@@ -1,0 +1,35 @@
+# All of these were already installed globally (Python 3.13.1 at C:\Python313),
+# so a fresh install should be a no-op. Listed so the project is reproducible.
+pandas>=2.3
+numpy>=2.3
+pyarrow>=22.0          # parquet
+scipy>=1.16            # signal.find_peaks for pivot detection
+requests>=2.32         # Alpaca REST; no SDK is used
+Jinja2>=3.1            # dashboard template
+python-dotenv>=1.1     # .env resolution chain
+yfinance>=0.2.40       # OPTIONAL: market-cap enrichment of the shortlist only
+xlrd>=2.0.1            # OPTIONAL: the GPR geopolitical index ships as a real
+                       # OLE2 .xls, not an xlsx, so openpyxl cannot read it.
+                       # Without this macro.py skips GPR and carries on.
+
+# --- score modules (news / sentiment) -------------------------------------
+# Nothing new is required. The news API is the same Alpaca REST layer and the
+# same keys; the lexicon and event taxonomy are pure pandas/regex, measured at
+# 0.143 ms/article, so a full 4-year backfill scores in ~3 minutes.
+#
+# OPTIONAL, and deliberately not a dependency of the working system:
+#   onnxruntime>=1.20   FinBERT int8. Measured on this machine (i7-10510U,
+#   tokenizers>=0.20    92 GFLOPS sustained): ~22 ms/article, so ~1.3 s per
+#                       30-min run but ~8 h for a 4-year backfill. The lexicon
+#                       path exists so the backtest is never blocked on that,
+#                       and whether FinBERT is actually better is a question for
+#                       `senti_backtest.py`, not an assumption.
+#
+# FRED needs a free key (fredaccount.stlouisfed.org) in .env as FRED_API_KEY.
+# Without it macro.py skips the rates/CPI/expectations block and still produces
+# breadth, sector ETFs, GPR and EPU.
+
+# Deliberately NOT required:
+#   alpaca-py / alpaca-trade-api  - raw REST via requests, matching the sibling project
+#   pandas_ta / TA-Lib            - indicators.py is hand-rolled and Pine-validated
+#   tzdata                        - pandas supplies the timezone database

@@ -1,0 +1,319 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Support Bounce Screen &middot; {{ asof }}</title>
+<style>
+{{ shared_css }}
+
+:root{
+  --bg:#f7f8fa; --panel:#ffffff; --ink:#12161c; --muted:#5b6572; --line:#e2e6ec;
+  --accent:#2f6feb; --up:#0f9d58; --down:#d93025; --warn:#c47f00;
+  --chip:#eef1f6; --band:rgba(47,111,235,.10); --grid:#eceff3;
+  --early:#7b5cd6; --prime:#0f9d58; --spec:#c47f00; --watch:#5b6572; --late:#d93025;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#262c36;
+    --accent:#589bff; --up:#3fb950; --down:#f85149; --warn:#d29922;
+    --chip:#1f2630; --band:rgba(88,155,255,.14); --grid:#1d2228;
+    --early:#a78bfa; --prime:#3fb950; --spec:#d29922; --watch:#8b949e; --late:#f85149;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f7f8fa; --panel:#ffffff; --ink:#12161c; --muted:#5b6572; --line:#e2e6ec;
+  --accent:#2f6feb; --up:#0f9d58; --down:#d93025; --warn:#c47f00;
+  --chip:#eef1f6; --band:rgba(47,111,235,.10); --grid:#eceff3;
+  --early:#7b5cd6; --prime:#0f9d58; --spec:#c47f00; --watch:#5b6572; --late:#d93025;
+}
+:root[data-theme="dark"]{
+  --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#262c36;
+  --accent:#589bff; --up:#3fb950; --down:#f85149; --warn:#d29922;
+  --chip:#1f2630; --band:rgba(88,155,255,.14); --grid:#1d2228;
+  --early:#a78bfa; --prime:#3fb950; --spec:#d29922; --watch:#8b949e; --late:#f85149;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 64px}
+h1{font-size:19px;margin:0 0 2px;letter-spacing:-.01em}
+.sub{color:var(--muted);font-size:12.5px}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+
+header.top{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;
+  justify-content:space-between;margin-bottom:16px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+select,button{font:inherit;color:var(--ink);background:var(--panel);
+  border:1px solid var(--line);border-radius:7px;padding:5px 9px;cursor:pointer}
+button:hover,select:hover{border-color:var(--accent)}
+label.lbl{color:var(--muted);font-size:12px;margin-right:2px}
+
+.tallies{display:flex;flex-wrap:wrap;gap:7px;margin:0 0 18px}
+.tally{background:var(--panel);border:1px solid var(--line);border-radius:7px;
+  padding:5px 10px;font-size:12.5px}
+.tally b{font-variant-numeric:tabular-nums}
+
+.sect{margin:26px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--line);
+  display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.sect h2{font-size:15px;margin:0;letter-spacing:.02em}
+.sect .cnt{color:var(--muted);font-size:12px}
+.sect .help{color:var(--muted);font-size:12px;flex:1 1 320px}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:12px 14px;margin-bottom:11px;display:grid;
+  grid-template-columns:minmax(0,1fr) 268px;gap:16px}
+@media (max-width:820px){.card{grid-template-columns:minmax(0,1fr)}}
+.chd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:5px}
+.tkr{font-weight:650;font-size:16px;letter-spacing:-.01em}
+.tkr a{color:inherit;text-decoration:none;border-bottom:1px dotted var(--muted)}
+.tkr a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+.cname{color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;max-width:340px}
+.px{font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:5px;margin:6px 0 0}
+.chip{background:var(--chip);border-radius:5px;padding:2px 7px;font-size:11px;
+  color:var(--muted);white-space:nowrap}
+.chip.b{color:var(--ink);font-weight:600}
+.chip.new{background:var(--accent);color:#fff;font-weight:650}
+.chip.promo{background:var(--up);color:#fff;font-weight:650}
+.chip.warn{background:var(--warn);color:#fff}
+svg.spark{width:100%;height:132px;display:block;overflow:visible}
+.sl{stroke:var(--ink);stroke-width:1.15;fill:none;vector-effect:non-scaling-stroke}
+.lvl{stroke:var(--accent);stroke-width:1.3;stroke-dasharray:5 3;fill:none}
+.tick{stroke:var(--accent);stroke-width:1.4}
+.bandr{fill:var(--band)}
+.pk{fill:var(--down)}
+.bn{fill:var(--up)}
+.cur{fill:var(--accent)}
+.axl{fill:var(--muted);font-size:9.5px}
+.gl{stroke:var(--grid);stroke-width:1}
+
+table.m{width:100%;border-collapse:collapse;font-size:12px}
+table.m td{padding:1.5px 0;vertical-align:baseline}
+table.m td.k{color:var(--muted);white-space:nowrap;padding-right:8px}
+table.m td.v{text-align:right;font-variant-numeric:tabular-nums}
+.br{margin-top:7px;padding-top:7px;border-top:1px solid var(--line)}
+.brh{font-size:10.5px;color:var(--muted);margin-bottom:2px}
+.brv{display:flex;gap:10px;font-size:11.5px;font-variant-numeric:tabular-nums}
+.bars{margin-top:7px;padding-top:7px;border-top:1px solid var(--line)}
+.brow{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--muted)}
+.brow .bl{width:60px;flex:0 0 60px}
+.brow .bt{flex:1;height:5px;background:var(--chip);border-radius:3px;overflow:hidden}
+.brow .bf{height:100%;background:var(--accent);border-radius:3px}
+.brow .bv{width:26px;text-align:right;font-variant-numeric:tabular-nums}
+
+.nm{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:12px 14px;margin-top:8px;overflow-x:auto}
+.nm table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:560px}
+.nm th{text-align:left;color:var(--muted);font-weight:500;font-size:11.5px;
+  padding:3px 10px 6px 0;border-bottom:1px solid var(--line)}
+.nm td{padding:4px 10px 4px 0;border-bottom:1px solid var(--grid);
+  font-variant-numeric:tabular-nums}
+.nm td.g{color:var(--warn)}
+.empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;
+  padding:28px;text-align:center;color:var(--muted)}
+.caution{background:var(--panel);border:1px solid var(--warn);
+  border-left:4px solid var(--warn);border-radius:8px;padding:10px 13px;
+  margin:0 0 18px;font-size:12.5px;line-height:1.55;color:var(--muted)}
+.caution b{color:var(--ink)}
+.cx{color:var(--accent);cursor:pointer;text-decoration:underline;
+  margin-left:4px;white-space:nowrap}
+.cxbody{display:none;margin-top:7px;padding-top:7px;
+  border-top:1px solid var(--line)}
+.cxbody.on{display:block}
+footer{margin-top:34px;padding-top:12px;border-top:1px solid var(--line);
+  color:var(--muted);font-size:11.5px}
+code{background:var(--chip);padding:1px 4px;border-radius:4px;font-size:11px}
+</style>
+</head>
+<body>
+{{ navbar }}
+<div class="wrap">
+  <header class="top">
+    <div>
+      <h1>Support Bounce Screen</h1>
+      <div class="sub">Parabolic run &rarr; full retrace to base &rarr; base holds &rarr; bounce
+        &nbsp;&middot;&nbsp; session <b>{{ asof }}</b>
+        &nbsp;&middot;&nbsp; built {{ generated }}</div>
+    </div>
+    <div class="controls">
+      {{ sessions }}
+      <a class="idx" href="index.html">all sessions</a>
+      <label class="lbl" for="grp">group by</label>
+      <select id="grp">
+        <option value="bucket">Bucket</option>
+        <option value="price_tier">Price tier</option>
+        <option value="age_band">Setup age</option>
+        <option value="size_tier">Size</option>
+        <option value="stage">Bounce stage</option>
+        <option value="support_grade">Support grade</option>
+        <option value="liquidity_tier">Liquidity</option>
+        <option value="shape">Shape</option>
+        <option value="sector">Sector</option>
+      </select>
+      <button id="theme" title="Toggle light/dark">&#9788;</button>
+    </div>
+  </header>
+
+  <div class="tallies" id="tallies">{{ tallies }}</div>
+
+  <!-- Shown every day on purpose. A screener whose backtest is negative must say
+       so where the user actually looks, not only in a README. -->
+  <div class="caution">
+    <b>Small edge, not statistically established.</b>
+    Backtest: <b>1,300 flags</b>, 2024-02 &rarr; 2026-08, entry at the next open,
+    2-ATR trailing stop &rarr; <b>+2.16% mean per trade</b>.
+    But a <b>random pick from the same eligible pool</b> returned <b>+1.60%</b> under
+    the identical rule, so the screen's edge is <b>+0.56%</b> &mdash;
+    <b>smaller than the &plusmn;0.96% standard error</b> of the measurement
+    (Welch p&nbsp;=&nbsp;0.28: not distinguishable from random selection).
+    Win rates are identical, 41% vs 41%.
+    <span class="cx" id="cxtoggle">details</span>
+    <div id="cxbody" class="cxbody">
+      Returns are strongly right-skewed &mdash; median &minus;3.7% against a +2.16%
+      mean &mdash; so most trades lose a little and a few win big. Position sizing
+      and taking <i>every</i> signal therefore matter more than picking.
+      <b>11 of 12 exit rules favour the screen</b> (sign-test p=0.003), which is weak
+      directional evidence of something real, though the rules are highly correlated
+      so that overstates it.
+      Of <b>17 subgroup comparisons, zero survive</b> a Bonferroni correction; the
+      strongest is the <code>RECENT</code> age band (+3.09% edge, raw p=0.005,
+      corrected p=0.088) &mdash; a lead worth watching, not a validated filter.
+      Two design assumptions are contradicted: <code>EARLY</code> is the only bucket
+      with a negative mean (&minus;0.72%) despite being built to be the earliest
+      entry, and support grade <b>A</b> (n=1011, +0.04% edge) is the <i>weakest</i>
+      grade even though support quality carries the largest score weight.
+      Costs, spread and borrow are not modelled and would plausibly consume a
+      0.5&ndash;0.8% edge on sub-$5 names. Survivorship makes every figure
+      optimistic: the universe comes from Alpaca's current asset list, so companies
+      that delisted mid-window were never fetched.
+      Reproduce: <code>python backtest.py --start 2024-02 --every 3 --exits</code>
+      then <code>python baseline.py --seeds 10</code>.
+    </div>
+  </div>
+
+  <div id="body">{{ sections }}</div>
+
+  <div id="nmwrap">{{ near_miss }}</div>
+  <div id="dropwrap">{{ dropped }}</div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+/* Progressive enhancement ONLY.
+   The page is fully rendered server-side, so it works with scripts disabled --
+   in a preview pane, a static snapshot, print-to-PDF, or an email client. This
+   script never builds content; it rearranges nodes that already exist, and if it
+   fails the page still reads correctly. That is deliberate: an earlier version
+   built every card in JS and showed a completely blank page anywhere scripts
+   did not run. */
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  var GROUP_HELP = {
+    bucket: "",
+    age_band: "RECENT (peak 41-90 sessions back) had the best historical mean.",
+    stage: "CONFIRMED beat TURNING beat STILL_TESTING historically.",
+    support_grade: "Grade A was the WEAKEST historically, despite the largest score weight."
+  };
+  var ORDER = {
+    bucket: {{ bucket_order_js }},
+    price_tier: ["MICRO", "LOW", "MID", "HIGH", "PREMIUM"],
+    age_band: ["FRESH", "RECENT", "MATURE", "OLD"],
+    size_tier: ["LARGE", "MID_CAP", "SMALL", "MICRO_CAP", "NANO", "UNKNOWN"],
+    stage: ["STILL_TESTING", "TURNING", "CONFIRMED", "EXTENDED", "GONE"],
+    support_grade: ["A", "B", "C", "D"],
+    liquidity_tier: ["DEEP", "GOOD", "OK"]
+  };
+
+  /* Cards are captured once, on load, before any regrouping moves them. */
+  var body = $("body");
+  if (!body) return;
+  var cards = Array.prototype.slice.call(body.querySelectorAll(".card"));
+  if (!cards.length) return;
+
+  function regroup(key) {
+    var buckets = {};
+    cards.forEach(function (c) {
+      var v = c.getAttribute("data-" + key.replace(/_/g, "-")) || "(none)";
+      (buckets[v] = buckets[v] || []).push(c);
+    });
+    var names = Object.keys(buckets);
+    var pref = ORDER[key] || [];
+    names.sort(function (a, b) {
+      var ia = pref.indexOf(a), ib = pref.indexOf(b);
+      if (ia !== -1 || ib !== -1) {
+        return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      }
+      return a.localeCompare(b);
+    });
+
+    var frag = document.createDocumentFragment();
+    names.forEach(function (n) {
+      var list = buckets[n];
+      var sect = document.createElement("div");
+      sect.className = "sect";
+      var help = key === "bucket" ? "" : (GROUP_HELP[key] || "");
+      sect.innerHTML = '<h2>' + n + '</h2><span class="cnt">' + list.length +
+        '</span>' + (help ? '<span class="help">' + help + '</span>' : "");
+      frag.appendChild(sect);
+      list.sort(function (a, b) {
+        return (+b.getAttribute("data-score") || 0) - (+a.getAttribute("data-score") || 0);
+      });
+      list.forEach(function (c) { frag.appendChild(c); });
+    });
+    body.innerHTML = "";
+    body.appendChild(frag);
+  }
+
+  var grp = $("grp");
+  if (grp) {
+    grp.addEventListener("change", function () { regroup(grp.value); });
+  }
+
+  var sess = $("sess");
+  if (sess) {
+    sess.addEventListener("change", function () {
+      if (sess.value) window.location.href = sess.value;
+    });
+  }
+
+  var theme = $("theme");
+  if (theme) {
+    theme.addEventListener("click", function () {
+      var el = document.documentElement;
+      var cur = el.getAttribute("data-theme");
+      var dark = cur ? cur === "dark"
+        : (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+      el.setAttribute("data-theme", dark ? "light" : "dark");
+    });
+  }
+
+  var cx = $("cxtoggle"), cxb = $("cxbody");
+  if (cx && cxb) {
+    cx.addEventListener("click", function () { cxb.classList.toggle("on"); });
+  }
+
+  /* The footer is the one piece built here: it is pure static text, so losing it
+     when scripts are off costs nothing that is not already in the README. */
+  var foot = $("foot");
+  if (foot) {
+    foot.innerHTML =
+      'Gates: price &ge; ${{ min_price }} &middot; ADV &ge; {{ min_adv_m }}M &middot; ' +
+      'run &ge; {{ min_run_x }}x (z &ge; {{ min_run_z }}) &middot; ' +
+      '&ge; {{ min_touches }} prior support touches, &ge; 1 predating the run.' +
+      '<br>Bounce stage is ATR-normalised: <code>(close &minus; low) / ATR at the low</code>. ' +
+      'A plain %-off-low rule misreads a volatile name\'s early bounce as extended.' +
+      '<br>Chart: dashed line = support with a tick per prior touch, shaded band = ' +
+      'pre-run base, red triangle = peak, green dot = retracement low.' +
+      '<br>Screening only. Not advice, and no execution costs are modelled.';
+  }
+})();
+</script>
+
+</body>
+</html>

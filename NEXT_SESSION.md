@@ -1,0 +1,806 @@
+# Next session — START HERE
+
+`SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
+Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
+
+## State at 2026-08-13 02:30 — READ THIS FIRST
+
+**History rebuild COMPLETE** — finished 22:45 on 2026-08-12, 507 min, 7 stages,
+0 failed, `integrity audit clean`. `remeasure.py` (study → walk-forward) is
+still running; it touches no fundamental figure.
+
+### The data reconciles against SEC, 15/15 at 0.000%
+
+Not "looks plausible" — compared field by field against SEC's own XBRL API,
+quarter by quarter:
+
+```
+AAPL MSFT NVDA AMD KO WMT JNJ PG INTC CSCO HD MCD NKE ORCL ADBE
+   all 0.000% max difference across ~7 quarters each
+```
+
+Every fix verified in the rebuilt data:
+
+| | before | now |
+|---|---|---|
+| negative P/E | 932 | **0** |
+| negative P/B | 171 | **0** |
+| negative EV/EBITDA | 296 | **0** |
+| RDW P/E (loss-making) | −14.9 | **blank** |
+| turnover max | 414,549 | **37.6** |
+| market caps under $1M | 9 | **3** |
+| blank quarterly columns (58 largest) | 19 | **7 of 696 (1%)** |
+
+### Two bugs found by that reconciliation
+
+**`history()` ignored the largest-alias rule that `facts_asof` already had.**
+Walmart files BOTH `RevenueFromContractWithCustomerExcludingAssessedTax`
+(net sales, 175.68B) and `Revenues` (total, 177.75B) in the same 10-Q. The
+table took whichever was filed last, so quarters came out on net sales while
+the ANNUAL figure came out on the total — and since Q4 is derived as
+`FY − Q1 − Q2 − Q3`, mixing the two inflated it. Our TTM read 713–718B against
+SEC's 700B. This is the REXR 1,700x bug in a second code path; the fix existed
+and had simply never been applied here.
+
+**Blank quarterly columns.** A company whose quarter does not end on a
+month-end files its income statement against the fiscal date and its balance
+sheet against the calendar month-end, so one quarter became two rows and one
+rendered empty. NVDA showed revenue at 2025-07-27 beside an empty 2025-07-31.
+`_merge_near_periods` collapses dates within 10 days, keeping the fiscal one.
+19 blank columns → 7, and the remainder are companies SEC itself has no
+discrete quarters for (XOM files cumulative periods only).
+
+### Known and accepted
+
+- **~1% of quarterly cells are blank** where SEC has no discrete-quarter fact.
+  Deriving them from cumulative (6-month, 9-month) figures is the next
+  improvement if it ever matters.
+- **`facts_asof` TTM and `history()` 4-quarter sum differ ~0.75%** for names
+  with a derived Q4. By design they are different objects — the first is
+  point-in-time and filed-only, the second lets restatements win — but the gap
+  is worth remembering before comparing them.
+
+### Verify it yourself, any time
+
+```bash
+python validate.py                       # 33 checks
+python -c "import fundamentals as FD; print(FD.history('AAPL',freq='Q',periods=6))"
+```
+
+## Superseded — 2026-08-12 01:50
+
+**Running:** `Screener-FixAll` → `fix_all.py`, restarted **01:38** on the fully
+corrected metric definitions.
+
+**TWO MILESTONES, and only the first one matters for data:**
+
+```
+11:21   history rebuilt, every page regenerated  <<< DATA ACCURATE
+20:40   study + walk-forward finished            <<< predictive only
+```
+
+The second touches no fundamental figure. Spot-check from 11:30; do not wait
+for 20:40.
+
+```bash
+tail -20 "data/_rebuild.log"     # want 4 modules complete + "integrity audit clean"
+tail -30 "data/_fix_all.log"     # want FIX ALL DONE ... 2 ok, 0 failed
+```
+
+### Why it restarted at 01:38
+
+A systematic sweep — every ratio's negative values checked against its ranking
+direction, across the whole universe — found three more bugs of the RDW family:
+
+| metric | defect |
+|---|---|
+| `net_debt_ebitda` | 430 cash-burning filers ranked the LEAST leveraged in the market (mean rank 0.86 vs 0.36) |
+| `roe` | 99 loss-makers showed a POSITIVE return — loss ÷ negative equity flips sign and hides in the good bucket |
+| `roic` | the same flip on negative invested capital |
+
+The earlier run had imported the metric code before those landed, so its 50
+completed sessions were already stale. Stopped, state cleared, restarted.
+
+**The sweep now passes and its remaining negatives are provably right:**
+`pe`/`pb`/`ev_ebitda` have none; `roe`/`roic` negatives are genuine losses on
+positive equity and rank low; all 299 negative `net_debt_ebitda` are NET CASH
+companies (AAON, ACM, ACMR) which deserve the best leverage rank; negative
+`accruals` mean cash-backed earnings, which is good.
+
+**Write the check, do not ask the user to eyeball tickers.** Every bug this week
+was found by looking at data. The rank-direction sweep is the generalisation of
+that and should be run after any metric change.
+
+### The server must be restarted after a metric change
+
+`serve.py` builds profiles on demand and holds `fund_metrics` imported from
+whenever it started. It was still serving yesterday's logic hours after the
+fixes landed. Restarted 01:47. `python serve.py --stop` then relaunch.
+
+## Superseded — 2026-08-12 01:20
+
+**Running:** scheduled task `Screener-FixAll` → `fix_all.py`, started 00:05.
+**ETA ~18:00 today.** Log `data/_fix_all.log`; the two inner chains log to
+`data/_rebuild.log` and `data/_remeasure.log`.
+
+```bash
+tail -30 "data/_fix_all.log"     # want: FIX ALL DONE ... 2 ok, 0 failed
+python validate.py               # want: 0 FAILED
+```
+
+### It survives the laptop shutting down — TESTED, not assumed
+
+| | |
+|---|---|
+| progress saved | every 10 sessions to `data/_rebuild_state.json` (40 already banked) |
+| stage-level resume | `_remeasure_state.json` — a reboot 8h in no longer restarts the study |
+| chain-level resume | `_fix_all_state.json` — a finished chain is never re-run |
+| after a reboot | `shell:startup\Screener-Resume.bat` relaunches it at logon |
+| hook cleanup | `fix_all` deletes that .bat once both chains complete |
+
+**The bug this nearly shipped with.** Both inner chains returned **exit 0** when
+another instance held the run lock. So the resume hook firing during a live run
+would have made the wrapper mark the chain *complete having done nothing* — the
+project's own #1 trap. They now exit **75**, and `fix_all` treats that as "leave
+it alone", never as done.
+
+Verified by running a second instance against the live job:
+
+```
+ANOTHER RUN HOLDS THE LOCK (pid 12476). Exiting without work.
+[history] another instance is already running -- nothing marked done
+state AFTER: (still none)
+```
+
+`Register-ScheduledTask` is denied in this environment, which is why the resume
+is a Startup-folder .bat rather than an `AtStartup` trigger. Same effect for a
+laptop that reboots and gets logged into.
+
+### Why this run exists — two bugs found 2026-08-11 via RDW
+
+- **A negative P/E ranked as the cheapest stock in the market.** `pe`, `pb` and
+  `ev_ebitda` sort lower-is-better, so a negative denominator sorted best:
+  **932 of 2,918 filers (32%)** carried a negative P/E, and loss-makers earned a
+  mean value rank of **0.84** against **0.34** for profitable companies. Redwire,
+  unprofitable every year since 2021, scored 0.85 on "cheapness". All three now
+  withhold on a non-positive denominator, exactly as `peg` always did.
+- **Placeholder share counts produced a $14 market cap.** Some filers tag
+  cover-page `shares_out` as **1, 10 or 100**, and since `shares_out` is
+  preferred first those beat a real count in the same frame — FBYD resolved to
+  **10 shares** while carrying 39,255,880 diluted. HQ's market cap read
+  **$14.13**, making its turnover **414,549x**. `MIN_SHARES = 10_000` now
+  rejects them. Turnover max fell 414,549 → **37.6**.
+
+Both change what the metrics ARE, which is why history is being rebuilt before
+the study re-measures it.
+
+## State at 2026-08-11 20:10
+
+**Running:** scheduled task `Screener-Remeasure`, started 20:05, **ETA ~03:40**.
+Log `data/_remeasure.log`. Parented by Task Scheduler, so it is independent of
+any editor.
+
+```
+study   ~4.5h   re-measure every cell on the corrected data
+combo   ~5min   re-score; the study changes which metrics are admitted
+oos     ~2.5h   4-fold walk-forward, stale train caches deleted first
+pages   ~35min  rebuild so every figure comes from the new tables
+audit   ~6min   integrity audit, last, on the finished state
+```
+
+**When it finishes:**
+
+```bash
+tail -40 "data/_remeasure.log"      # want: REMEASURE DONE ... 5 ok, 0 failed
+python validate.py                  # want: 0 FAILED
+powershell -Command "Unregister-ScheduledTask -TaskName Screener-Remeasure -Confirm:\$false"
+```
+
+### Why this run exists
+
+The data was corrected on 2026-08-10/11 but **the factor study was not
+re-measured** — all 1,600 cells dated from 2026-08-09, before the `debt`/`ccc`
+fabrications were removed, before two missing quarters were recovered, and
+before 153 non-USD filers entered. That is not cosmetic: **`combo` picks its
+ingredients FROM the study**, so the live composite was assembled from
+measurements of data that no longer exists, and the out-of-sample and
+walk-forward conclusions (including the decay finding) rest on the same
+foundation. They may survive re-measurement; right now they are unproven.
+
+Nothing caught it, because the `claims` guard proved the labels agreed with the
+study while both were stale together. There is now a check for exactly that:
+`the factor study measures the CURRENT data`, which compares the study's
+newest cell against the mtime of every PAST month partition.
+
+### No measured number is typed into a label any more
+
+Every hand-written t-stat has been removed from `metrics_doc`. The prose says
+what a metric IS; the figures are rendered at build time from `study.py` and
+from `_oos_walkforward.parquet` via a new out-of-sample block on
+`reports/metrics.html`. That kills the drift class outright — one label had
+been quoting a *different metric's* t-stat for months.
+
+The `claims` guard was updated to match: zero quoted figures is now the goal,
+so it verifies the label tables were FOUND rather than that they still contain
+numbers. Conflating those would have made it warn forever precisely because the
+problem was fixed.
+
+### The archived comparison
+
+`study.py` skips cells it already holds, so the old table was moved to
+`data/_factor_study_pre_datafix.parquet` rather than deleted. That is the
+before/after: it answers whether the fabricated `debt` and `ccc` values were
+holding any result up. `net_debt_ebitda` — one of the five metrics the honest
+fit picked — lost 37% of its values in the correction, so expect movement.
+
+## State at 2026-08-10 16:45
+
+**Running:** scheduled task `Screener-RebuildHistory`, resumed 16:36, **ETA ~19:50**.
+Log `data/_rebuild.log`, progress `data/_rebuild_state.json` (saved every 10
+sessions, so it resumes rather than restarts). Independent of any editor.
+
+**When it finishes**, the whole verdict is one command:
+
+```bash
+python validate.py
+```
+
+Want `0 FAILED` and `fundamentals are CURRENT, not merely present` reading ok.
+Then unregister the one-off:
+
+```bash
+powershell -Command "Unregister-ScheduledTask -TaskName Screener-RebuildHistory -Confirm:\$false"
+```
+
+### The bug that cost a 10-hour run
+
+`fetch_companyfacts` never filtered to `WANTED`, though the bulk path always
+had. Harmless while it served ~200 gap names; pointed at the whole universe by
+the staleness refresh it stored **25M facts, 79% of them tags nothing reads**,
+and every `facts_asof` had to page through them. Sessions went from a measured
+48s to 25 minutes and Task Scheduler killed the run at its 10-hour limit, 90 of
+182 done.
+
+Filter added; the store was pruned in place — **53.4M → 12.7M rows, 246 → 67
+MB** — with no re-fetching. Re-measured after: **68–118s per session**.
+
+The process lesson, which is the one worth keeping: the ETA came from a
+measurement taken BEFORE the job that invalidated it. Measure, and re-measure
+after anything that changes what you measured.
+
+### Fixed since the 02:00 note
+
+- **Fiscal Q4 was missing from every quarterly table since 2020.** A 10-K
+  reports the full year and no 10-Q covers Q4, so the series had a hole every
+  September — one blank column in four. Now derived as FY − Q1 − Q2 − Q3, flow
+  concepts only, and refused outright if any of the three is missing. Verified
+  against Apple's actuals including FQ4-2024's anomalous $14.7B net income (the
+  EU State Aid charge).
+- **"Bulk always wins" was silently discarding the fresh data.** Bulk held one
+  AAPL row in `2026q1`, which dropped every companyfacts row for AAPL in that
+  partition — including the 2026-03-28 quarter only companyfacts has. The
+  staleness refresh could therefore never fix a filer bulk already covered,
+  which was nearly all of them. Authority is now whichever source **filed more
+  recently**, still exactly one per (cik, partition).
+- **Absurd period dates** (1986, 6016, LEGH's 2033) rejected at ingest, not
+  just at read.
+- **Two UI defects**: the twin scrollbar sized itself from the table's width
+  while the container scrolled by the container's width — 12px apart, which
+  clipped the last column mid-character (`143.8B` as `143.8E`). Financial
+  tables now also open on the NEWEST period. And `IC by horizon` is now
+  `Predictive strength · by holding period · 1/5/20/60 days` with a visible
+  legend, left-aligned on a fixed grid.
+- **`_fill_q4` had the same class of bug it was fixing**: the date index was
+  built once then rows inserted in a loop, so every concept after the first got
+  a misaligned mask and was left blank. Two-pass now, pinned by selftest.
+
+**Staleness is largely resolved already: 3,207 → 273 names (92% → 8%).**
+
+## State at 2026-08-10 02:00
+
+The walk-forward **finished 01:05** (result in the next section) and its one-off
+task has been unregistered. Nothing is scheduled now except the daily
+orchestrator at 05:00, which will rebuild every page with the corrected labels.
+
+**Why that job was a Scheduled Task and not `nohup`.** The walk-forward was first launched
+with `nohup ... &` from the agent's shell. That process was **inside a Windows
+job object**, so closing the editor could have killed it — checked with
+`IsProcessInJob` rather than assumed, after noticing `overnight.py` had already
+learned this ("launched detached via a one-time Scheduled Task so it survives
+any terminal or editor being closed"). Relaunched under Task Scheduler, the
+process is parented by `svchost.exe` and is independent of any editor session.
+
+Restarting cost only the fold in flight: **the per-split train fits are cached**
+(`data/_oos_train_<split>.parquet`), so folds 1 and 2 resumed in 36 seconds
+instead of refitting for 50 minutes. That cache is the reason a restart is
+cheap, and it is worth keeping that property in anything similar.
+
+## READ FIRST: "not reported" was being published as zero
+
+Found 2026-08-10 while auditing whether the metrics are actually *correct*
+rather than merely self-consistent. Two metric families were inventing
+favourable numbers out of missing data, and the audit could not see it because
+every invented value was in range, non-null and internally consistent.
+
+**`debt` was `debt_lt.fillna(0) + debt_st.fillna(0)`.** In pandas `NaN + NaN` is
+NaN, but `fillna(0) + fillna(0)` is **0** — so a filer tagging no debt line came
+out not as "unknown" but as the flattering "this company has no borrowings".
+
+- 1,376 of 3,270 tradeable names (42%) tag no debt line at all
+- **849 of those report total liabilities above 30% of assets** — they plainly
+  do carry obligations
+- it flowed into `net_debt_ebitda` (lower is better), into EV for `ev_ebitda` /
+  `ev_sales` / `fcf_yield`, and into `invested_capital` for `roic` / `eva` /
+  `wacc`
+
+**`ccc` was `dio.fillna(0) + dso.fillna(0) - dpo.fillna(0)`.** A filer tagging
+none of inventory, receivables or payables scored `0 + 0 - 0` = **zero days**,
+published as fact. `ccc` ranks lower-is-better, so:
+
+| | median score on this axis |
+|---|---|
+| company with NO working-capital data | **62 / 100** |
+| company with all three legs reported | **25 / 100** |
+
+Missing data was outranking disclosed data by 2.5x.
+
+**Fixed** with `_sum_reported` (sum the legs actually reported; NaN if none
+were) and a `ccc` that requires revenue, receivables and cogs. `invested_capital`,
+`ev` and `wacc` no longer re-introduce the zero one layer down. Pinned by
+selftest, because the wrong idiom is one character from the right one.
+
+The cost is coverage, and that is the correct trade — every remaining value is
+real:
+
+| metric | before | after |
+|---|---:|---:|
+| `ccc` | 3,270 | 1,412 |
+| `roic` | 2,474 | 1,518 |
+| `roic_wacc`, `eva` | 2,343 | 1,306 |
+| `fcf_yield` | 2,313 | 1,346 |
+| `ev_sales` | 2,366 | 1,448 |
+| `net_debt_ebitda` | 1,798 | 1,128 |
+| `ev_ebitda` | 1,668 | 1,028 |
+
+**Only the 2026-08-07 session is recomputed.** History still holds the old
+fabricated values, so the study, the backtests and the walk-forward below were
+all measured on partly-invented data — `net_debt_ebitda` is one of the five
+metrics the honest fit picked. A full rebuild plus re-measure is now the single
+highest-value job outstanding.
+
+## The walk-forward overturned the headline below
+
+The single-split result in the next section is real but **misleading on its
+own**. A 4-fold walk-forward finished 2026-08-10 01:05 and shows every combo
+score decaying toward zero as the test window approaches today:
+
+| score | h | 2020-22 | 2022-23 | 2023-25 | **2025-26** |
+|---|---|---|---|---|---|
+| `combo_h20` | 20 | +4.40 | +2.04 | +1.46 | **+0.16** |
+| `combo_h60` | 20 | +3.60 | +2.28 | +0.94 | **+0.42** |
+| `combo_h60` | 60 | +3.18 | +2.05 | +1.11 | **+0.02** |
+
+Hit rate falls with it: `combo_h20` 81% → 65% → 62% → **50%**, `combo_h60`
+81% → 62% → 62% → **54%**. Fifty per cent is a coin flip.
+
+**The fold with the most training data is the worst fold.** Fold 4 trained on
+148 sessions and admitted 31 metrics; fold 1 trained on 70 and admitted 10. More
+data, more ingredients, worse result — the signature of overfitting, a decayed
+edge, or both.
+
+**Why the single split looked fine:** its 88 test dates ran 2021→2026 and were
+dominated by the strong early period. Splitting that same span into four windows
+shows where the strength actually lives.
+
+**The honest caveat in the other direction:** each fold has only 26 test dates
+(n_eff ≈ 18 at h=20), so any *one* weak fold would be noise. What is not noise
+is the same monotonic slide appearing in three scores and every horizon at once.
+
+**My own verdict logic got this wrong first.** It printed `STABLE ACROSS FOLDS`
+because all four numbers were positive — a criterion that cannot fail on a dying
+signal. It now checks the most recent fold and the trend, and reports `DECAYING`
+when t slides monotonically. A test that can only pass is worth nothing.
+
+Labels on every combo score have been corrected to say this.
+
+## The single split, for the record — `combo_h60` t=+3.19
+
+The horizons are now named for their **evidence**, not a promise:
+`combo_short/medium/long` → **`combo_h1` / `combo_h20` / `combo_h60`**. The old
+names claimed a horizon each score did not predict best; the suffix now says
+only "built from N-day evidence", and where each actually peaks is measured and
+stated in `metrics_doc` instead of encoded in a name.
+
+Then the test that mattered. Split at **2021-09-29**: 88 train sessions, 88 held
+out. The admission rule, signs and theme weights were refit on train dates only,
+frozen, and applied to dates the fit never saw. t-stats are overlap-corrected
+(n_eff ≈ 60, not 86).
+
+| score | h | in-sample (175 dates) | **out-of-sample (86 unseen)** |
+|---|---|---|---|
+| `combo_h60` | 20 | IC .0441 · t=+4.76 · 64% | **IC .0266 · t=+3.19 · 69%** |
+| `combo_h60` | 60 | IC .0671 · t=+4.24 · 74% | **IC .0354 · t=+2.21 · 77%** |
+| `combo_h20` | 20 | IC .0379 · t=+3.60 · 59% | IC .0165 · t=+2.03 · 63% |
+| `combo_h20` | 60 | IC .0548 · t=+3.09 · 67% | IC .0178 · t=+1.21 · 65% |
+| `combo_h1` | 1 | IC .0219 · t=+2.00 · 59% | IC .0069 · t=+0.30 · 54% |
+
+**`combo_h60` survives this test** — IC shrinks ~40%, hit rate rises 64% → 69%,
+which reads like a real effect carrying a normal selection premium. The
+walk-forward above shows why that reading was too generous: these 86 dates span
+2021→2026 and the strength is concentrated in the first half.
+
+**`combo_h1` was selection, not signal.** It sat exactly on the |t|≥2 bar
+in-sample and reads t=+0.30 out of sample. Now labelled FAILED OUT OF SAMPLE.
+
+**`combo_h20` is marginal** — t=+2.03 at its own horizon, fails at h=60.
+
+The honest fit admitted **5 metrics for `combo_h60` where the full sample picks
+21** (half the dates shrinks every |t| by ~√2): `avg_trade_size` +3.49, `gpoa`
++2.93, `net_debt_ebitda` −2.88, `turnover` +2.73, `z_score` −2.51. So what held
+is the **procedure**, not these exact 21 weights. And the metric definitions,
+theme assignments and exclusion list were authored with the full history already
+seen — no split removes that.
+
+Reproduce in seconds, not 22 minutes: the train fit is cached per split in
+`data/_oos_train_<split>.parquet`.
+
+```bash
+python oos.py --split 2021-09-29 --reuse-train
+```
+
+## Recency weighting LOST
+
+Plain beats decayed in **10 of 12** window/horizon pairs. The two decay wins are
+hairline (30d h=1: 3.22 vs 3.21) and it loses badly at the long end (90d h=60:
+0.65 vs 1.86). Both stay on the page, neither is promoted. `sent_age` was the
+real fix all along -- DPRO's problem was never that old articles outweighed new
+ones, it was that there were no new ones.
+
+## The size look-ahead is gone, and it mattered more than expected
+
+`mktcap` now covers all 182 fundamental sessions, so `study.py` logs
+**POINT-IN-TIME across 182 sessions** instead of the snapshot warning. Removing
+the bias did not nudge the size analysis, it inverted it -- significant metrics
+at h=20 went **large 14 -> 44, mid 23 -> 39, small 51 -> 34**.
+
+That **falsified the reason `days_since_filing` was excluded from combo.** The
+old note said it was significant only among small caps; on unbiased buckets it
+is significant everywhere. Re-investigated, the real mechanism is SIZE:
+Spearman **+0.355** with mktcap, median cap rising $0.66B -> $6.38B across
+filing-recency quintiles, because SEC deadlines scale with filer status
+(60/75/90 days). Still excluded -- `mktcap` already is -- but on evidence that
+holds.
+
+## reports/ is one convention
+
+74 flat files with four naming schemes became:
+
+```
+reports/index.html · metrics.html
+reports/explore/latest.html      + <session>.html
+reports/bounce/latest.html       + index.html, <session>.html, <session>.csv
+reports/sentiment/latest.html · reports/fundamental/latest.html
+reports/stock/<TICKER>.html
+```
+
+Moving files leaves their hrefs stale, and the dead-link gate caught **223** of
+them. Two hid from the first grep: a hardcoded href in `dashboard_template.html`
+(a Jinja template, not a `.py`) and a hub link in `senti_screen.py`. Now 63
+pages, zero dead links.
+
+## Bugs fixed since the last note
+
+- **`sector` was emitted for ZERO companies** -- `_sector_for` returns a
+  positionally-indexed Series and the caller looked up by ticker. 3,197 labels
+  now; sector peer comparison had been running on nothing.
+- **Report retention had never run.** `store.prune_dated` was hard-coded to
+  `*.parquet` while being called on `reports/`, which holds .html/.csv -- and a
+  comment in the caller described the ~93 MB/yr it was supposedly reclaiming. It
+  now takes patterns, walks the subdirectories, and refuses to delete a file
+  whose stem is not a date (`latest.html` would have sorted before any cutoff).
+- **combo could have fed itself** -- its own `th_*` and `*_cov` outputs were not
+  in its exclusion set, so a composite built from `th_profitability` would have
+  counted every profitability metric twice and called it independent evidence.
+- **`session_picker` built its "latest" alias by string surgery**
+  (`pattern.split("_")[0]`), which only worked while every pattern contained an
+  underscore. Explore's became `{d}.html` and it produced `{d}.html.html`.
+- **`FUNDAMENTALS_MIN_FILERS` was declared for two years and never enforced.**
+  Now relative to the four preceding quarters: 68/68 real quarters accepted,
+  4/4 synthetic truncations rejected. A fixed floor would have rejected the
+  genuine 2009-2011 XBRL phase-in.
+- **The chart's window buttons never worked** -- a patch script printed "wired"
+  without asserting its replace matched. Five windows now, verified by clicking;
+  the guard greps the RENDERED script.
+- Quarterly was capped at 16 of 73 periods. `wacc` exported, `sue` removed from
+  REGISTRY rather than faked, `--exits` persists its table, explore names
+  dropped columns, 9 dead config constants marked and audited.
+
+## Bugs found by the two guards added tonight
+
+Both were found by new checks, within minutes of those checks first running.
+
+- **`trade_size_trend`'s label quoted the wrong metric's t-stat.** It claimed
+  "MEASURED POSITIVE (t=3.06): bigger prints predicted better". It measures
+  **negative and insignificant at every horizon** (best |t|=1.74). The +3.06
+  belongs to `avg_trade_size` — a different metric, a level rather than a
+  change — and the whole "institutional reading" interpretation had been
+  written on top of the wrong number, in the label *and* in the `MEASURED`
+  fallback dict. The level works; the level *growing* does not.
+- **Theme sub-scores were silently dead.** `scores/combo.py` published `th_*`
+  behind `if lab == "medium"`, and renaming the horizons deleted `"medium"`.
+  No exception, nothing empty: 2.5M stale `th_*` rows stayed in the store, so
+  every page would have gone on rendering a frozen number as current. Caught
+  before a single session was scored post-rename, so the store has no gap. Now
+  keyed off `THEME_HORIZON = 20`, a number, with a selftest asserting it names
+  a real horizon.
+- **`th_sentiment` can never exist** and was documented anyway. Themes publish
+  at h=20; no sentiment metric survives 20 days — all nine admit at h=1 and
+  nowhere else. Removed from both the declaration and the reference, with the
+  reason recorded. The absence *is* the measurement.
+
+## Nine large caps had no fundamentals because of a full stop
+
+SEC writes `BRK-B`. The price feed writes `BRK.B`. Nothing reconciled the
+separator, so **Berkshire Hathaway, Brown-Forman (A and B), Heico, Lennar,
+Moog, Greif, U-Haul and Biglari** resolved to no CIK and received **no
+fundamental data at all**.
+
+It never raised, and that is the point: a missing key returns `None`, and "no
+fundamentals" is a perfectly legitimate state for a closed-end fund or an ETF.
+Nine operating companies looked exactly like the funds. `ticker_map()` now adds
+dotted aliases on read (aliases are *added*, never substituted, and SEC uses no
+dots so they cannot collide), and the 2026-08-07 fundamental session has been
+rewritten: **3,197 → 3,206 tickers**.
+
+The new `coverage` check exists so this class of bug cannot hide again. It
+splits the unscored universe three ways instead of reporting one number:
+
+```
+274 of 3480 (7.9%): 7 absent from SEC's ticker file,
+                    267 mapped but no facts (funds, non-USD filers),
+                    0 unexplained
+```
+
+`unexplained` is the bucket worth waking up for, and a dual-class ticker
+reappearing as unmapped is a hard FAIL rather than a warning.
+
+The 7 genuinely absent (AEP, FRBA, HIFS, NBN, RCBC, STLN, TOWN) are missing
+from SEC's own `company_tickers.json` — verified against a fresh fetch, not the
+cache. That file is a convenience list, not a registry. **Their CIKs were
+deliberately not hardcoded**: a CIK typed from memory that happens to be wrong
+attaches another company's financials to a real ticker, which is far worse than
+missing data.
+
+## Non-USD filers are scored now — without an FX feed
+
+**Built and live.** 64 large caps that had no fundamentals at all now score:
+BTI, CNQ, BCE, BCS, DB, CCJ, E, CCEP, ASML, ENB, CP, Imperial Oil and 52 more.
+The unscored universe went **274 → 210 (7.9% → 6.0%)**, and the tradeable count
+with fundamentals went **3,206 → 3,270**.
+
+No exchange rates were used, because most of the metric set does not need any.
+A ratio of two figures from the same filing is currency-free: EUR revenue over
+EUR assets is the same number as its USD equivalent. The split is now explicit
+and asserted in `fund_metrics.selftest`:
+
+- **18 scale-free** — `f_score`, `roe`, `roic`, `gpoa`, `op_margin`,
+  `asset_turnover`, `ccc`, `m_score`, `accruals`, `net_debt_ebitda`,
+  `current_ratio`, `interest_cover`, `net_issuance`, the four growth rates,
+  `mom_12_1`
+- **10 need FX and are WITHHELD** — `pe`, `pb`, `ev_ebitda`, `ev_sales`,
+  `fcf_yield`, `peg`, `shareholder_yield`, `z_score` (its X4 term is market cap
+  / liabilities), and `roic_wacc` / `eva` (WACC's equity weight is market cap)
+
+Withheld, not converted. A wrong rate produces a *plausible* P/E, which is the
+dangerous kind of wrong. The value pillar is entirely price-relative, so a
+non-USD filer scores on quality, safety and growth and its `fund_cov` can never
+exceed 0.75 — surfaced through two new outputs, `currency` and `reports_usd`,
+so a page can say "value metrics withheld: reports in EUR" instead of showing a
+gap that looks like missing data.
+
+Three things this turned up:
+
+- **The cheap route was per-company, not bulk.** Re-ingesting non-USD rows from
+  the bulk sets means 68 quarters × 85 MB. There are only ~129 such filers, so
+  one small `companyfacts` request each is three orders of magnitude less
+  traffic for the same history. 75 fetched, 75 succeeded, 373,872 facts.
+- **"Bulk always wins" was the wrong invariant for these names.** Canadian
+  Pacific, Imperial Oil and Enbridge each had **2–8 stray USD rows** in the
+  bulk store against 92–178 real ones in companyfacts. Preferring bulk would
+  have scored three large caps off two facts each. The rule is now: one
+  authority per (cik, quarter) still, but companyfacts is that authority when
+  the filer's home currency is not USD, because the bulk copy is incomplete
+  *by construction*. Both the selftest and `validate` test this by **accession
+  provenance**, not row counts — a count from a multi-quarter read compared
+  against one quarter's file proves nothing, and an earlier version of that
+  assertion reported 875 rows against an expected 178.
+- **`ARS/EUR` is an exchange rate, not an amount in pesos.** The unit parser
+  read the numerator as the currency. A composite unit only names a currency
+  when its denominator is `shares`.
+
+### Still open here
+
+**History has not been rebuilt.** The 81 quarters of companyfacts history are
+stored, so `facts_asof` finds them at any past date — but only the 2026-08-07
+score session has been recomputed. Until the rest is rebuilt (~182 sessions,
+~1.5 h) history excludes these 64 names while new sessions include them, which
+is a discontinuity for anything measuring across the boundary.
+
+**Rebuilding it invalidates the out-of-sample numbers above** and they would
+need re-measuring: adding 64 names changes every cross-sectional percentile.
+Do the rebuild and the re-measure together, or not at all.
+
+## Left
+
+1. **Nothing blocking.** The remeasure chain above closes the last known gap.
+2. **374 names (11%) have no period within 150 days** — mostly dormant or
+   delisted filers that genuinely have not filed. Below the audit's warn
+   threshold; revisit only if it climbs.
+3. **Whether there is any edge at all** is open until the walk-forward reruns.
+   If it still decays, the honest next step is to test on BOUNCE CANDIDATES
+   rather than the whole market — this is a support-bounce screener, and
+   ranking 3,400 names is not the question it exists to answer.
+
+## Traps this project has already paid for
+
+- **A job that reports success after failing is worse than one that crashes.**
+  Count successes, exit non-zero, verify against the DATA. A patch script that
+  prints "done" without asserting its edit landed is the same bug.
+- **A guard that fires on correct data is worse than no guard.** Four now: the
+  CSS collision check read class names out of comments, the audit flagged Altman
+  Z as a broken percentile, the dead-config check flagged a constant used two
+  lines below its definition, and the filer guard rejected real 2009 data.
+- **A guard that inspects nothing reports "ok".** The first `claims` check read
+  `metrics_doc.METRICS`, which does not exist, and passed cleanly having
+  examined **0** of 13 t-stats. Any check counting what it examined must
+  *report* that count, and treat zero as a warning rather than a pass.
+- **Never compare against a renameable string.** `if lab == "medium"` silently
+  stopped every theme sub-score the moment the labels were renamed. Compare
+  against the number, and assert the number is reachable.
+- **Two identifiers for the same company are two companies** until something
+  reconciles them. `BRK.B` vs `BRK-B` cost Berkshire its entire fundamental
+  history, and it looked exactly like a closed-end fund with nothing to file.
+- **A ratio does not need a currency.** Before building an FX pipeline, check
+  which metrics are scale-free — most of the fundamental set is.
+- **"NOT REPORTED" IS NOT ZERO.** `a.fillna(0) + b.fillna(0)` is `0` where
+  `a + b` is `NaN`, and the two read identically. It made 42% of filers look
+  debt-free and gave no-data companies the BEST working-capital score.
+- **Measure, then re-measure after anything that changes what you measured.**
+  A 10-hour run was killed on an ETA built from a measurement its own earlier
+  stage had invalidated.
+- **Coverage and freshness are different questions.** Every check asked whether
+  data EXISTED; none asked whether it was CURRENT, so 92% of fundamentals sat
+  two quarters stale with a green audit.
+- **A "last N" slice must sort on meaning, not on string order.** Forward-dated
+  disclosures create partitions out to 2028, so `stored_quarters()[-8:]`
+  sampled empty future files and silently reverted 153 non-USD filers to USD.
+- **The reference date of a check is part of the check.** Auditing against the
+  last CLOSED session when a weekly module had not run yet reported "3,479 of
+  3,479 have no fundamental score" — a pure false alarm.
+- **Two stores of the same thing need a stated authority rule, and "the older
+  one always wins" is rarely it.** Preferring the lagging bulk sets discarded
+  the only copy of two published quarters.
+- **Never type a measured number into prose.** Labels quoted t-stats by hand;
+  one quoted a DIFFERENT metric's. Render from the table at build time.
+- **A guard that inspects nothing reports ok.** Count what you examined and
+  treat zero as a failure of the guard, not a pass of the subject.
+- **A function whose caller believes it works is worse than one obviously
+  unused** -- `prune_dated` on `reports/`.
+- **CSS that looks right can behave wrong.** `position:sticky` is ignored on
+  cells of a `border-collapse:collapse` table, and an ancestor with
+  `overflow:hidden` re-parents a sticky element. Check the RENDERED page.
+- **A stale constant becomes a silent cap** (`dip`'s floor) and **a biased
+  control invalidates the reason you excluded something** (the size buckets).
+- A float NaN is TRUTHY, `str(nan)` is the truthy STRING `"nan"`, `pd.NA`
+  **raises** on `bool()`, and a Series indexed by position looked up by key
+  returns None for everything.
+- Never name a module after a stdlib one (`profile.py` broke `cProfile`).
+- **Judge a signal at the wrong horizon and you will call it dead.**
+- **Never mix reporting currencies in one numeric column.**
+- Bulk SEC downloads are 128 MB each. Rate-limit them.
+
+---
+
+## Costs (generated)
+
+<!-- GENERATED:costs -->
+_Generated 2026-08-12 22:42 — do not edit by hand._
+
+| step | cadence | last | median | slowest (last 5) | budget | runs |
+|---|---|---:|---:|---:|---:|---:|
+| `universe` | daily | 9s | 8s | 10s | 2.0 min | 6 |
+| `bars` | daily | 55s | 54s | 2.4 min | 10.0 min | 6 |
+| `macro` | daily | 54s | 56s | 6.1 min | 15.0 min | 6 |
+| `news` | daily | 5s | 5s | 53s | 10.0 min | 6 |
+| `senti_cache` | daily | 2s | 9s | 3.0 min | 10.0 min | 6 |
+| `sentiment` | daily | 8s | 9s | 22s | 15.0 min | 7 |
+| `shortvol` | daily | 3s | 6s | 8s | 10.0 min | 4 |
+| `hype` | daily | 31s | 31s | 2.1 min | 20.0 min | 5 |
+| `bounce` | daily | 47s | 47s | 2.0 min | 15.0 min | 6 |
+| `fundamental` | weekly | 31s | 39s | 44s | 15.0 min | 5 |
+| `sec_facts` | quarterly | 4s | 4s | 4s | 60.0 min | 3 |
+| `sec_gap` | weekly | 3.5 min | 3.5 min | 3.5 min | 20.0 min | 1 |
+| `events` | weekly | 13.1 min | 8.3 min | 13.1 min | 30.0 min | 3 |
+| `leaderboard` | weekly | 53.5 min | 22.7 min | 53.5 min | 90.0 min | 4 |
+| `dip` | daily | 5s | 20s | 50s | 15.0 min | 5 |
+| `combo` | daily | 4s | 5s | 6s | 15.0 min | 2 |
+| `explore` | daily | 4s | 4s | 4s | 5.0 min | 7 |
+| `snapshots` | daily | 3s | 1s | 3s | 5.0 min | 6 |
+| `profiles` | daily | 11.8 min | 11.8 min | 12.5 min | 15.0 min | 7 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 6 |
+| `dashboard` | daily | 0s | 1s | 1s | 2.0 min | 10 |
+| `docs` | daily | 0s | 0s | 1s | 5.0 min | 5 |
+
+**Daily total ≈ 16.0 min.** Weekly adds 35.1 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+<!-- /GENERATED:costs -->
+
+## Stores (generated)
+
+<!-- GENERATED:stores -->
+_Generated 2026-08-12 22:42 — do not edit by hand._
+
+| store | files | MB | span |
+|---|---:|---:|---|
+| bars 1d | 122 | 244.0 | 2016-07 → 2026-08 |
+| bars 1h | 4 | 0.4 | 2026-05 → 2026-08 |
+| bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
+| news | 121 | 167.9 | 2016-08 → 2026-08 |
+| sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
+| scores | 121 | 243.5 | 2016-08 → 2026-08 |
+| fundamentals | 68 | 332.9 | 2009q2 → 2026q1 |
+| short volume | 73 | 54.3 | 2020-08 → 2026-08 |
+| flags | 8 | 0.7 | 2026-07-31 → 2026-08-11 |
+| rejects | 8 | 1.6 | 2026-07-31 → 2026-08-11 |
+| loose (macro, universe, jobs, study) | 27 | 2.8 | — |
+
+**`data/` total ≈ 1,063 MB.** `reports/` is a further 19 MB across 75 pages.
+
+Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
+<!-- /GENERATED:stores -->
+
+## Modules (generated)
+
+<!-- GENERATED:modules -->
+_Generated 2026-08-12 22:42 — do not edit by hand._
+
+| module | metrics | stored sessions | span |
+|---|---:|---:|---|
+| `sentiment` | 26 | 322 | 2016-09-27 → 2026-08-11 |
+| `fundamental` | 48 | 182 | 2016-08-25 → 2026-08-07 |
+| `hype` | 20 | 300 | 2016-10-25 → 2026-08-11 |
+| `dip` | 10 | 224 | 2016-09-27 → 2026-08-11 |
+| `combo` | 15 | 178 | 2016-11-04 → 2026-08-11 |
+<!-- /GENERATED:modules -->
+
+## Study (generated)
+
+<!-- GENERATED:study -->
+_Generated 2026-08-12 22:42 — do not edit by hand._
+
+1,056 cells measured across 66 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
+
+**43 metric(s) reach |t| >= 2 at their best horizon.**
+| metric | module | best h | IC | t | hit |
+|---|---|---:|---:|---:|---:|
+| `fund_score` | fundamental | 20 | +0.0248 | +5.49 | 64% |
+| `z_score` | fundamental | 60 | -0.0565 | -4.62 | 22% |
+| `net_issuance` | fundamental | 20 | -0.0308 | -4.18 | 42% |
+| `interest_cover` | fundamental | 20 | +0.0353 | +4.06 | 61% |
+| `roe` | fundamental | 20 | +0.0273 | +3.91 | 61% |
+| `ev_sales` | fundamental | 20 | -0.0341 | -3.90 | 39% |
+| `f_score` | fundamental | 1 | +0.0257 | +3.81 | 61% |
+| `asset_turnover` | fundamental | 20 | +0.0225 | +3.79 | 59% |
+| `du_asset_turnover` | fundamental | 20 | +0.0225 | +3.79 | 59% |
+| `quality_score` | fundamental | 20 | +0.0252 | +3.55 | 63% |
+| `roic` | fundamental | 20 | +0.0198 | +3.46 | 63% |
+| `days_since_filing` | fundamental | 60 | +0.0262 | +3.31 | 66% |
+| `sent_decay_30d` | sentiment | 1 | +0.0101 | +3.25 | 58% |
+| `du_leverage` | fundamental | 20 | +0.0258 | +3.24 | 59% |
+| `sent_decay_90d` | sentiment | 1 | +0.0104 | +3.23 | 59% |
+| `sent_mean_30d` | sentiment | 1 | +0.0112 | +3.22 | 58% |
+| `sent_rank` | sentiment | 1 | +0.0112 | +3.22 | 58% |
+| `fcf_yield` | fundamental | 20 | +0.0230 | +3.21 | 55% |
+| `safety_score` | fundamental | 1 | +0.0128 | +3.17 | 60% |
+| `roic_wacc` | fundamental | 20 | +0.0210 | +3.17 | 60% |
+<!-- /GENERATED:study -->
+
