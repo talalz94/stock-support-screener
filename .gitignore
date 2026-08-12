@@ -1,0 +1,15 @@
+.env
+data/
+reports/
+__pycache__/
+*.parquet.tmp
+*.json.tmp
+screener.disabled
+sentiment.disabled
+orchestrator.disabled
+_c.js
+.env*
+!.env.example
+*.pem
+*.key
+credentials*
