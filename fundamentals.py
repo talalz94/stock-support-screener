@@ -45,7 +45,10 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
+import os
 import sys
+import threading
 import time
 import zipfile
 from datetime import date, datetime
@@ -159,8 +162,30 @@ TAGS: dict[str, list[str]] = {
               "ProfitLossFromOperatingActivities"],                  # IFRS
     "sga": ["SellingGeneralAndAdministrativeExpense", "GeneralAndAdministrativeExpense"],
     "rnd": ["ResearchAndDevelopmentExpense"],
-    "dna": ["DepreciationDepletionAndAmortization", "DepreciationAndAmortization",
+    # TOTALS ONLY. Components live in `deprec` and `amort` below and are
+    # SUMMED, never chosen between -- see the note there.
+    "dna": ["DepreciationDepletionAndAmortization",
+            "DepreciationAndAmortization",
             "DepreciationAmortizationAndAccretionNet"],
+
+    # D&A COMPONENTS, FOR FILERS THAT REPORT NO TOTAL.
+    #
+    # Found 2026-08-14 on COLL, by the user, from the page. Collegium reports
+    # none of the three total tags; it files the two halves separately:
+    #
+    #     AmortizationOfIntangibleAssets   62,953,000   (Q2 2026)
+    #     Depreciation                      1,812,000   (Q2 2026)
+    #
+    # These are COMPLEMENTARY, not synonyms, so the alias mechanism -- which
+    # picks ONE by preference -- is the wrong tool. Picking `Depreciation`
+    # yielded 1.8M against a true 64.8M and made EBITDA read $4M instead of
+    # ~$68M. They are separate concepts here precisely so `derive` can add them,
+    # and so that adding a component alias can never silently shadow a total.
+    #
+    # 1,938 filers had operating income and no recognised D&A before this.
+    "deprec": ["Depreciation", "DepreciationNonproduction"],
+    "amort": ["AmortizationOfIntangibleAssets",
+              "FiniteLivedIntangibleAssetsAmortizationExpense"],
     "pretax": ["IncomeLossFromContinuingOperationsBeforeIncomeTaxesExtraordinaryItemsNoncontrollingInterest",
                "IncomeLossFromContinuingOperationsBeforeIncomeTaxesMinorityInterestAndIncomeLossFromEquityMethodInvestments",
                "ProfitLossBeforeTax"],                               # IFRS
@@ -365,6 +390,10 @@ CF_ATTEMPTS = 3
 # hundred MB, which stays well clear of the concat spike that a whole-universe
 # refresh would otherwise hit.
 CF_BATCH = 200
+# Concurrent companyfacts fetchers. SEC's published ceiling is 10 req/s; six
+# workers averaging ~3.7 s per multi-MB document lands near 1.6 req/s, which
+# leaves headroom for retries without ever approaching the limit.
+CF_WORKERS = 6
 
 
 def _cf_qtrs(start: str | None, end: str) -> int | None:
@@ -512,27 +541,71 @@ def backfill_companyfacts(tickers: list[str] | None = None, verbose: bool = True
         facts += len(allf)
         fr.clear()
 
-    sess = requests.Session()
+    # FETCH IN PARALLEL, WRITE SERIALLY.
+    #
+    # Measured 2026-08-13: 3.74 s per company sequentially, which is 3.6 hours
+    # for the tradeable universe and over 8 for every CIK -- and almost all of
+    # it is waiting on a multi-megabyte download, not CPU. That put us at
+    # 0.27 requests/second against SEC's published ceiling of 10.
+    #
+    # Six workers is a deliberate fraction of that ceiling: enough to turn
+    # hours into minutes, far enough below the limit that a slow response or a
+    # retry cannot push the aggregate over it. `fetch_companyfacts` already
+    # retries per company, and each worker keeps its OWN Session because
+    # requests' Session is not documented as thread-safe.
+    #
+    # The flush stays on this thread. It reads, merges and atomically replaces
+    # parquet partitions, and doing that concurrently would race two writers
+    # onto the same file for no gain -- the cost here was never the writing.
+    from concurrent.futures import ThreadPoolExecutor
+
     frames, failed, empty = [], [], 0
-    for i, (tk, cik) in enumerate(pairs, 1):
+    _local = threading.local()
+
+    def _one(pair):
+        tk, cik = pair
+        s = getattr(_local, "sess", None)
+        if s is None:
+            s = _local.sess = requests.Session()
         try:
-            d = fetch_companyfacts(cik, session=sess)
-            if d.empty:
-                empty += 1
-            else:
-                frames.append(d)
+            return tk, fetch_companyfacts(cik, session=s), None
         except Exception as exc:                                 # noqa: BLE001
-            failed.append(f"{tk}({type(exc).__name__})")
-        if len(frames) >= CF_BATCH:
-            _flush(frames)
-        if verbose and i % 25 == 0:
-            print(f"  {i}/{len(pairs)} companies, {facts + sum(len(f) for f in frames):,} "
-                  f"facts ({companies} already written to disk)", flush=True)
-        time.sleep(CF_GAP_S)
+            return tk, None, type(exc).__name__
+
+    done_n = 0
+    with ThreadPoolExecutor(max_workers=CF_WORKERS) as pool:
+        # Chunked so `_flush` still runs every CF_BATCH companies and peak
+        # memory stays bounded -- the 2.2 GB incident above is why.
+        step = max(CF_BATCH, CF_WORKERS)
+        for start in range(0, len(pairs), step):
+            for tk, d, err in pool.map(_one, pairs[start:start + step]):
+                done_n += 1
+                if err is not None:
+                    failed.append(f"{tk}({err})")
+                elif d is None or d.empty:
+                    empty += 1
+                else:
+                    frames.append(d)
+            if len(frames) >= CF_BATCH:
+                _flush(frames)
+            if verbose:
+                print(f"  {done_n}/{len(pairs)} companies, "
+                      f"{facts + sum(len(f) for f in frames):,} facts "
+                      f"({companies} written to disk)", flush=True)
 
     if not frames:
-        return {"ok": not failed, "companies": 0, "facts": 0,
-                "empty": empty, "failed": failed}
+        # REPORT WHAT WAS ALREADY FLUSHED, not zero.
+        #
+        # This used to hardcode 0/0, which was harmless when the loop only
+        # flushed on a full CF_BATCH and usually had a remainder left over.
+        # Fetching in chunks makes an empty tail the NORMAL case, so every
+        # batch logged "0 with data, 0 facts" while writing tens of thousands
+        # of rows to disk -- a refresh that worked and reported that it had
+        # done nothing, which is the worst possible direction for a log to be
+        # wrong in. Measured 2026-08-13: 110,685 rows landed in 2026q2 while
+        # the log claimed 0.
+        return {"ok": not failed, "companies": companies, "facts": facts,
+                "empty": empty, "failed": failed, "quarters": len(quarters)}
 
     _flush(frames)
     # A fetch can change which filers are non-USD, and `read()` caches that.
@@ -1075,6 +1148,27 @@ STOCK_CONCEPTS = frozenset({
     "retained", "ppe", "goodwill", "intangibles", "shares_out",
 })
 
+# A THIRD KIND, and the one that was silently wrong: a period AVERAGE.
+#
+# Weighted-average share counts are tagged with a duration, so `qtrs > 0` puts
+# them on the flow path -- but they do not accumulate. Two quarters of revenue
+# add up; two quarters of average shares outstanding do not. Treating them as
+# flows broke both ends of the pipeline:
+#
+#   Q4 derivation   FY - Q1 - Q2 - Q3 on a count that is ~the same every
+#                   quarter gives roughly -2x the count. AAPL's derived
+#                   2025-09-27 diluted shares were **-30,150,480,000** --
+#                   a negative share count, shown on the profile page.
+#   TTM             summing four quarterly averages gives ~4x the true count,
+#                   except when the negative derived Q4 happens to cancel it
+#                   back to ~1x. Both are wrong; which one you get depends on
+#                   whether the fiscal year boundary fell inside the window.
+#
+# `share_count()` falls back to these for market cap whenever `shares_out` is
+# missing, so this fed straight into pe, pb, ev_ebitda, ev_sales and fcf_yield.
+# The right reduction is the MOST RECENT period's figure, never a sum.
+AVERAGE_CONCEPTS = frozenset({"shares_basic", "shares_diluted"})
+
 
 _HIST_CACHE: dict = {}
 
@@ -1104,6 +1198,23 @@ def prime_history(tickers: list[str], periods: int = 20, freq: str = "A") -> int
 
 
 NEAR_PERIOD_DAYS = 10
+
+# Four CONSECUTIVE quarter-ends span ~273 days (three gaps of ~91). Allow slack
+# for 52/53-week fiscal calendars and late filings, but reject anything that
+# implies a missing quarter -- see the HD case in `_ttm`.
+MAX_4Q_SPAN_DAYS = 310
+
+_LOGGED: set = set()
+
+
+def _log_once(msg: str) -> None:
+    """Print a data-quality note once per process, not once per ticker."""
+    if msg not in _LOGGED:
+        _LOGGED.add(msg)
+        try:
+            print(f"  [fundamentals] {msg}", flush=True)
+        except (ValueError, OSError):
+            pass
 
 
 def _merge_near_periods(wide: pd.DataFrame) -> pd.DataFrame:
@@ -1194,7 +1305,8 @@ def _fill_q4(wide: pd.DataFrame, all_raw: pd.DataFrame,
     fills: list[tuple[str, str, float]] = []
     for _, a in ann.iterrows():
         concept = str(a["concept"])
-        if concept in STOCK_CONCEPTS or concept not in wide.columns:
+        if (concept in STOCK_CONCEPTS or concept in AVERAGE_CONCEPTS
+                or concept not in wide.columns):
             continue
         fy_end = pd.to_datetime(a["ddate"], errors="coerce")
         if pd.isna(fy_end):
@@ -1399,6 +1511,86 @@ def store_bytes() -> int:
 # ===========================================================================
 # CIK <-> ticker
 # ===========================================================================
+def _succession_aliases(df: pd.DataFrame) -> pd.DataFrame:
+    """Map a ticker to its PREDECESSOR CIK as well as its current one.
+
+    A corporate reorganisation issues the surviving company a new CIK, and
+    SEC's `company_tickers.json` lists only that new one. Every filing made
+    under the predecessor then becomes unreachable even though it is sitting in
+    our own fact store. Measured 2026-08-16:
+
+        XOM   cik 2115436   94 rows        <- all the map knows about
+              cik   34088   5,208 rows     <- 2006..2025, still filing
+
+    With only the new CIK there is no annual figure and no four consecutive
+    quarters, so every TTM is uncomputable and the page renders blank --
+    correct given the inputs, and useless to read.
+
+    Adding a SECOND ROW for the same ticker is what fixes it: `facts_asof`
+    merges facts to tickers on `cik`, so both CIKs' rows resolve to the one
+    ticker and the histories join. Nothing is substituted, so a lookup that
+    already worked cannot change.
+
+    The map is built by `cik_succession.py`, which requires an exact
+    normalised entity-name match and a 10-K/10-Q filing history. Four links
+    exist today (XOM, NVRI, PNFP, CLBK) out of 86 candidates -- deliberately
+    strict, because attaching another company's financials to a ticker is far
+    worse than the blank page this repairs.
+    """
+    # ENABLED 2026-08-16, once the merger case could be excluded by DATA.
+    #
+    # First attempt linked on entity name alone and was wrong: PNFP's new CIK
+    # is the combined Pinnacle/Synovus entity, so splicing pre-merger Pinnacle
+    # onto it gave assets of 129B against the predecessor's 56B and dropped
+    # verification to 30.3%.
+    #
+    # `cik_succession.py` now also requires the two CIKs to report TOTAL ASSETS
+    # WITHIN 0.75-1.35x of each other, because a reorganisation preserves the
+    # balance sheet and a merger does not:
+    #
+    #     XOM   464.5B / 449.0B = 1.03   linked
+    #     CLBK   12.2B /  11.0B = 1.10   linked
+    #     NVRI    1.7B /   2.7B = 0.64   rejected
+    #     PNFP  129.1B /  56.0B = 2.31   rejected
+    #
+    # Set FD_CIK_SUCCESSION=0 to turn it off.
+    if os.environ.get("FD_CIK_SUCCESSION", "1") == "0":
+        return df
+    if df.empty or "ticker" not in df:
+        return df
+    p = config.DATA / "_cik_alias.json"
+    if not p.exists():
+        return df
+    # CATCH ONLY WHAT A BAD FILE THROWS.
+    #
+    # This was `except Exception`, and it swallowed a NameError from a missing
+    # `import json` -- so the alias silently never applied, XOM stayed broken,
+    # and every line of this function appeared to run. A blanket catch turns a
+    # CODE bug into a silent data gap, which is the hardest kind to find.
+    try:
+        alias = {int(k): int(v) for k, v in
+                 json.loads(p.read_text(encoding="utf-8")).items()}
+    except (OSError, ValueError, TypeError) as exc:
+        _log_once(f"cik alias map unreadable ({type(exc).__name__}); "
+                  f"successions not applied")
+        return df
+    if not alias:
+        return df
+    # `list(alias)`, not `alias`. `Series.isin(dict)` does NOT test the dict's
+    # keys -- it silently matched nothing, so this returned the frame unchanged
+    # and XOM stayed broken while every line of the function ran.
+    hit = df[df["cik"].isin(list(alias))]
+    if hit.empty:
+        return df
+    extra = hit.assign(cik=hit["cik"].map(alias))
+    # Only genuinely new (ticker, cik) pairs; never displace an existing row.
+    have = set(map(tuple, df[["ticker", "cik"]].values))
+    extra = extra[[t not in have for t in map(tuple, extra[["ticker", "cik"]].values)]]
+    if extra.empty:
+        return df
+    return pd.concat([df, extra], ignore_index=True)
+
+
 def _class_share_aliases(df: pd.DataFrame) -> pd.DataFrame:
     """Add dotted aliases for SEC's hyphenated class-share tickers.
 
@@ -1431,7 +1623,7 @@ def ticker_map(refresh: bool = False) -> pd.DataFrame:
     if p.exists() and not refresh:
         # Aliased on READ, not baked into the cache: an existing cache written
         # before this fix must gain the aliases too, without needing a refresh.
-        return _class_share_aliases(pd.read_parquet(p))
+        return _succession_aliases(_class_share_aliases(pd.read_parquet(p)))
     r = requests.get(config.SEC_TICKER_MAP_URL,
                      headers={"User-Agent": config.SEC_UA}, timeout=60)
     r.raise_for_status()
@@ -1441,7 +1633,7 @@ def ticker_map(refresh: bool = False) -> pd.DataFrame:
     tmp = p.with_suffix(".parquet.tmp")
     df.to_parquet(tmp, compression=config.COMPRESSION, index=False)
     store.atomic_replace(tmp, p)
-    return _class_share_aliases(df)
+    return _succession_aliases(_class_share_aliases(df))
 
 
 def sector_map(write_file: bool = True, verbose: bool = True) -> pd.DataFrame:
@@ -1633,36 +1825,236 @@ def _latest(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
         columns=["_pref", "_val"], errors="ignore")
 
 
+def _q4_rows(q: pd.DataFrame, ann: pd.DataFrame) -> pd.DataFrame:
+    """Add the fiscal Q4 that no 10-Q ever reports: annual minus Q1+Q2+Q3.
+
+    Same arithmetic as `_fill_q4`, on the long point-in-time frame rather than
+    the wide display one. Only filled when the annual figure AND exactly three
+    quarters inside its year are present -- a partial subtraction would invent
+    a number, and an invented earnings figure is worse than a missing one.
+    """
+    if q.empty or ann is None or ann.empty:
+        return q
+    # Period AVERAGES do not decompose by subtraction -- see AVERAGE_CONCEPTS.
+    ann = ann[~ann["concept"].isin(AVERAGE_CONCEPTS)]
+    if ann.empty:
+        return q
+    a = _latest(ann, ["ticker", "concept"])[["ticker", "concept", "value",
+                                             "ddate"]]
+    qd = pd.to_datetime(q["ddate"], errors="coerce")
+    rows = []
+    for r in a.itertuples(index=False):
+        end = pd.Timestamp(r.ddate)
+        if pd.isna(end):
+            continue
+        m = ((q["ticker"] == r.ticker) & (q["concept"] == r.concept)
+             & (qd > end - pd.DateOffset(months=12)) & (qd <= end))
+        inside = q[m]
+        if len(inside) == 3 and not (inside["ddate"] == r.ddate).any():
+            rows.append({"ticker": r.ticker, "concept": r.concept,
+                         "ddate": r.ddate, "qtrs": 1,
+                         "value": float(r.value) - float(inside["value"].sum()),
+                         "rank": 0, "filed": q["filed"].max()})
+    return pd.concat([q, pd.DataFrame(rows)], ignore_index=True) if rows else q
+
+
 def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
     """Trailing twelve months per (ticker, concept).
 
     Prefers an annual (qtrs==4) figure when one is visible; otherwise sums the
     four most recent distinct quarterly (qtrs==1) periods. Mixing the two would
     double count, which is why annual short-circuits rather than adding.
+
+    AVERAGE_CONCEPTS are carved out and reduced by LATEST instead of by sum --
+    a weighted-average share count is a duration fact that does not accumulate.
     """
     if flow.empty:
         return flow
+
+    # Period averages: newest period wins, no summing, no Q4 derivation.
+    avg = flow[flow["concept"].isin(AVERAGE_CONCEPTS)]
+    flow = flow[~flow["concept"].isin(AVERAGE_CONCEPTS)]
+    avg_out = None
+    if not avg.empty:
+        avg_out = _latest(avg, ["ticker", "concept"])[
+            ["ticker", "concept", "value", "ddate"]].assign(_src="avg")
+    if flow.empty:
+        return (avg_out.drop(columns=["_src"]) if avg_out is not None
+                else pd.DataFrame(columns=["ticker", "concept", "value"]))
+
     out = []
     ann = flow[flow["qtrs"] == 4]
     if not ann.empty:
-        out.append(_latest(ann, ["ticker", "concept"])[["ticker", "concept", "value"]])
+        a = _latest(ann, ["ticker", "concept"])[["ticker", "concept", "value",
+                                                 "ddate"]]
+        out.append(a.assign(_src="annual"))
 
     q1 = flow[flow["qtrs"] == 1]
     if not q1.empty:
         d = (q1.sort_values(["ddate", "rank", "filed"], ascending=[True, False, True])
                .groupby(["ticker", "concept", "ddate"], observed=True).tail(1))
+        # DERIVE THE MISSING FISCAL Q4 FIRST, or the "four most recent
+        # quarters" is not twelve months. A 10-K reports the full year and no
+        # 10-Q ever covers Q4, so the fourth-newest FILED quarter sits a year
+        # back: Apple's window became Jun25 + Dec25 + Mar26 + Jun26, skipping
+        # Sep25 entirely and spanning fifteen months. `history()` already fills
+        # this gap for the table; the point-in-time frame did not, so every
+        # TTM-derived metric inherited the malformed window.
+        d = _q4_rows(d, ann)
         d = d.sort_values("ddate").groupby(["ticker", "concept"], observed=True).tail(4)
         n = d.groupby(["ticker", "concept"], observed=True)["value"].transform("size")
         d = d[n == 4]
+
+        # FOUR QUARTERS IS NOT THE SAME AS TWELVE MONTHS.
+        #
+        # `tail(4)` takes the four most recent quarters that EXIST, and for a
+        # concept a filer tags only occasionally those four can be scattered
+        # across years. Home Depot tags `AmortizationOfIntangibleAssets`
+        # quarterly only sometimes: the four most recent were 2024-07-28,
+        # 2024-10-27, 2025-05-04 and 2026-05-03 -- a **644-day** window summed
+        # and labelled TTM. It produced 538M against a true 639M.
+        #
+        # Four CONSECUTIVE quarter-ends span about nine months from first to
+        # last (three gaps of ~91 days), so anything past ~10 months means the
+        # window has holes in it. Such a window is dropped, and the annual
+        # figure -- a real twelve months, merely older -- wins instead via the
+        # ends-later rule below. An honest older number beats a fabricated
+        # recent one.
+        #
+        # `verify_metrics` has enforced exactly this since it was written,
+        # which is why it caught the discrepancy the production path missed.
         if not d.empty:
-            out.append(d.groupby(["ticker", "concept"], observed=True)["value"]
-                       .sum().reset_index())
+            dd = pd.to_datetime(d["ddate"], errors="coerce")
+            span = (dd.groupby([d["ticker"], d["concept"]]).transform("max")
+                    - dd.groupby([d["ticker"], d["concept"]]).transform("min")).dt.days
+            malformed = int((span > MAX_4Q_SPAN_DAYS).groupby(
+                [d["ticker"], d["concept"]]).first().sum())
+            if malformed:
+                _log_once(f"_ttm: dropped {malformed} four-quarter window(s) "
+                          f"spanning more than {MAX_4Q_SPAN_DAYS} days")
+            d = d[span <= MAX_4Q_SPAN_DAYS]
+
+        if not d.empty:
+            g = d.groupby(["ticker", "concept"], observed=True)
+            # RECORD THE WINDOW, not just the sum.
+            #
+            # A TTM is never a reported fact -- no filer publishes "TTM
+            # revenue" in XBRL -- so it is always a CONSTRUCTION, and two
+            # honest constructions disagree wherever the underlying periods are
+            # irregular. Chasing those disagreements one at a time is endless;
+            # what ends it is being able to SEE the window that produced a
+            # number. `_window` carries the exact period-ends summed, so any
+            # future dispute is settled by reading it rather than by
+            # re-deriving both sides.
+            agg = g.agg(value=("value", "sum"), ddate=("ddate", "max"),
+                        _window=("ddate", lambda s: ",".join(sorted(map(str, s)))),
+                        _n=("ddate", "size")).reset_index()
+            out.append(agg.assign(_src="4q"))
+
+    # ROLL-FORWARD: DIAGNOSED, ATTEMPTED, REVERTED 2026-08-15. DO NOT REDO BLIND.
+    #
+    # THE DIAGNOSIS IS SOUND and worth acting on later. A 10-Q reports the cash
+    # flow statement CUMULATIVELY: only Q1 is tagged qtrs=1, Q2 is qtrs=2, Q3 is
+    # qtrs=3. So "the four most recent qtrs==1 rows" collects ONE QUARTER PER
+    # YEAR. Measured on HNI's `cfo` by `ttm_invariants.py`:
+    #
+    #     2023-04-01, 2024-03-30, 2025-03-29, 2026-04-04   span 1,099 days
+    #
+    # The MAX_4Q_SPAN_DAYS guard rejects those, so nothing catastrophic ships --
+    # but the fallback is the last ANNUAL figure. For cfo, cfi, cff, capex, sbc,
+    # buybacks, dividends, tax and pretax, `*_ttm` therefore means "last full
+    # year", up to a year stale, NOT a trailing twelve months. That staleness is
+    # the source of the residual UPS/HNI/KO disagreements.
+    #
+    # The correct construction is TTM = FY + YTD_now - YTD_year_ago, every leg a
+    # reported figure. An implementation of it was written and REVERTED because
+    # it made things worse, not better:
+    #
+    #     KO   cfo_ttm  14,631M against a true 7,408M   (~2x, double counted)
+    #     HNI  net_income_ttm  56.4M against 4.4M       (1,182% off)
+    #     overall verify_metrics 96% -> 76%
+    #
+    # The merge produced more rows than intended somewhere between `cur`,
+    # `prior` and the 350-380 day stub match. Redo it with a per-ticker unit
+    # test that pins KO, HD and UPS to hand-computed values BEFORE wiring it
+    # into `_ttm` -- not by reasoning about the merge, which is what failed.
+    #
+    # ------------------------------------------------------- ROLL-FORWARD
+    # TTM = FY + YTD_now - YTD_a_year_ago, for YEAR-TO-DATE filings.
+    #
+    # See `_selftest_rollforward` for the pinned hand-computed cases. Every leg
+    # is a REPORTED figure, so nothing is derived by subtracting periods that
+    # were never meant to be subtracted.
+    #
+    # Guarded three ways, because an earlier version of this was reverted:
+    #   * the current stub must END AFTER the annual, else the annual already
+    #     covers those twelve months and rolling would double count;
+    #   * the prior stub must be the SAME qtrs and 350-380 days earlier, so a
+    #     six-month stub is only ever netted against a six-month stub;
+    #   * exactly one current stub and one prior stub per (ticker, concept),
+    #     taken as the latest of each -- a many-to-many merge here is what
+    #     produced the bogus figures the first time.
+    if not flow.empty:
+        ytd = flow[flow["qtrs"].isin([1, 2, 3])]
+        ann_all = flow[flow["qtrs"] == 4]
+        if not ytd.empty and not ann_all.empty:
+            y = (ytd.sort_values(["ddate", "filed"])
+                    .drop_duplicates(["ticker", "concept", "ddate", "qtrs"],
+                                     keep="last"))
+            a = _latest(ann_all, ["ticker", "concept"])[
+                ["ticker", "concept", "value", "ddate"]].rename(
+                columns={"value": "_fy", "ddate": "_fy_end"})
+            y = y.merge(a, on=["ticker", "concept"], how="inner")
+            cur = y[y["ddate"] > y["_fy_end"]]
+            if not cur.empty:
+                cur = (cur.sort_values("ddate")
+                          .groupby(["ticker", "concept"], observed=True)
+                          .tail(1)[["ticker", "concept", "qtrs", "ddate",
+                                    "value", "_fy", "_fy_end"]])
+                prior = y[["ticker", "concept", "qtrs", "ddate", "value"]].rename(
+                    columns={"ddate": "_p_end", "value": "_p_val"})
+                m = cur.merge(prior, on=["ticker", "concept", "qtrs"], how="inner")
+                gap = (pd.to_datetime(m["ddate"])
+                       - pd.to_datetime(m["_p_end"])).dt.days
+                m = m[(gap >= 350) & (gap <= 380)]
+                if not m.empty:
+                    m = (m.sort_values("_p_end")
+                           .groupby(["ticker", "concept"], observed=True).tail(1))
+                    roll = pd.DataFrame({
+                        "ticker": m["ticker"].values,
+                        "concept": m["concept"].values,
+                        "value": (m["_fy"].astype(float)
+                                  + m["value"].astype(float)
+                                  - m["_p_val"].astype(float)).values,
+                        "ddate": m["ddate"].values,
+                    }).assign(_src="roll")
+                    _log_once(f"_ttm: rolled {len(roll)} year-to-date series "
+                              f"forward to a true twelve months")
+                    out.append(roll)
 
     if not out:
         return pd.DataFrame(columns=["ticker", "concept", "value"])
-    # Annual first, so drop_duplicates keeps it over the quarterly reconstruction.
-    return pd.concat(out, ignore_index=True).drop_duplicates(
-        ["ticker", "concept"], keep="first")
+
+    # WHICHEVER WINDOW ENDS LATER WINS -- never both, never added.
+    #
+    # This used to prefer the annual figure unconditionally, and the reason
+    # given ("mixing them would double count") is real but does not imply that
+    # the annual is the right pick. A 10-K is filed once a year, so for most of
+    # the year the four most recent quarters end LATER than the last annual
+    # period. Measured on 2026-08-11: 2,799 of 2,964 filers (94%) were in that
+    # position, median 181 days stale, worst 639.
+    #
+    # Apple was the case that surfaced it -- `net_income_ttm` read $112.0B,
+    # which is fiscal 2025 (ended 2025-09-27), while the true trailing four
+    # quarters through 2026-06-27 were $128.9B. That put the displayed P/E at
+    # 40.9 against a real ~35.5, and the same staleness ran through revenue,
+    # margins, EV/EBITDA, FCF yield, ROE and every growth metric.
+    cat = pd.concat(out, ignore_index=True)
+    cat = cat.sort_values("ddate").groupby(["ticker", "concept"],
+                                           observed=True).tail(1)
+    if avg_out is not None:      # disjoint concepts, so no contest to resolve
+        cat = pd.concat([cat, avg_out], ignore_index=True)
+    return cat[["ticker", "concept", "value"]].reset_index(drop=True)
 
 
 def _q_back(asof: str, n: int) -> str:
@@ -1867,6 +2259,8 @@ def _selftest_companyfacts() -> None:
     # A guard that fires on correct data is worse than no guard, so the rule is
     # verified where it is unambiguous -- on inputs built for the purpose.
     _selftest_source_choice()
+    _selftest_rollforward()
+    _selftest_average_concepts()
     _selftest_q4()
 
     # ...and the OUTCOME is checked on the real store: a non-USD filer whose
@@ -1887,6 +2281,97 @@ def _selftest_companyfacts() -> None:
                 assert got_rev >= max(1, len(w) // 3), (
                     f"only {got_rev} of {len(w)} non-USD filers have revenue; "
                     f"the companyfacts authority switch is not taking effect")
+
+
+def _selftest_rollforward() -> None:
+    """TTM from a YEAR-TO-DATE filing: FY + YTD_now - YTD_a_year_ago.
+
+    PINNED TO HAND-COMPUTED VALUES FROM REAL FILINGS, written BEFORE the
+    implementation, because the first attempt at this was reverted on a
+    misreading and the only way to be sure is to fix the expected answer first.
+
+    A 10-Q reports the cash flow statement CUMULATIVELY: only Q1 carries
+    qtrs=1, Q2 is qtrs=2 (six months), Q3 is qtrs=3 (nine months). So the
+    "four most recent quarterly rows" are one quarter per year -- HNI's `cfo`
+    window spanned 1,099 days. The span guard rejects that and falls back to
+    the annual, which is a real twelve months but up to a year stale.
+
+    The three cases below are taken from the filings:
+
+        KO   FY2025  7,408.0 + Q1-26  2,021.0 - Q1-25 (-5,202.0) = 14,631.0
+        HD   FY2026 16,325.0 + Q1-26  6,032.0 - Q1-25   4,325.0  = 18,032.0
+        UPS  FY2025  8,450.0 + H1-26  3,083.0 - H1-25   2,666.0  =  8,867.0
+
+    KO IS THE CASE THAT MATTERS. Its Q1-2025 operating cash flow was NEGATIVE
+    5,202.0M -- the fairlife contingent-consideration payment. Rolling that
+    quarter OUT of the window is why the TTM (14,631.0) is nearly double the
+    fiscal year (7,408.0). That is arithmetically right, and mistaking it for a
+    double count is exactly what caused the first revert.
+    """
+    def _mk(rows):
+        return pd.DataFrame([
+            {"ticker": "T", "concept": "cfo", "value": v, "ddate": d,
+             "qtrs": q, "rank": 0, "filed": "2026-08-01", "tag": "x",
+             "adsh": f"a{d}{q}"} for d, q, v in rows])
+
+    cases = [
+        ("KO",  [("2025-12-31", 4, 7408.0), ("2025-03-28", 1, -5202.0),
+                 ("2026-04-03", 1, 2021.0)], 14631.0),
+        ("HD",  [("2026-02-01", 4, 16325.0), ("2025-05-04", 1, 4325.0),
+                 ("2026-05-03", 1, 6032.0)], 18032.0),
+        ("UPS", [("2025-12-31", 4, 8450.0), ("2025-06-30", 2, 2666.0),
+                 ("2026-06-30", 2, 3083.0)], 8867.0),
+    ]
+    for name, rows, want in cases:
+        got = _ttm(_mk(rows))
+        v = float(got.loc[got["concept"] == "cfo", "value"].iloc[0])
+        assert abs(v - want) < 0.5, (
+            f"{name} roll-forward: got {v:,.1f} want {want:,.1f}")
+
+    # A stub with NO prior-year match must NOT roll -- the annual stands.
+    got = _ttm(_mk([("2025-12-31", 4, 1000.0), ("2026-04-03", 1, 200.0)]))
+    v = float(got.loc[got["concept"] == "cfo", "value"].iloc[0])
+    assert abs(v - 1000.0) < 0.5, (
+        f"no prior-year stub must keep the annual, got {v}")
+
+
+def _selftest_average_concepts() -> None:
+    """A weighted-average share count is never summed and never subtracted.
+
+    Pins the AAPL bug: a derived fiscal Q4 of -30,150,480,000 diluted shares,
+    and a `shares_diluted_ttm` that was the sum of four quarterly averages.
+    Both fed `share_count()` -> market cap -> pe, pb, ev_ebitda, ev_sales.
+    """
+    # Four quarters at ~14.8B shares plus the FY average, exactly the shape
+    # that produced the negative Q4.
+    rows = []
+    for ddate, val, qtrs in [
+            ("2025-12-27", 14.81e9, 1), ("2026-03-28", 14.73e9, 1),
+            ("2026-06-27", 14.71e9, 1), ("2025-09-27", 14.95e9, 4)]:
+        rows.append({"ticker": "T", "concept": "shares_diluted", "value": val,
+                     "ddate": ddate, "qtrs": qtrs, "rank": 0,
+                     "filed": "2026-07-31", "tag": "x", "adsh": f"a{ddate}"})
+    # A real flow alongside it, to prove the carve-out did not drop the rest.
+    for ddate, val in [("2025-12-27", 100.0), ("2026-03-28", 110.0),
+                       ("2026-06-27", 120.0), ("2025-09-27", 90.0)]:
+        rows.append({"ticker": "T", "concept": "revenue", "value": val,
+                     "ddate": ddate, "qtrs": 1, "rank": 0,
+                     "filed": "2026-07-31", "tag": "y", "adsh": f"r{ddate}"})
+    got = _ttm(pd.DataFrame(rows))
+    sh = float(got.loc[got["concept"] == "shares_diluted", "value"].iloc[0])
+    rev = float(got.loc[got["concept"] == "revenue", "value"].iloc[0])
+
+    # Latest period (2026-06-27), NOT the 59B sum and NOT a negative.
+    assert abs(sh - 14.71e9) < 1.0, f"shares_diluted_ttm={sh:,.0f}, want 14.71e9"
+    assert sh > 0, f"negative share count {sh:,.0f}"
+    # Revenue still sums all four quarters.
+    assert abs(rev - 420.0) < 1e-6, f"revenue_ttm={rev}, want 420"
+
+    # And the Q4 derivation refuses to touch an average concept.
+    q = pd.DataFrame([r for r in rows if r["qtrs"] == 1
+                      and r["concept"] == "shares_diluted"])
+    ann = pd.DataFrame([r for r in rows if r["qtrs"] == 4])
+    assert len(_q4_rows(q, ann)) == len(q), "Q4 derived for an average concept"
 
 
 def _selftest_q4() -> None:

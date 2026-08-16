@@ -365,9 +365,18 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
     "has_news": ("Has news", "1 if any article covered this name in the window"),
     "news_coverage": ("News coverage", "fraction of the window the store covers"),
     "sent_delta": ("Sentiment change", "recent tone minus baseline"),
-    "severity_rank": ("Severity rank", "percentile of severity_max"),
-    "news_count_rank": ("Article count rank", "percentile of article count"),
-    "sent_rank": ("Sentiment rank", "percentile of sent_mean_30d"),
+    # THE `_rank` SUFFIX DOES NOT MEAN ONE SCALE, and that is a trap worth
+    # stating rather than hiding. Audited 2026-08-14: sentiment's ranks are
+    # 0-1 while `dip.fund_rank` and `dip.growth_rank` are 0-100, both under the
+    # same suffix. Rescaling the sentiment series would be a monotonic change
+    # -- harmless to any IC or ordering -- but it would silently invalidate the
+    # stored history against the measured ICs recorded above, so the scale is
+    # DOCUMENTED here instead of quietly rewritten.
+    "severity_rank": ("Severity rank", "percentile of severity_max (0-1)"),
+    "news_count_rank": ("Article count rank",
+                        "percentile of article count (0-1)"),
+    "sent_rank": ("Sentiment rank", "percentile of sent_mean_30d (0-1; note "
+                  "dip's *_rank metrics are 0-100)"),
     "top_event": ("Top event", "highest-severity event class seen"),
     "event_types": ("Event types", "every event class in the window"),
     "top_severity_band": ("Severity band", "band of the top event"),

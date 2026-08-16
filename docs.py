@@ -233,7 +233,29 @@ def main() -> int:
             print(f"\n===== {name} =====\n{body}")
         return 0
     apply()
+    _data_dictionary()
     return 0
+
+
+def _data_dictionary() -> None:
+    """Regenerate docs/DATA_DICTIONARY.md alongside the inline blocks.
+
+    It is a whole FILE rather than a block inside one, so it cannot go through
+    `BLOCKS`. Regenerating it here means the `docs` orchestrator step keeps it
+    current: its field lists are read from the live registries, so a metric
+    added tomorrow documents itself and a metric removed stops being listed.
+    Failure is reported, never fatal -- docs are not worth failing a run over.
+    """
+    try:
+        import data_dict
+        text = data_dict.build()
+        data_dict.OUT.parent.mkdir(parents=True, exist_ok=True)
+        data_dict.OUT.write_text(text, encoding="utf-8")
+        print(f"  data dictionary -> {data_dict.OUT.name} "
+              f"({text.count(chr(10)):,} lines)")
+    except Exception as exc:                                     # noqa: BLE001
+        print(f"  ! data dictionary not regenerated ({type(exc).__name__}: "
+              f"{str(exc)[:80]})")
 
 
 if __name__ == "__main__":

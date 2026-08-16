@@ -65,12 +65,12 @@ DERIVED = {
     "gross_margin": lambda d: _safe_div(d.get("gross_profit"), d.get("revenue")),
     "op_margin": lambda d: _safe_div(d.get("opinc"), d.get("revenue")),
     "net_margin": lambda d: _safe_div(d.get("net_income"), d.get("revenue")),
-    "fcf_margin": lambda d: _safe_div(_sub(d.get("cfo"), d.get("capex")),
-                                      d.get("revenue")),
-    "ebitda": lambda d: _add(d.get("opinc"), d.get("dna")),
-    "ebitda_margin": lambda d: _safe_div(_add(d.get("opinc"), d.get("dna")),
+    "fcf_margin": lambda d: _safe_div(_fcf(d), d.get("revenue")),
+    "ebitda": lambda d: _add_strict(d.get("opinc"), _dna(d)),
+    "ebitda_margin": lambda d: _safe_div(_add_strict(d.get("opinc"), _dna(d)),
                                          d.get("revenue")),
-    "fcf": lambda d: _sub(d.get("cfo"), d.get("capex")),
+    "dna": lambda d: _dna(d),
+    "fcf": lambda d: _fcf(d),
     "roe": lambda d: _safe_div(d.get("net_income"), d.get("equity")),
     "roa": lambda d: _safe_div(d.get("net_income"), d.get("assets")),
     "current_ratio": lambda d: _safe_div(d.get("assets_current"),
@@ -120,6 +120,16 @@ UNIT_ROWS = {"eps_diluted", "eps_basic"}   # per-share: shown as-is, not scaled
 # row's YoY against the same year's net-income YoY; a large divergence is a split.
 SPLIT_SUSPECT_GAP = 0.35     # fractional YoY divergence that trips the flag
 
+# Age at which the newest stored filing gets a warning banner. A filer reports
+# quarterly, so ~135 days covers a late 10-Q; past that, something is not being
+# maintained. Names outside `bars.tradeable_universe()` are never refreshed and
+# run 226-591 days stale, which is invisible without this.
+# ANNUAL periods are legitimately old: the newest completed fiscal year ends up
+# to a year back plus filing lag, so a single threshold fires on every ticker's
+# annual table. Caught immediately -- the first version warned on COLL, which is
+# refreshed nightly. Thresholds are per frequency.
+STALE_FILING_DAYS = {"Q": 200, "A": 500}
+
 
 def _safe_div(a, b):
     if a is None or b is None:
@@ -129,10 +139,111 @@ def _safe_div(a, b):
 
 
 def _add(a, b):
+    """Sum two series, treating a MISSING SERIES as zero.
+
+    Correct for genuinely additive components where absence means "none of
+    this" -- `debt_lt + debt_st` for a filer with no short-term debt is the
+    long-term figure, not unknown.
+
+    WRONG for anything where absence means "not reported". See `_add_strict`.
+    """
     if a is None:
         return None
     return pd.to_numeric(a, errors="coerce").add(
         pd.to_numeric(b, errors="coerce") if b is not None else 0, fill_value=0)
+
+
+def _dna(d):
+    """Depreciation & amortisation: the reported TOTAL, else the components.
+
+    A filer either reports a combined figure (`DepreciationDepletionAnd
+    Amortization` and friends) or reports depreciation and intangible
+    amortisation on separate lines. Both are normal. What is NOT valid is
+    choosing between the two halves, which is what alias preference does and
+    which gave COLL 1.8M of depreciation while ignoring 63.0M of amortisation.
+
+    Total wins when present, because a total already contains both and adding
+    components on top would double count. Otherwise the halves are summed, with
+    a missing half treated as zero ONLY when the other half exists -- a filer
+    with intangibles but no separately-tagged depreciation genuinely has a D&A
+    dominated by amortisation, whereas a filer with neither has no D&A figure
+    at all and must render as "--".
+    """
+    total = d.get("dna")
+    dep, am = d.get("deprec"), d.get("amort")
+    if dep is None and am is None:
+        return total
+    parts = [pd.to_numeric(x, errors="coerce")
+             for x in (dep, am) if x is not None]
+    comp = parts[0] if len(parts) == 1 else parts[0].add(parts[1], fill_value=0)
+    # Keep the total wherever it exists; fall back to the component sum.
+    if total is None:
+        return comp
+    t = pd.to_numeric(total, errors="coerce")
+    return t.where(t.notna(), comp)
+
+
+def _fcf(d):
+    """Operating cash flow minus capex -- withheld when capex is unknowable.
+
+    `_sub` fills a missing leg with zero, so a filer with no capex tag got
+    FCF = CFO: overstated, flattering, and indistinguishable from a real
+    figure. Same shape as the EBITDA bug.
+
+    But it is NOT the same case, and measuring the difference mattered.
+    2,227 filers report CFO with no capex tag; **1,394 of them hold no PP&E at
+    all** -- financials, REandD-stage biotechs, asset-light services. For those,
+    zero capex is the TRUTH, not a gap, and blanking their FCF would destroy
+    good data to chase a bug that is not there.
+
+    The remaining **833 own PP&E and report buying none**, which is not
+    credible for a going concern. Those are the ones where FCF cannot be
+    computed honestly, so those are the ones withheld.
+
+    The test is therefore not "is capex missing" but "is capex missing from a
+    filer that visibly has property to maintain".
+    """
+    cfo, capex, ppe = d.get("cfo"), d.get("capex"), d.get("ppe")
+    if cfo is None:
+        return None
+    c = pd.to_numeric(cfo, errors="coerce")
+    if capex is None:
+        # No capex series at all: genuine only if there is no PP&E either.
+        if ppe is None:
+            return c
+        p = pd.to_numeric(ppe, errors="coerce")
+        return c.where(p.isna() | (p == 0))
+    x = pd.to_numeric(capex, errors="coerce")
+    out = c - x.fillna(0)
+    if ppe is not None:
+        p = pd.to_numeric(ppe, errors="coerce")
+        # capex absent for a period in which PP&E is held -> unknowable
+        out = out.where(x.notna() | p.isna() | (p == 0))
+    return out
+
+
+def _add_strict(a, b):
+    """Sum two series, but yield NOTHING unless BOTH are present.
+
+    THE BUG THIS FIXES (found 2026-08-14 on COLL, by the user, on the page).
+    EBITDA was `_add(opinc, dna)`, and `_add` fills a missing leg with zero.
+    Collegium Pharmaceutical reports no tag this project recognises as D&A, so
+    `dna` was absent and EBITDA silently became OPERATING INCOME: the page
+    published **$4M** for 2026-06-30 against a real GAAP EBITDA nearer $67M.
+
+    It did not look broken. It looked like a small number, which is exactly the
+    failure this codebase already has a rule against -- "not reported is not
+    zero", `_sum_reported` in fund_metrics exists for it -- and this helper
+    quietly broke it for the single most-read table on the site.
+
+    A missing D&A means EBITDA is UNKNOWN. Unknown must render as "--", never
+    as a plausible figure.
+    """
+    if a is None or b is None:
+        return None
+    x = pd.to_numeric(a, errors="coerce")
+    y = pd.to_numeric(b, errors="coerce")
+    return (x + y).where(x.notna() & y.notna())      # NaN if either is absent
 
 
 def _sub(a, b):
@@ -406,8 +517,22 @@ def _block_header(t: str, m: dict, sc: dict, px: pd.Series, opt: dict) -> str:
                      f'EV/EBITDA, Altman Z) are withheld rather than converted '
                      f'at a guessed rate.">reports in <b>{_esc(ccy)}</b> '
                      f'&middot; no price ratios</span>')
+    # PRICE IS THE FIRST THING ANYONE LOOKS FOR, so it gets its own prominent
+    # chip with the day's move and the date it closed -- a bare "last $313.33"
+    # left people asking "as of when?", which on a static page rebuilt daily is
+    # exactly the right question.
     if "price" in show and len(px):
-        chips.append(f'<span class="chip">last <b>${px.iloc[-1]:,.2f}</b></span>')
+        last = float(px.iloc[-1])
+        prev = float(px.iloc[-2]) if len(px) > 1 else last
+        chg = (last / prev - 1.0) * 100 if prev else 0.0
+        col = "var(--pos)" if chg >= 0 else "var(--neg)"
+        when = str(px.index[-1])[:10] if getattr(px, "index", None) is not None \
+            else ""
+        chips.append(
+            f'<span class="chip px"><b>${last:,.2f}</b>'
+            f'<span style="color:{col};margin-left:7px">{chg:+.2f}%</span>'
+            f'<span class="muted" style="margin-left:7px;font-size:11px">'
+            f'close {ui.esc(when)}</span></span>')
     if "mktcap" in show:
         mc = (sc.get("fundamental") or {}).get("mktcap")
         if isinstance(mc, float) and np.isfinite(mc):
@@ -634,6 +759,42 @@ def _block_financials(t, hist: pd.DataFrame, opt: dict,
         return '<div class="warn">No requested rows are available.</div>'
     periods = list(hist.index)
 
+    # HOW OLD IS THE NEWEST FILING? Say it, loudly, when it is old.
+    #
+    # `serve.py` builds a profile on demand for ANY ticker typed into the URL,
+    # but only names inside `bars.tradeable_universe()` are ever refreshed. So
+    # a name outside it renders a page that looks exactly like a maintained one
+    # and is arbitrarily out of date. Measured 2026-08-15 on a 60-name sample
+    # of the SEC ticker map: MTEX 318 days stale and shown as PROFITABLE with
+    # positive equity when SEC had it loss-making with NEGATIVE equity -- a
+    # different company, presented without a word of warning.
+    #
+    # The same sample scored 65.1% against SEC, while the tradeable universe
+    # scored 96.0%. The gap is not arithmetic, it is maintenance, and the
+    # honest fix is to tell the reader which side of that line they are on
+    # rather than to hide the page.
+    stale_note = ""
+    try:
+        newest = pd.to_datetime(periods[-1])
+        age = (pd.Timestamp.today().normalize() - newest).days
+        limit = STALE_FILING_DAYS.get(str(freq).upper()[:1], 200)
+        if age > limit:
+            stale_note = (
+                f'<div class="warn"><b>These figures are {age} days old.</b> '
+                f'The newest filing in the fact store for this name ends '
+                f'{newest:%Y-%m-%d}. Fundamentals are refreshed nightly only '
+                f'for the tradeable universe; this ticker sits outside it, so '
+                f'its filings are whatever was last collected. Treat every '
+                f'figure below as a historical snapshot, not a current one '
+                f'&mdash; the company may since have swung to a loss or '
+                f'negative equity without this page changing.</div>')
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        pass
+    except Exception:                                            # noqa: BLE001
+        pass
+
     # <thead> IS LOAD-BEARING, not decoration: `.scroll.sticky-x thead th` is
     # what pins the header row, and without the wrapper the selector matched
     # nothing and the header scrolled away like any other row.
@@ -708,7 +869,8 @@ def _block_financials(t, hist: pd.DataFrame, opt: dict,
     # most recent quarter. It also removes a real defect -- the browser settled
     # 11px short of the true end, which clipped the last column's value mid
     # character ("143.8B" rendering as "143.8E").
-    return (f'{warn}<div class="scroll sticky-x start-end">'
+    # Staleness first: it changes how every number below should be read.
+    return (f'{stale_note}{warn}<div class="scroll sticky-x start-end">'
             f'<table>{head}<tbody>{body}</tbody></table></div>')
 
 

@@ -141,7 +141,21 @@ class DipModule:
         for t, x in score[score.notna()].items():
             rows.append({"ticker": t, "metric": "dip_score", "value": float(x),
                          "label": _band(x)})
-            rows.append({"ticker": t, "metric": "has_dip", "value": 1.0,
+        # `has_dip` OVER THE WHOLE POPULATION, not just the scored part.
+        #
+        # It used to be a hardcoded 1.0 emitted inside the loop above, so it
+        # was true for every row that existed and absent everywhere else --
+        # which is precisely what the row's own existence already said. Audited
+        # 2026-08-14: one distinct value across 3,485 names, carrying no
+        # information at all while being documented as "1 if it passed the gate
+        # and was scored".
+        #
+        # Emitted over `cov`'s population (every name reaching this module) so
+        # a 0 is a real, readable answer -- the same treatment `dip_gate` and
+        # `has_fundamentals` already get.
+        for t in cov.index:
+            rows.append({"ticker": t, "metric": "has_dip",
+                         "value": 1.0 if pd.notna(score.get(t)) else 0.0,
                          "label": None})
         return pd.DataFrame(rows)
 

@@ -350,9 +350,31 @@ def main() -> int:
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--once", action="store_true",
                     help="run even if paused")
+    ap.add_argument("--standalone", action="store_true",
+                    help="run even though the orchestrator owns this work")
     a = ap.parse_args()
 
     config.dirs()
+
+    # THE ORCHESTRATOR OWNS THIS WORK NOW.
+    #
+    # `orchestrator._step_bounce` calls `daily_run.run(...)` directly, and the
+    # orchestrator's own docstring says it replaces this schedule. But the
+    # `PatternScan-DailyRun` task kept firing at 03:00 anyway, re-fetching bars
+    # and re-running the screen two hours before the 05:00 orchestrated pass did
+    # it again -- and on 2026-08-12 the two collided on the run lock, costing a
+    # whole day of scores.
+    #
+    # That task was created under an elevated context this process cannot
+    # unregister ("Access is denied"), so the duplication is stopped HERE, where
+    # it cannot be undone by a task being re-created. Only `main()` is guarded:
+    # `run()` is untouched, so the orchestrator's call still works exactly as
+    # before, and `--standalone` remains for deliberate manual use.
+    if not a.standalone and not a.dry_run:
+        log("The orchestrator owns this run (it calls daily_run.run internally). "
+            "Exiting without work -- use `orchestrator.py` for the daily pass, "
+            "or `--standalone` to force this path.")
+        return 0
 
     if a.pause:
         return pause()

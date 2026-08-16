@@ -3,11 +3,489 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
-## State at 2026-08-13 02:30 — READ THIS FIRST
+## State at 2026-08-16 08:00 — ALL TRACKED ITEMS CLOSED
 
-**History rebuild COMPLETE** — finished 22:45 on 2026-08-12, 507 min, 7 stages,
-0 failed, `integrity audit clean`. `remeasure.py` (study → walk-forward) is
-still running; it touches no fundamental figure.
+### Read this first: which number to quote
+
+| check | reads | what it means |
+|---|---|---|
+| `providers --compare` | **89.1%** | our figures vs Finnhub/Yahoo. **The headline.** |
+| `ttm_invariants --rollforward` | **61/61** | every rolled TTM re-derived from its reported legs |
+| `audit_metrics` | **0 high** | 109 stored metrics |
+| `verify_metrics` | **76.3%** | **EXPECTED TO BE LOW — see below** |
+
+> **`verify_metrics` CANNOT follow the roll-forward.** Two attempts to teach it
+> both made the CHECKER wrong (eagerly it corrupted AAPL revenue to 431.5B
+> against a true 466.8B; gated it silently failed to fire). So `cfo_ttm`,
+> `capex_ttm`, `sbc_ttm` show as mismatches there while `ttm_invariants` proves
+> them correct 61/61. **A low number here is not a data regression.** On
+> 2026-08-15 a CORRECT implementation was reverted on exactly this misreading.
+
+### The four items, closed
+
+**1. Four page rows nothing could check** — `net_margin`, `gross_margin`, `roa`,
+`debt_to_equity` were computed for display but absent from
+`fund_metrics.REGISTRY`, so `providers.compare` reported "we do not compute"
+for 456 comparisons. Added (registry now 32 metrics, 22 scale-free).
+`net_margin` **100% / 0.00% gap**, `gross_margin` 0.21%.
+
+`roa` and `debt_to_equity` disagree for a PROVEN reason, not a bug: Yahoo's own
+`totalDebt` divided by OUR equity reproduces their ratio exactly (AAPL
+84.3/107.5 = 0.784 vs their 0.784; MSFT 0.291 vs 0.291). Our equity is right;
+the gap is finance leases, which `debt_lt + debt_st` does not carry. `roa` runs
+a consistent ~0.80x of ours across AAPL/MSFT/KO — an averaged denominator.
+
+**2. Roll-forward unverifiable** — `ttm_invariants.py --rollforward` re-derives
+each rolled value from `FY + YTD_now - YTD_prior` using only reported figures.
+**61 of 61 hold.** No second implementation, so nothing to drift.
+
+**3. CIK succession** — now gated on TOTAL ASSETS within 0.75-1.35x, because a
+reorganisation preserves the balance sheet and a merger does not:
+
+```
+XOM   464.5B / 449.0B = 1.03   LINKED    blank -> revenue 366.8B (1.58% vs Yahoo)
+CLBK   12.2B /  11.0B = 1.10   LINKED
+NVRI    1.7B /   2.7B = 0.64   rejected
+PNFP  129.1B /  56.0B = 2.31   rejected  (Pinnacle/Synovus merger)
+```
+
+Enabled by default; `FD_CIK_SUCCESSION=0` disables.
+
+**4. `_rank` scale** — 0-1 in sentiment, 0-100 in dip. DOCUMENTED, deliberately
+not rescaled: a monotonic rescale preserves IC but would split stored history
+against the ICs already recorded in `metrics_doc`.
+
+### Known LIMITATIONS (not bugs, do not "fix")
+
+- **Banks** (CLBK, PNFP) have no `revenue_ttm` — they report interest income,
+  not `Revenues`. Needs bank-specific tags, not a repair.
+- **288 tradeable tickers file 20-F/40-F** — foreign issuers using IFRS. No
+  us-gaap data exists for them at any CIK.
+- **`fcf` 50% vs providers** — Yahoo's `freeCashflow` exceeded our CFO for PFE,
+  impossible under its own formula. Ours is SEC-verified.
+- **10 of 61 pages carry a staleness banner** — accurate, and the point.
+
+---
+
+## State at 2026-08-16 02:15 — two investigations closed, one shipped as opt-in
+
+### `op_margin` / `roe` / `fcf` disagreements — CLEARED, not bugs
+
+The nightly provider cross-check reported 229 disagreements. ~150 are now
+explained with evidence, and **none of them are our bug**:
+
+| field | n | verdict |
+|---|---|---|
+| `op_margin` | 75 | CELH hand-checked: opinc TTM 160.3M on revenue 3,047.3M, **both legs pass SEC**. The company took an **80.0M operating loss in Q3-2025**; our TTM includes it, Yahoo's 19.1% does not. Directions are mixed across names (CLMT opposite sign) — a definition gap, not an offset. |
+| `fcf` | 40 | Yahoo's `freeCashflow` EXCEEDS our CFO for PFE, impossible under its own formula. MSFT capex 115.9B is verbatim from the FY2026 10-K. |
+| `roe` | 34 | we divide by ENDING equity, vendors use AVERAGE equity. Median gap 9.8%, neither wrong. |
+
+Tolerances widened with the evidence in the code. **Do not "fix" these toward
+the provider** — that would corrupt figures SEC verifies as correct.
+
+### CIK succession — built, measured, SHIPPED DISABLED
+
+`cik_succession.py` finds a ticker's predecessor CIK by exact normalised
+entity-name match. Four links out of 86 candidates:
+
+```
+XOM   2115436 (94 rows)  <- 34088    (743)   reorganisation
+NVRI  2104052 (185)      <- 45876    (868)   reorganisation
+PNFP  2082866 (248)      <- 1115055  (623)   MERGER
+CLBK  2115119 (70)       <- 1723596  (573)   ?
+```
+
+Wired in, it fixed XOM (blank → revenue 332.2B) and NVRI (0.4% vs Yahoo) —
+**and broke PNFP**: assets 129B against SEC's 56B, because Pinnacle Financial
+MERGED with Synovus in 2025. The new CIK is the combined entity; splicing the
+predecessor produces a history that is not any single company. Verification on
+the four fell to **30.3%**.
+
+**A name match cannot distinguish a reorganisation from a merger.** So it is
+`FD_CIK_SUCCESSION=1` opt-in, off by default. The map and tool are kept so the
+next attempt starts from four candidates and a per-link judgement, not scratch.
+
+> Also fixed here: `_succession_aliases` had a bare `except Exception` that
+> swallowed a `NameError` from a missing `import json`. The alias silently never
+> applied while every line appeared to run. **A blanket catch turns a code bug
+> into a silent data gap.** Narrowed to `(OSError, ValueError, TypeError)`.
+
+> And: a patch script printed "json import added" while its anchor matched
+> nothing, so it wrote the file unchanged and reported success. **Verify the
+> edit landed, never trust the patch's own message.**
+
+### Scope note that ends the "374 broken tickers" panic
+
+374 tradeable tickers have a CIK with <8 periods. **288 file 20-F/40-F/6-K —
+foreign issuers using IFRS tags, which carry no us-gaap data at all.** They are
+not fixable by any CIK work and are not broken; they are out of scope. Only 86
+were domestic candidates.
+
+---
+
+## State at 2026-08-15 03:35 — READ THIS FIRST
+
+### The one number that matters, and the population it belongs to
+
+| population | verified vs SEC | what it is |
+|---|---|---|
+| 15 mega-caps | 97.6% | the old default check list — **too narrow, it is why COLL slipped through** |
+| **tradeable universe (3,480)** | **96.0%** | 602 fields, 24 mismatches — **the names the screener serves** |
+| SEC ticker map (~8,000 CIKs) | 65.1% | includes thousands never maintained — **measures the wrong thing** |
+
+**Always quote the TRADEABLE number.** Sampling `FD.ticker_map()` draws names
+outside `bars.tradeable_universe()`, which are never refetched and sit 226–591
+days stale *by design*. `verify_metrics.py --n N --tradeable` samples the right
+population; without `--tradeable` it samples the map and the result is not a
+statement about the product.
+
+### The failure mode that produced every bug this week
+
+**A missing input silently becoming a plausible number.** Not arithmetic
+errors — compositions where one leg was absent and the code substituted zero:
+
+| bug | what it looked like |
+|---|---|
+| `stock_profile._add(opinc, dna)` with `fill_value=0` | COLL EBITDA **$4M** vs a real **$68M** — operating income mislabelled |
+| `_ttm` taking `tail(4)` with no span check | HD amortisation summed a **644-day** window: 538M vs a true 639M |
+| `cash_conversion_cycle` all-legs `fillna(0)` (fixed 08-10) | zero days, a flattering value, for filers tagging nothing |
+
+The rule already existed in this codebase — *"not reported is not zero"*,
+`fund_metrics._sum_reported` — and each new helper broke it again. **Before
+adding any composed metric, ask what it renders when one leg is missing.**
+`_add_strict` and `_fcf` in `stock_profile` are the patterns to copy.
+
+### Verification: three layers, three different standards of proof
+
+1. **`verify_metrics.py`** — recomputes TTM from raw SEC JSON, deliberately NOT
+   importing `_ttm`. 13 concepts + a derived-EBITDA check. **A mismatch is a
+   bug.** Use `--tradeable`.
+2. **`providers.py --compare`** — 15 fields vs Finnhub/Yahoo, nightly inside the
+   `provider` step. **A gap is a QUESTION, not a verdict** — our FCF disagreed
+   with Yahoo on 43% of names and SEC proved *us* right.
+3. **`audit_metrics.py`** — all 109 stored metrics, invariants only. Proprietary
+   scores have no external truth; what is checkable is that they do not exhibit
+   the fabrication signature.
+
+> **THE CHECKER IS WRONG AS OFTEN AS THE DATA.** Tally for this week: checker
+> wrong on KO, CSCO, the COLL EBITDA window, and 4 of 5 of `audit_metrics`'
+> first HIGH issues (bad bounds — Beneish M is legitimately −15..15). Checker
+> RIGHT on HD's amortisation. **Never report a mismatch as a data bug until you
+> have shown which side is wrong.**
+
+### Fixed 2026-08-14/15
+
+- **`AmortizationOfIntangibleAssets` was never ingested.** The store filters to
+  `TAGS` at write time, so adding a tag requires a **refetch**. `dna` (totals,
+  chosen) is now split from `deprec`+`amort` (components, **summed** — alias
+  preference picks one, which gave COLL 1.8M instead of 64.8M).
+- **`_ttm` span guard** (`MAX_4Q_SPAN_DAYS = 310`) — rejects four-quarter
+  windows with holes; dropped 11 malformed windows on first run.
+- **Staleness banner** — `serve.py` builds a page for ANY ticker typed, but only
+  tradeable names are refreshed. MTEX rendered as **profitable with positive
+  equity** when SEC had it **loss-making with negative equity**. Pages whose
+  newest filing exceeds `STALE_FILING_DAYS` ({"Q": 200, "A": 500} — annual
+  periods are legitimately old, a single threshold warned on every ticker) now
+  carry a banner. Verified: MTEX warns at 591 days, COLL/AAPL do not.
+- **Backfill**: scores TODAY first, then a **time** budget (`BACKFILL_BUDGET_S`
+  = 25 min). A count-based bound blew a 6-hour task limit because `hype` costs
+  ~70 min/session against dip and combo at ~5 seconds.
+- **`has_dip`** emitted 0/1 over the whole population (758/1), not hardcoded 1.
+
+### Still open — do not claim these are fine
+
+- 24 mismatches in the tradeable sweep, not individually run down.
+- `roa`, `net_margin`, `gross_margin`, `debt_to_equity` are page-derived but
+  absent from the scored frame, so the nightly cross-check cannot reach them.
+- `_rank` is 0–1 in sentiment, 0–100 in dip. Documented, not unified —
+  rescaling would invalidate the stored history against measured ICs.
+- `rebuild_all_pages.py` exists because the `profiles` step only builds TODAY'S
+  FLAGGED names and reports success ("no flags file for this session") while
+  doing nothing after a `stock_profile` change.
+
+---
+
+## State at 2026-08-14 15:00 — BACKFILL BLEW THE DAILY RUN, now fixed
+
+**What happened.** The 2026-08-13 night run finished cleanly at 00:48: Finnhub
+swept 3,477/3,480, `fundamental` scored 3,179 names on provider data, `dip` and
+`combo` backfilled their gaps, 56 profile pages rebuilt. Then the 05:00 run on
+08-14 was **killed by Task Scheduler at its 6-hour limit** (`LastTaskResult
+267014`), and that day's session was never scored.
+
+**Why — a 23x estimate error.** Backfill was budgeted at ~3 min/session from
+the daily cost. Measured:
+
+| module | per backfilled session |
+|---|---|
+| `dip` | ~5 seconds |
+| `combo` | ~5 seconds |
+| **`hype`** | **~70 minutes** |
+
+Scoring a PAST session cannot reuse the warm caches the daily path builds.
+Four hype backfills consumed 5.5 hours and the run died before reaching today.
+
+**Two design errors, both fixed:**
+
+1. **Backfill ran BEFORE today's session** — least important work ahead of most
+   important. `_with_backfill` now scores `asof` FIRST, always. Today's data can
+   never be starved by history again.
+2. **The bound was a session count, not time.** A count is meaningless when the
+   per-item cost varies 800x between modules and is unknown up front.
+   `BACKFILL_BUDGET_S = 25 * 60` now caps it: dip and combo clear their backlog
+   instantly, hype makes ~one session per night and catches up within a week,
+   and the daily pass is never at risk. Remaining gaps are logged, not hidden.
+
+### Verification run 2026-08-14 (stored session 2026-08-12)
+
+| check | result |
+|---|---|
+| `verify_metrics` (independent SEC arithmetic) | **92 fields, 0 mismatches, 100%** — flagged itself INCOMPLETE on one request timeout rather than reporting clean |
+| stored vs Yahoo, 10 large caps | P/E median gap **1.07%**, mktcap **0.62%** |
+| provider agreement, 150 tradeable names | **81.0%** — price 100%, shares_out 89%, mktcap 83% (median gap 0.13%), P/E 67% (median gap 2.37%) |
+| module selftests | `fundamentals`, `fund_metrics`, `providers` all OK |
+
+The P/E and mktcap pass rates are dragged partly by comparing a **two-day-old
+stored session against live Yahoo prices** — the median gaps (0.13%, 2.37%) are
+the honest measure of the pipeline.
+
+---
+
+## State at 2026-08-13 21:40 — ONE PIPELINE, PROVIDER-FIRST
+
+**The daily job is `orchestrator.py` and nothing else.** One scheduled task,
+`Screener-Orchestrator`, runs it at 05:00. Everything below this heading is
+history; read it for the reasoning, not for the current state.
+
+### What changed tonight
+
+**Ten scheduled tasks became one.** Seven were one-shot rescue chains that had
+already fired (`Screener-Chain`, `-FixAll`, `-FixData`, `-Overnight`,
+`-SentiRebuild`, `-Study`, `-Refetch`) — all unregistered.
+`PatternScan-DailyRun` was a genuine DUPLICATE: `orchestrator._step_bounce`
+calls `daily_run.run(...)` internally, so the 03:00 task re-fetched bars and
+re-ran the screen two hours before the 05:00 pass did it again — and on
+2026-08-12 the two collided on the run lock and cost a whole day of scores.
+That task was created under an elevated context this account cannot unregister
+("Access is denied"), so the duplication is stopped in code: `daily_run.main()`
+now exits immediately unless given `--standalone`. `run()` is untouched, so the
+orchestrator's internal call is unaffected.
+
+**Finnhub is the primary provider; yfinance is on-demand only.** Measured:
+Finnhub 0.89 s/name, 133 metrics, documented 60/min → ~61 min for the universe,
+0 failures. yfinance handled 24 and 150 names fine and then **hung** on the
+3,480-name sweep — 53 minutes for ~20 CPU-seconds, two sockets open, no timeout
+to break it. yfinance is kept because it alone carries float, short interest,
+the next earnings date and analyst targets.
+
+> **UNITS DIFFER BETWEEN PROVIDERS AND THE DIFFERENCE IS SILENT.** Finnhub
+> returns `marketCapitalization` in **millions** (4,476,472.5) and
+> `roeTTM`/margins as **percent** (137.18, 48.65); Yahoo returns absolute
+> (4,439,768,301,568) and fractions (1.488, 0.48653). An unconverted merge is a
+> **1,000,000× market-cap error**.
+
+#### Four layers stop a naive merge, and each was proven by breaking it
+
+The first version had a conversion table for Finnhub only, on the assumption
+that Yahoo was already normalised. **Two Yahoo fields were 100× out** and a
+three-field, one-ticker selftest passed anyway:
+
+```
+debt_to_equity   finnhub 0.7844   yahoo 78.44    (yahoo is percent)
+dividend_yield   finnhub 0.00357  yahoo 0.36     (yahoo is percent)
+```
+
+| layer | what it catches |
+|---|---|
+| `FINNHUB_FIELDS` / `YAHOO_SCALE` multipliers | conversion declared per field, in one place |
+| `SANE` bounds, applied on **ingest and on read** | percent-as-fraction (a 27.6 net margin is impossible); read-time too, because the cache outlives any one version of this file |
+| `_selftest_cross_scale` | compares **every** field both backends emit across 5 tickers; fails outside [0.25, 4]. Also fails if a field is silently **dropped** — a wrong multiplier makes a value fail its bound and vanish, which shrinks the comparison instead of failing it |
+| `_selftest_identity` | `mktcap == price × shares`. The only check that catches millions-vs-absolute, since 4,476,472 is a plausible cap for a microcap |
+| `_selftest_declared` | a new field with no declared bound fails immediately |
+
+Verified by deliberately breaking each: dropped `mktcap` multiplier → caught;
+`net_margin` left as percent → caught (via the drop assertion); Yahoo
+`dividend_yield` scale removed → caught; undeclared field → caught.
+
+**`providers.selftest()` runs at the top of the `provider` orchestrator step**,
+before anything is written. A step that fails writes nothing; a step that writes
+and then notices has already put 3,480 corrupt rows in the store.
+
+> **`np.int64` is not a subclass of `int`.** `isinstance(v, (int, float))`
+> returns False for every integer field after a parquet round-trip — market cap
+> and share count are exactly those. That made `_selftest_identity` skip itself
+> in silence. Use `providers._num()`, never `isinstance`.
+
+**Missed days are now backfilled.** Score steps scored exactly the session they
+were handed, so a closed laptop left permanent holes. `_with_backfill` wraps
+`hype`, `dip` and `combo` (daily modules only — `fundamental` is weekly and its
+empty days are by design, so "backfilling" it would build six sessions at the
+~94 min/session measured on the enlarged fact store). Bounded to
+`BACKFILL_MAX_SESSIONS = 10`. It immediately found real holes:
+`2026-07-30, 07-31, 08-03, 08-04, 08-05` missing from hype/dip/combo, which the
+next run that actually executes those steps will fill.
+
+**`archive/`** holds the eight retired rescue scripts with a README recording
+what each measured and why it is retired — including the trap that
+`rebuild_history.py` resumes from a state file and will rebuild *one* session
+unless given `--fresh`.
+
+**`docs/DATA_DICTIONARY.md`** is generated by `data_dict.py` from the live
+registries and regenerated by the `docs` step, so it cannot go stale. Its third
+section is the point: what each source offers that we do **not** take.
+
+### Daily cost after the change
+
+| | |
+|---|---|
+| daily steps | ~17 min (`profiles` is 12 of it) |
+| `provider` sweep | ~61 min |
+| **daily total** | **~78 min** |
+| weekly day (+`leaderboard` 22.7 m, `events` 8.3 m, `sec_gap` 3.5 m) | ~115 min |
+| per missed session backfilled | ~3 min |
+
+---
+
+## State at 2026-08-13 04:10 — earlier the same day
+
+> ### ⚠ THE 2026-08-12 REBUILD IS ALREADY SUPERSEDED
+>
+> The 507-min rebuild that finished 22:45 on 08-12 is **correct on everything
+> it was checked against** (SEC reconciliation 15/15 at 0.000%, still true) but
+> it was built before two TTM bugs found on 08-13 were known. The stored
+> fundamental sessions therefore carry wrong TTM figures.
+>
+> **Measured, not estimated** — 200-ticker random sample of stored session
+> 2026-08-07, P/E comparable on 137 of them, corrected code vs stored:
+>
+> | | |
+> |---|---|
+> | P/E unchanged (<1%) | **7.3%** |
+> | P/E changed >5% | **70.8%** (±8pp, 95% CI, n=137) |
+> | P/E changed >25% | **30.7%** |
+> | median absolute change | **12.3%** |
+> | market cap unchanged (<1%) | 85.0% — the share bug barely touched mktcap |
+>
+> Stored values included clip-ceiling artefacts: SCHW and RUN both sat at the
+> P/E ceiling of 1000 (true values 19.60 and 6.89); MDLN read 0.02 (true 29.56).
+>
+> **The SEC reconciliation did not catch this** because it compared *reported
+> quarterly figures* — which were right — not the *TTM aggregation built on
+> top of them*, which is where both bugs lived. Any future audit must check
+> the derived TTM column, not only the raw quarters.
+>
+> A history rebuild (~8.5 h) + remeasure (~7.5 h) is required before the
+> fundamental figures on any page can be trusted. **Not yet started.**
+
+### The two TTM bugs (both fixed in code 2026-08-13, neither yet in the data)
+
+**1. `_ttm()` preferred a stale annual figure over newer quarters.** It
+short-circuited on any visible `qtrs==4` row. A 10-K is filed once a year, so
+for most of the year the four most recent quarters end *later* than the last
+annual period. Measured 2026-08-11: **2,799 of 2,964 filers (94%)** were in
+that position, median **181 days** stale, worst 639. AAPL's `net_income_ttm`
+read $112.0B (fiscal 2025) instead of $128.9B, putting the displayed P/E at
+**40.87** against a true **34.70**. Fixed: whichever window *ends later* wins,
+never both, never added — plus `_q4_rows()` to derive the fiscal Q4 that no
+10-Q reports, so "four most recent quarters" is really twelve months.
+
+**2. Weighted-average share counts were treated as flows.** `shares_basic` and
+`shares_diluted` carry a duration, so `qtrs > 0` put them on the flow path —
+but they do not accumulate. The Q4 derivation `FY − Q1 − Q2 − Q3` gave AAPL
+**−30,150,480,000 diluted shares**, a negative share count rendered on the
+profile page; and the TTM summed four quarterly averages (~4× too high, or
+~1× by accident when the negative Q4 cancelled it). New `AVERAGE_CONCEPTS`
+frozenset is excluded from both Q4 derivations and reduced by *latest* in
+`_ttm`. Cross-check `net_income_ttm / shares_diluted_ttm` vs reported
+`eps_diluted_ttm` went from **5% apart to 0.6%** on AAPL. Pinned by
+`_selftest_average_concepts`.
+
+**3. `pe` now uses the filer's own diluted EPS.** `mktcap / net_income` divides
+a *current* share count by *trailing-average* earnings; every quote site shows
+`price / diluted EPS`. AAPL: 34.25 the old way, **34.70** the new way, against
+the ~34.6 quoted publicly. Falls back to `mktcap / net_income` where EPS is
+untagged, so coverage does not drop.
+
+### THE REAL ROOT CAUSE OF "GOOGLE SAYS SOMETHING ELSE" — freshness, not arithmetic
+
+Once the two TTM bugs were fixed, the large caps became exactly right. A wider
+check then showed the actual problem, and it is not computation:
+
+**`providers.py` (new)** cross-checks our figures against Yahoo — the source
+Google shows — so the user's own comparison is now automated instead of
+anecdotal. 150 random tickers, 113 with Yahoo data, 345 field comparisons:
+
+| field | agree | median gap |
+|---|---|---|
+| price | **100%** | 0.00% |
+| mktcap | 70.2% | 0.63% |
+| shares_out | 66.1% | 0.63% |
+| pe | 67.7% | 0.23% |
+| revenue_ttm | 57.4% | 1.89% |
+| eps_ttm | **45.3%** | **10.51%** |
+
+**Median staleness where we DISAGREE: 225 days. Where we AGREE: 44 days.** The
+median gap is tiny (0.23% on P/E) — most comparisons are near-identical and a
+stale minority drags the rate down. VSBC's newest stored period was **925 days**
+old; its stored value was *correct for Jan-2024* and meaningless in Aug-2026.
+
+**Why the data is stale, definitively:** SEC's bulk Financial Statement Data
+Sets are the backbone, and **2026q2 is not published yet — probed 2026-08-13,
+HTTP 404**. 2026q1 is the newest that exists. The bulk route *structurally
+cannot* be current; it is not a missed fetch.
+
+**And the mechanism meant to cover that gap is broken.** `stale_names()` /
+`refresh_targets()` / `backfill_companyfacts()` were written 2026-08-10 to
+top up from the companyfacts API per company. The runner that called them,
+`run_refetch.py`, **no longer exists**, while the `Screener-Refetch` scheduled
+task still points at it and therefore fails silently (last real run 2026-08-08,
+no future trigger). That is why 94% of the universe froze at the last bulk
+quarter and nobody was told.
+
+**The fix is bounded**: `FD.backfill_companyfacts(FD.refresh_targets())`, which
+is ~3,000 API calls. Not yet run.
+
+### Two verification tools now exist, and both are honest about their limits
+
+**`verify_metrics.py`** — checks the numbers the app DISPLAYS (TTM revenue, net
+income, diluted EPS, share counts, equity, assets) against TTM arithmetic
+written from scratch against raw SEC JSON. It does not import `_ttm`, so it can
+disagree with the code under test. **91/91 fields, 100%, on 15 large caps.**
+It found four bugs *in itself* before it was trustworthy — stale-tag fallback,
+an API returning empty payloads with HTTP 200, a one-day off-by-one in the Q4
+derivation, and counting unreachable data as a pass. It now fails loudly on
+fetch errors rather than reporting a clean run.
+
+**`providers.py`** — Yahoo second opinion. NOT a source of truth: unofficial,
+no point-in-time history, wrong sometimes too. Where two independent pipelines
+agree, confidence is real; where they disagree, that is information to surface,
+not to hide.
+
+### Also fixed 2026-08-13 (independent of the data rebuild)
+
+**Clicking a ticker in Explore hung the browser for four minutes.** Explore
+links to `stock/XXXX.html` as a plain `<a href>`; the loader with the spinner
+existed only on the Profiles index, so arriving from Explore gave no feedback
+at all while `serve.py` blocked the GET on a cold on-demand build (measured at
+252 s). The browser usually gave up first, and the abandoned socket then threw
+`ConnectionAbortedError` out of `do_GET`, burying the real cause in a stack
+trace that looked like a server crash. Now the build runs in a thread and the
+request returns a self-refreshing waiting page **in 0.002 s**; `_write()`
+swallows client disconnects. Verified end to end: JNJ returned the waiting
+page instantly, built in 160 s in the background, then served 267 KB in
+0.004 s on refresh.
+
+**The daily pass skipped a whole day on a 94-second lock collision.** On
+2026-08-12 the 05:00 `Screener-Orchestrator` found the lock held by a rebuild
+chain that had started at 04:58:33, logged `Exiting without work`, and did not
+return for 24 hours — which is why profile pages still showed 08-11 data.
+`acquire_lock()` now takes `wait_min`, and the scheduled task passes
+`--wait-for-lock 300` (task `ExecutionTimeLimit` raised PT3H → PT6H to match;
+`ORCH_LOCK_STALE_HOURS` is 6 and long jobs refresh the lock, so a live holder
+is never broken). Default stays 0, so interactive runs and the chained jobs
+keep exiting immediately. Four cases tested: no-wait/held → False in 0.1 s;
+budget expiry → False after the full wait; **holder releases mid-wait → lock
+acquired**; dead pid → broken with no wait.
 
 ### The data reconciles against SEC, 15/15 at 0.000%
 
@@ -704,56 +1182,57 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-12 22:42 — do not edit by hand._
+_Generated 2026-08-16 08:24 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 9s | 8s | 10s | 2.0 min | 6 |
-| `bars` | daily | 55s | 54s | 2.4 min | 10.0 min | 6 |
-| `macro` | daily | 54s | 56s | 6.1 min | 15.0 min | 6 |
-| `news` | daily | 5s | 5s | 53s | 10.0 min | 6 |
-| `senti_cache` | daily | 2s | 9s | 3.0 min | 10.0 min | 6 |
-| `sentiment` | daily | 8s | 9s | 22s | 15.0 min | 7 |
-| `shortvol` | daily | 3s | 6s | 8s | 10.0 min | 4 |
-| `hype` | daily | 31s | 31s | 2.1 min | 20.0 min | 5 |
-| `bounce` | daily | 47s | 47s | 2.0 min | 15.0 min | 6 |
-| `fundamental` | weekly | 31s | 39s | 44s | 15.0 min | 5 |
-| `sec_facts` | quarterly | 4s | 4s | 4s | 60.0 min | 3 |
-| `sec_gap` | weekly | 3.5 min | 3.5 min | 3.5 min | 20.0 min | 1 |
-| `events` | weekly | 13.1 min | 8.3 min | 13.1 min | 30.0 min | 3 |
+| `universe` | daily | 10s | 9s | 11s | 2.0 min | 9 |
+| `bars` | daily | 40s | 53s | 72s | 10.0 min | 9 |
+| `macro` | daily | 2.2 min | 60s | 3.2 min | 15.0 min | 9 |
+| `news` | daily | 7s | 5s | 10s | 10.0 min | 9 |
+| `senti_cache` | daily | 2s | 3s | 12s | 10.0 min | 9 |
+| `sentiment` | daily | 9s | 9s | 22s | 15.0 min | 10 |
+| `shortvol` | daily | 2s | 3s | 8s | 10.0 min | 7 |
+| `hype` | daily | 109.0 min | 2.1 min | 116.5 min ⚠ | 20.0 min | 9 |
+| `bounce` | daily | 77s | 43s | 77s | 15.0 min | 10 |
+| `provider` | daily | 6.0 min | 6.0 min | 51.3 min | 120.0 min | 3 |
+| `fundamental` | daily | 108.9 min | 44.3 min | 158.7 min ⚠ | 30.0 min | 10 |
+| `sec_facts` | quarterly | 7s | 4s | 7s | 60.0 min | 4 |
+| `sec_gap` | weekly | 187.1 min | 95.3 min | 187.1 min ⚠ | 20.0 min | 2 |
+| `events` | weekly | 11.3 min | 9.8 min | 13.1 min | 30.0 min | 4 |
 | `leaderboard` | weekly | 53.5 min | 22.7 min | 53.5 min | 90.0 min | 4 |
-| `dip` | daily | 5s | 20s | 50s | 15.0 min | 5 |
-| `combo` | daily | 4s | 5s | 6s | 15.0 min | 2 |
-| `explore` | daily | 4s | 4s | 4s | 5.0 min | 7 |
-| `snapshots` | daily | 3s | 1s | 3s | 5.0 min | 6 |
-| `profiles` | daily | 11.8 min | 11.8 min | 12.5 min | 15.0 min | 7 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 6 |
-| `dashboard` | daily | 0s | 1s | 1s | 2.0 min | 10 |
-| `docs` | daily | 0s | 0s | 1s | 5.0 min | 5 |
+| `dip` | daily | 16s | 16s | 16s | 15.0 min | 11 |
+| `combo` | daily | 15s | 11s | 38s | 15.0 min | 7 |
+| `explore` | daily | 8s | 5s | 8s | 5.0 min | 13 |
+| `snapshots` | daily | 0s | 0s | 6s | 5.0 min | 14 |
+| `profiles` | daily | 25.2 min | 14.5 min | 25.2 min ⚠ | 15.0 min | 13 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 8 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 16 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 13 |
 
-**Daily total ≈ 16.0 min.** Weekly adds 35.1 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 70.5 min.** Weekly adds 127.7 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-12 22:42 — do not edit by hand._
+_Generated 2026-08-16 08:24 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 244.0 | 2016-07 → 2026-08 |
-| bars 1h | 4 | 0.4 | 2026-05 → 2026-08 |
+| bars 1d | 122 | 244.4 | 2016-07 → 2026-08 |
+| bars 1h | 4 | 0.5 | 2026-05 → 2026-08 |
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
-| news | 121 | 167.9 | 2016-08 → 2026-08 |
+| news | 121 | 168.2 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 243.5 | 2016-08 → 2026-08 |
+| scores | 121 | 249.3 | 2016-08 → 2026-08 |
 | fundamentals | 68 | 332.9 | 2009q2 → 2026q1 |
-| short volume | 73 | 54.3 | 2020-08 → 2026-08 |
-| flags | 8 | 0.7 | 2026-07-31 → 2026-08-11 |
-| rejects | 8 | 1.6 | 2026-07-31 → 2026-08-11 |
-| loose (macro, universe, jobs, study) | 27 | 2.8 | — |
+| short volume | 73 | 54.5 | 2020-08 → 2026-08 |
+| flags | 11 | 1.0 | 2026-07-31 → 2026-08-14 |
+| rejects | 11 | 2.2 | 2026-07-31 → 2026-08-14 |
+| loose (macro, universe, jobs, study) | 29 | 3.5 | — |
 
-**`data/` total ≈ 1,063 MB.** `reports/` is a further 19 MB across 75 pages.
+**`data/` total ≈ 1,071 MB.** `reports/` is a further 23 MB across 95 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -761,46 +1240,46 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-12 22:42 — do not edit by hand._
+_Generated 2026-08-16 08:24 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 322 | 2016-09-27 → 2026-08-11 |
-| `fundamental` | 48 | 182 | 2016-08-25 → 2026-08-07 |
-| `hype` | 20 | 300 | 2016-10-25 → 2026-08-11 |
-| `dip` | 10 | 224 | 2016-09-27 → 2026-08-11 |
-| `combo` | 15 | 178 | 2016-11-04 → 2026-08-11 |
+| `sentiment` | 26 | 325 | 2016-09-27 → 2026-08-14 |
+| `fundamental` | 52 | 185 | 2016-08-25 → 2026-08-14 |
+| `hype` | 20 | 307 | 2016-10-25 → 2026-08-14 |
+| `dip` | 10 | 232 | 2016-09-27 → 2026-08-14 |
+| `combo` | 15 | 187 | 2016-11-04 → 2026-08-14 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-12 22:42 — do not edit by hand._
+_Generated 2026-08-16 08:24 — do not edit by hand._
 
-1,056 cells measured across 66 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
+1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
-**43 metric(s) reach |t| >= 2 at their best horizon.**
+**58 metric(s) reach |t| >= 2 at their best horizon.**
 | metric | module | best h | IC | t | hit |
 |---|---|---:|---:|---:|---:|
-| `fund_score` | fundamental | 20 | +0.0248 | +5.49 | 64% |
-| `z_score` | fundamental | 60 | -0.0565 | -4.62 | 22% |
-| `net_issuance` | fundamental | 20 | -0.0308 | -4.18 | 42% |
-| `interest_cover` | fundamental | 20 | +0.0353 | +4.06 | 61% |
-| `roe` | fundamental | 20 | +0.0273 | +3.91 | 61% |
-| `ev_sales` | fundamental | 20 | -0.0341 | -3.90 | 39% |
-| `f_score` | fundamental | 1 | +0.0257 | +3.81 | 61% |
-| `asset_turnover` | fundamental | 20 | +0.0225 | +3.79 | 59% |
-| `du_asset_turnover` | fundamental | 20 | +0.0225 | +3.79 | 59% |
-| `quality_score` | fundamental | 20 | +0.0252 | +3.55 | 63% |
-| `roic` | fundamental | 20 | +0.0198 | +3.46 | 63% |
-| `days_since_filing` | fundamental | 60 | +0.0262 | +3.31 | 66% |
-| `sent_decay_30d` | sentiment | 1 | +0.0101 | +3.25 | 58% |
-| `du_leverage` | fundamental | 20 | +0.0258 | +3.24 | 59% |
-| `sent_decay_90d` | sentiment | 1 | +0.0104 | +3.23 | 59% |
-| `sent_mean_30d` | sentiment | 1 | +0.0112 | +3.22 | 58% |
-| `sent_rank` | sentiment | 1 | +0.0112 | +3.22 | 58% |
-| `fcf_yield` | fundamental | 20 | +0.0230 | +3.21 | 55% |
-| `safety_score` | fundamental | 1 | +0.0128 | +3.17 | 60% |
-| `roic_wacc` | fundamental | 20 | +0.0210 | +3.17 | 60% |
+| `fund_score` | fundamental | 20 | +0.0254 | +5.21 | 65% |
+| `z_score` | fundamental | 60 | -0.0567 | -4.63 | 22% |
+| `dip_gate` | dip | 20 | +0.0151 | +4.33 | 66% |
+| `net_issuance` | fundamental | 20 | -0.0307 | -4.17 | 41% |
+| `avg_trade_size` | hype | 60 | +0.0463 | +4.11 | 74% |
+| `roic` | fundamental | 20 | +0.0302 | +4.08 | 64% |
+| `interest_cover` | fundamental | 20 | +0.0345 | +4.05 | 61% |
+| `roe` | fundamental | 20 | +0.0324 | +3.95 | 62% |
+| `ev_sales` | fundamental | 20 | -0.0345 | -3.91 | 39% |
+| `f_score` | fundamental | 1 | +0.0258 | +3.91 | 63% |
+| `roic_wacc` | fundamental | 20 | +0.0319 | +3.71 | 63% |
+| `du_asset_turnover` | fundamental | 20 | +0.0218 | +3.69 | 58% |
+| `asset_turnover` | fundamental | 20 | +0.0218 | +3.69 | 58% |
+| `quality_score` | fundamental | 20 | +0.0262 | +3.58 | 61% |
+| `combo_h60_cov` | combo | 20 | +0.0203 | +3.47 | 58% |
+| `safety_score` | fundamental | 1 | +0.0147 | +3.46 | 60% |
+| `combo_h20_cov` | combo | 20 | +0.0215 | +3.43 | 58% |
+| `fund_rank` | dip | 20 | +0.0187 | +3.37 | 62% |
+| `du_leverage` | fundamental | 20 | +0.0260 | +3.32 | 58% |
+| `combo_h1_cov` | combo | 60 | +0.0311 | +3.29 | 68% |
 <!-- /GENERATED:study -->
 

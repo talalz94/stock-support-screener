@@ -82,6 +82,41 @@ class FundamentalModule:
             if _c in px.columns and _c not in m.columns:
                 m = m.merge(px[["ticker", _c]], on="ticker", how="left")
 
+        # PROVIDER FIRST, FOR THE CURRENT SESSION ONLY.
+        #
+        # Yahoo publishes trailingPE, priceToBook, enterpriseToEbitda, margins,
+        # returnOnEquity and the rest directly, computed from the same filings
+        # and shown by Google. Deriving them ourselves from raw XBRL added no
+        # accuracy and three separate bugs: `_ttm` preferring a stale annual
+        # (94% of filers, median 181 days), weighted-average share counts summed
+        # as flows (AAPL: -30,150,480,000 diluted shares), and a fact store
+        # lagging SEC's own API by up to 925 days. So where the provider has the
+        # number, the provider is the source; our calculation is the fallback
+        # for everything it does not publish.
+        #
+        # ONLY ON THE LATEST SESSION. Yahoo knows today and nothing else -- it
+        # cannot say what a P/E was in 2019. Overlaying it onto a historical
+        # session would write 2026 knowledge into a 2019 row, which is exactly
+        # the look-ahead the point-in-time design exists to prevent and would
+        # silently invalidate every backtest. The guard is the asof comparison
+        # below, not a comment.
+        if _is_current(asof) and getattr(config, "PROVIDER_OVERLAY", True):
+            try:
+                import providers
+                m, tally = providers.overlay(m, verbose=False)
+                if tally:
+                    top = ", ".join(f"{k}={v}" for k, v in
+                                    sorted(tally.items(), key=lambda kv: -kv[1])[:6])
+                    print(f"  [fundamental] provider overlay on {asof}: {top}",
+                          flush=True)
+            except Exception as exc:                             # noqa: BLE001
+                # A provider outage must not fail the run -- fall through to
+                # our own figures, and SAY so rather than looking identical to
+                # a successful overlay.
+                print(f"  [fundamental] provider overlay unavailable "
+                      f"({type(exc).__name__}); using our own figures",
+                      flush=True)
+
         sector = _sector_for(m["ticker"])
         ranks = FM.rank_pillars(m, sector=sector.reset_index(drop=True))
         wide = m.merge(ranks, on="ticker", how="left")
@@ -167,6 +202,22 @@ class FundamentalModule:
 
 
 # ---------------------------------------------------------------- helpers
+def _is_current(asof: str) -> bool:
+    """True only for the most recent session the market has closed.
+
+    The provider overlay hangs off this. Anything older is HISTORY and must
+    stay exactly as the filings knew it at the time -- see the overlay comment
+    in `compute`. Written as a function so the rule is testable, and erring
+    towards False so a calendar hiccup declines the overlay rather than
+    contaminating a historical row.
+    """
+    try:
+        import calendar_us
+        return str(asof)[:10] >= str(calendar_us.last_closed_session())[:10]
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
 def _year_before(asof: str) -> str:
     return (pd.Timestamp(asof) - pd.DateOffset(years=1)).strftime("%Y-%m-%d")
 

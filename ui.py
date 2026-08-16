@@ -99,6 +99,10 @@ gap:12px}
 .chip{background:var(--panel);border:1px solid var(--line);border-radius:20px;
 padding:3px 11px;font-size:12px;white-space:nowrap}
 .chip b{font-weight:600}
+/* The price chip is the one people scan for, so it is bigger and
+   outlined rather than sitting flat among the descriptive chips. */
+.chip.px{font-size:15px;padding:5px 13px;border-color:var(--accent)}
+.chip.px b{font-size:17px}
 .chip.cta{background:var(--accent);color:#fff;border-color:var(--accent);
 font-weight:600}
 .chip.cta:hover{text-decoration:none;opacity:.9}
@@ -146,6 +150,12 @@ overflow:visible;border-radius:0}
       recent quarter was underneath it. `scrollbar-gutter:stable` reserves the
       track instead of overlaying it. */
 .scroll.sticky-x{scrollbar-gutter:stable}
+/* AND breathing room after the last column. `scrollbar-gutter:stable` reserves
+   the scrollbar's width correctly, but with no padding the final column ends
+   ONE PIXEL before it -- measured 1237 against a content edge of 1238. That is
+   not technically covered, and it reads as covered to anyone looking at it,
+   which amounts to the same complaint. */
+.scroll.sticky-x th:last-child,.scroll.sticky-x td:last-child{padding-right:20px}
 .scroll.sticky-x::-webkit-scrollbar:horizontal{height:0}
 .scroll.sticky-x::-webkit-scrollbar{width:11px}
 .scroll.sticky-x::-webkit-scrollbar-thumb{background:var(--line);
