@@ -314,6 +314,185 @@ def _step_shortvol(asof: str) -> tuple[int, str]:
     return n, f"{n:,} row(s) over {res.get('days', 0)} session(s)"
 
 
+def _step_provider(asof: str) -> tuple[int, str]:
+    """Refresh the provider metric cache for the whole tradeable universe.
+
+    REPLACES the standalone `Screener-Refetch` task, which pointed at a script
+    (`run_refetch.py`) that had been deleted -- so it ran, found nothing, and
+    reported success for five days while the fact store silently went stale.
+    A job that lives in the registry cannot rot that way: it is listed by
+    `--status`, watermarked, and shows up in the job table.
+
+    Finnhub is the bulk source (see providers.FINNHUB_FIELDS). ~58 min for
+    3,480 names at its documented 60/min. It runs BEFORE `fundamental` because
+    that step's provider overlay reads this cache.
+    """
+    import bars
+    import providers
+    uni = bars.tradeable_universe(asof)
+    if not uni:
+        raise RuntimeError("no tradeable universe; run bars first")
+
+    # UNITS ARE CHECKED BEFORE ANYTHING IS WRITTEN, not after.
+    #
+    # Finnhub sends market cap in millions and margins in percent; Yahoo sends
+    # absolute and fractions. If a provider changes a unit, or a field is added
+    # without a multiplier, the sweep would write 3,480 corrupted rows into the
+    # store and the damage would only surface later as a company with a 4.5
+    # million dollar market cap. Two fields were already 100x apart when this
+    # was written (debt_to_equity, dividend_yield), found by exactly this test.
+    #
+    # So it runs FIRST and raises. A step that fails writes nothing; a step
+    # that writes and then notices has already done the harm.
+    providers.selftest()
+
+    got = providers.fetch_finnhub(uni, verbose=True)
+    n = len(got)
+    if not n:
+        raise RuntimeError("provider returned nothing for the whole universe")
+
+    # CROSS-CHECK OUR DERIVED ROWS AGAINST THE PROVIDER, EVERY NIGHT.
+    #
+    # This is the check that did not exist when COLL's EBITDA read $4M against
+    # a real $68M. Ten of the fifteen derived rows on the profile page are ALSO
+    # published by a provider we already call, so there was never a reason for
+    # them to go unchecked -- and it took a user reading a page to find it.
+    #
+    # A sample, not the universe: 120 names is minutes, catches a systematic
+    # break immediately, and a systematic break is the only kind worth waking
+    # up to. Disagreement is LOGGED, never acted on -- the provider is a second
+    # opinion, not an authority, and silently overwriting our figure with
+    # theirs would just move the unverified problem somewhere else.
+    detail = f"{n:,} of {len(uni):,} name(s) refreshed from finnhub"
+    try:
+        import numpy as np
+        rng = np.random.default_rng(int(asof.replace("-", "")))
+        sample = sorted(rng.choice(uni, size=min(120, len(uni)),
+                                   replace=False).tolist())
+        cmp = providers.compare(sample, asof=asof, verbose=False)
+        if not cmp.empty:
+            live = cmp[~cmp["status"].isin(["no comparison",
+                                            "we do not compute"])]
+            dis = live[live["status"] == "DISAGREE"]
+            if len(live):
+                agree = (1 - len(dis) / len(live)) * 100
+                log(f"    [provider] cross-check: {agree:.1f}% agree on "
+                    f"{len(live)} comparison(s); {len(dis)} disagree")
+                worst = (dis.groupby("field").size().sort_values(ascending=False)
+                         .head(3))
+                for fld, cnt in worst.items():
+                    log(f"      {fld}: {cnt} name(s) disagree")
+                detail += f"; cross-check {agree:.0f}% agree"
+    except Exception as exc:                                     # noqa: BLE001
+        log(f"    [provider] cross-check unavailable ({type(exc).__name__})")
+
+    return n, detail
+
+
+# --------------------------------------------------------------- backfill
+# WHAT THIS FIXES: a score step scores exactly the session it is handed. Close
+# the laptop for three days and those three sessions have no hype, dip, combo
+# or fundamental rows -- permanently, and nothing reported it. `daily_run`'s
+# catch-up only reconciles `days_on_list` from local bars, and
+# `scores.catchup` builds MONTHLY historical series, so neither covers a short
+# gap. Measured on 2026-08-12: the 05:00 run lost its lock and a whole day's
+# scores simply never existed.
+#
+# BOUNDED ON PURPOSE. If a month is missing, doing the most recent
+# BACKFILL_MAX_SESSIONS and saying so is better than silently starting a
+# multi-hour job at 05:00 that the next trigger then collides with.
+BACKFILL_MAX_SESSIONS = 10
+
+# ONLY DAILY MODULES. A weekly module has no rows for most sessions BY DESIGN --
+# `fundamental` is weekly precisely because it is filing-driven and costs
+# 486 KB/session. Treating its empty days as gaps would have "backfilled" six
+# sessions at the ~94 min/session measured on the enlarged fact store, turning
+# a 75-minute nightly run into a nine-hour one to manufacture rows nobody asked
+# for. Backfill answers "was a day MISSED", which is only meaningful where a
+# row was expected every day.
+BACKFILL_MODULES = ("hype", "dip", "combo")
+
+# TIME budget for backfilling, per step, per run.
+#
+# Measured 2026-08-14: dip and combo backfill a session in ~5 SECONDS, but
+# `hype` takes ~70 MINUTES -- it cannot reuse the warm caches the daily path
+# builds. A count-based bound (BACKFILL_MAX_SESSIONS) cannot express that
+# difference, so four hype sessions blew a 6-hour task limit and today's
+# session was never scored.
+#
+# 25 minutes lets dip and combo clear their whole backlog instantly and lets
+# hype make steady progress -- roughly one session per night, caught up within
+# a week, without ever putting the daily pass at risk.
+BACKFILL_BUDGET_S = 25 * 60
+
+
+def _missing_sessions(module: str, asof: str, limit: int) -> list[str]:
+    """Trading sessions at or before `asof` with no stored rows for `module`."""
+    import pandas as pd                     # module-level import is deliberate
+    import calendar_us                       # elsewhere too -- see step bodies
+    import scores
+    try:
+        stored = set(scores.sessions_stored(module))
+    except Exception:                                            # noqa: BLE001
+        return []
+    want = calendar_us.sessions_between(
+        (pd.Timestamp(asof) - pd.tseries.offsets.BDay(limit * 2)
+         ).strftime("%Y-%m-%d"), asof)
+    recent = [d for d in want if d <= asof][-limit:]
+    return [d for d in recent if d not in stored]
+
+
+def _with_backfill(module: str, compute_one) -> Callable[[str], tuple[int, str]]:
+    """Score TODAY first, then fill recent gaps within a time budget.
+
+    TWO THINGS HERE ARE THE RESULT OF THIS GOING WRONG ON 2026-08-14.
+
+    **Today is scored FIRST.** The original version backfilled before scoring
+    `asof`, which put the least important work in front of the most important.
+    `hype` backfill measured ~70 minutes per session -- against the ~3 minutes
+    estimated from the daily cost, a 23x miss, because scoring a PAST session
+    cannot reuse the warm caches the daily path enjoys. Four backfills consumed
+    5.5 hours, Task Scheduler killed the run at its 6-hour limit, and the
+    session everyone actually looks at was never scored at all. Today's data
+    must never be starved by history.
+
+    **The budget is TIME, not a session count.** `BACKFILL_MAX_SESSIONS` bounds
+    how far back to look; it says nothing about how long that takes, and a
+    count-based bound is worthless when the per-item cost is unknown. Backfill
+    now stops when `BACKFILL_BUDGET_S` is spent and says how many remain --
+    they are picked up on subsequent runs, a few per night, without ever
+    threatening the daily pass.
+    """
+    def run(asof: str) -> tuple[int, str]:
+        rows, detail = compute_one(asof)          # TODAY FIRST, always
+
+        gaps = [d for d in _missing_sessions(module, asof, BACKFILL_MAX_SESSIONS)
+                if d != asof]
+        if not gaps:
+            return rows, detail
+
+        started, filled = time.time(), 0
+        for d in gaps:
+            spent = time.time() - started
+            if spent > BACKFILL_BUDGET_S:
+                log(f"    [{module}] backfill budget spent "
+                    f"({spent / 60:.0f}m); {len(gaps) - filled} session(s) "
+                    f"left for the next run")
+                break
+            try:
+                compute_one(d)
+                filled += 1
+                log(f"    [{module}] backfilled missed session {d} "
+                    f"({(time.time() - started) / 60:.0f}m spent)")
+            except Exception as exc:                             # noqa: BLE001
+                log(f"    [{module}] backfill {d} failed: {repr(exc)[:90]}")
+        if filled or len(gaps) > filled:
+            detail = (f"{detail}; backfilled {filled} of {len(gaps)} "
+                      f"missed session(s)")
+        return rows, detail
+    return run
+
+
 def _step_hype(asof: str) -> tuple[int, str]:
     """Score module 3. DAILY, unlike `fundamental`, and the reason is the
     attention pillar: volume surge and trade-size shrink are short-horizon flow
@@ -684,17 +863,33 @@ REGISTRY: tuple[Step, ...] = (
          desc="sentiment score module + dashboard"),
     Step("shortvol", _step_shortvol, config.CADENCE_DAILY, timeout=600,
          desc="FINRA Reg SHO daily short volume (feeds hype)"),
-    Step("hype", _step_hype, config.CADENCE_DAILY,
+    Step("hype", _with_backfill("hype", _step_hype), config.CADENCE_DAILY,
          depends_on=("bars", "shortvol"),
          timeout=1200,
          desc="attention + narrative-premium score module (daily: attention "
               "is a short-horizon flow measure)"),
     Step("bounce", _step_bounce, config.CADENCE_DAILY, depends_on=("bars",),
          timeout=900, desc="support-bounce screen, confirm, report, outcomes"),
-    Step("fundamental", _step_fundamental, config.CADENCE_WEEKLY,
-         depends_on=("bars",), timeout=900,
-         desc="fundamental score module + dashboard (weekly: filing-driven, "
-              "and 486 KB/session if run daily)"),
+    Step("provider", _step_provider, config.CADENCE_DAILY,
+         depends_on=("universe",), timeout=7200,
+         desc="finnhub metric cache for the universe (the source for displayed "
+              "ratios; ~58 min at 60 req/min)"),
+    # DAILY, NOT WEEKLY, NOW THAT THE PROVIDER SWEEP IS DAILY.
+    #
+    # It was weekly because it is filing-driven -- fundamentals genuinely only
+    # change when someone files. That stopped being the whole story when this
+    # step became the place the PROVIDER OVERLAY is applied: Finnhub is
+    # refreshed every night, and a weekly consumer means fresh provider data
+    # sits in the cache for up to six days without ever reaching a page. The
+    # sweep would be pointless.
+    #
+    # Affordable because the step's own median is 39.5s across the last eight
+    # runs (the 4,313s outlier was a single run during the fact-store growth),
+    # and the provider half is a cache hit measured at 0.07s.
+    Step("fundamental", _step_fundamental, config.CADENCE_DAILY,
+         depends_on=("bars", "provider"), timeout=1800,
+         desc="fundamental score module + dashboard (daily: it applies the "
+              "provider overlay, which is refreshed nightly)"),
     Step("sec_facts", _step_sec_facts, config.CADENCE_QUARTERLY, timeout=3600,
          session_indexed=False, due_fn=_due_sec_facts,
          desc="SEC Financial Statement Data Sets, one ZIP per quarter"),
@@ -713,17 +908,27 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("sentiment",), timeout=5400,
          desc="factor_lab IC leaderboard per score module"),
     # `dip` reads the other modules' stored rows, so it must follow all three.
-    Step("dip", _step_dip, config.CADENCE_DAILY,
+    Step("dip", _with_backfill("dip", _step_dip), config.CADENCE_DAILY,
          depends_on=("fundamental", "sentiment", "hype"), timeout=900,
          desc="quality gate + depressed price; the dip thesis (UNMEASURED)"),
     # `combo` reads all four other modules, so it follows dip, and `explore`
     # follows it so the table shows the same session's combined scores.
-    Step("combo", _step_combo, config.CADENCE_DAILY,
+    Step("combo", _with_backfill("combo", _step_combo), config.CADENCE_DAILY,
          depends_on=("fundamental", "sentiment", "hype", "dip"), timeout=900,
          desc="the three combined scores (DECAYING out of sample -- see docs)"),
+    # SESSION-INDEXED, because it RENDERS A SESSION.
+    #
+    # It was date-indexed, and on 2026-08-14 that meant: the night run built
+    # explore at 00:31 from the 08-12 session, then when 08-13's scores landed
+    # at 17:33 the step declined to rebuild -- "already ran for 2026-08-14".
+    # Profile pages (session-indexed) were current while the all-stock table
+    # silently showed a two-day-old session. A step whose OUTPUT depends on the
+    # session must have the session as its watermark; only genuinely
+    # date-driven work (retention pruning, docs regeneration) may key on today.
     Step("explore", _step_explore, config.CADENCE_DAILY, depends_on=("combo",),
-         timeout=300, session_indexed=False,
+         timeout=300,
          desc="rebuild the sortable/filterable all-stock table"),
+    # Session-indexed for the same reason as `explore` above.
     Step("snapshots", _step_snapshots, config.CADENCE_DAILY,
          # Was 2400s for 20 snapshots x ~50s. Indexing `sessions_stored` took
          # the per-snapshot cost from ~48s to ~4s and the count from 20 to 5,
@@ -737,8 +942,9 @@ REGISTRY: tuple[Step, ...] = (
          timeout=900, desc="per-stock pages for today's bounce flags"),
     Step("retention", _step_retention, config.CADENCE_DAILY, timeout=300,
          session_indexed=False, desc="age-based pruning of rejects, 1h, reports"),
+    # Session-indexed too: it summarises the newest session, so a new session
+    # must refresh it. It costs 0.5s, so there is no reason to be frugal here.
     Step("dashboard", _step_dashboard, config.CADENCE_DAILY, timeout=120,
-         session_indexed=False,
          desc="rebuild reports/index.html from the job table"),
     Step("docs", _step_docs, config.CADENCE_DAILY, timeout=300,
          session_indexed=False,
@@ -776,9 +982,30 @@ def _pid_alive(pid: int | None) -> bool | None:
         return None
 
 
-def acquire_lock(force: bool = False) -> bool:
-    info = _lock_info()
-    if info is not None:
+def acquire_lock(force: bool = False, wait_min: float = 0.0,
+                 poll_s: float = 120.0) -> bool:
+    """Take the orchestrator lock. Optionally WAIT for it instead of skipping.
+
+    `wait_min=0` is the historical behaviour: if another run holds the lock,
+    log and return False immediately. That is right for interactive runs and
+    for the chained jobs, which exit 75 so their caller can decide.
+
+    It is WRONG for the scheduled daily pass. On 2026-08-12 the 05:00 run lost
+    the lock to a rebuild chain that had started 94 seconds earlier, exited
+    without work, and did not come back for 24 hours -- so a whole day's
+    scores, pages and explore snapshot never got built, and the profile pages
+    still showed 08-11 data. A 94-second collision cost a full day.
+
+    With `wait_min > 0` the run parks and re-tries instead. Nothing is skipped
+    unless the holder is STILL running when the budget runs out, and a holder
+    that dies mid-wait is picked up on the next poll by the liveness check.
+    """
+    deadline = time.monotonic() + wait_min * 60.0
+    waited = False
+    while True:
+        info = _lock_info()
+        if info is None:
+            break
         started = info.get("started")
         age_h = None
         if started:
@@ -791,15 +1018,32 @@ def acquire_lock(force: bool = False) -> bool:
         stale = (age_h is not None and age_h > config.ORCH_LOCK_STALE_HOURS)
         if alive is False:
             log(f"  breaking lock: pid {info.get('pid')} is gone")
-        elif stale:
+            break
+        if stale:
             log(f"  breaking lock: {age_h:.1f}h old "
                 f"(> {config.ORCH_LOCK_STALE_HOURS}h), assuming dead")
-        elif force:
+            break
+        if force:
             log(f"  breaking lock by --force (pid {info.get('pid')})")
-        else:
+            break
+
+        left = deadline - time.monotonic()
+        if left <= 0:
+            verb = (f"Waited {wait_min:g}m, still held. Exiting without work."
+                    if waited else "Exiting without work.")
             log(f"ANOTHER RUN HOLDS THE LOCK (pid {info.get('pid')}, "
-                f"started {started}). Exiting without work.")
+                f"started {started}). {verb}")
             return False
+
+        if not waited:                      # announce once, not every poll
+            log(f"  lock held by pid {info.get('pid')} (started {started}); "
+                f"waiting up to {wait_min:g}m for it rather than skipping the "
+                f"day")
+            waited = True
+        time.sleep(min(poll_s, left))
+
+    if waited:
+        log("  lock is free now; proceeding")
     config.ORCH_LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
     config.ORCH_LOCK_FILE.write_text(
         json.dumps({"pid": os.getpid(),
@@ -1017,6 +1261,11 @@ def main() -> int:
                     help="run only this step (repeatable); implies --force for it")
     ap.add_argument("--break-lock", action="store_true",
                     help="take the lock even if another run holds it")
+    ap.add_argument("--wait-for-lock", type=float, default=0.0, metavar="MIN",
+                    help="if another run holds the lock, wait up to MIN "
+                         "minutes for it instead of exiting (default 0). The "
+                         "scheduled daily pass uses this so a collision "
+                         "delays the run instead of skipping the day.")
     a = ap.parse_args()
 
     config.dirs()
@@ -1044,8 +1293,21 @@ def main() -> int:
             "exiting without work. Use --resume, or --once to override.")
         return 0
 
-    if not acquire_lock(force=a.break_lock):
-        return 0
+    if not acquire_lock(force=a.break_lock, wait_min=a.wait_for_lock):
+        # EXIT 75 IF WE ASKED TO WAIT AND STILL LOST.
+        #
+        # Returning 0 here says "ran fine" to whatever launched us, which is
+        # true enough for the bare scheduled task -- a skipped run is not an
+        # error. But a CHAIN that passes --wait-for-lock is saying "this step
+        # matters, hold on for it", and a 0 tells the chain to mark the step
+        # complete and move on. `fix_data.py` would then rebuild pages and
+        # 182 sessions of history on scores that were never recomputed, and
+        # nothing would ever say so.
+        #
+        # 75 is the convention already used by the resumable jobs for exactly
+        # this: not a failure, not a success, try again later. Only returned
+        # when a wait was requested, so the plain daily task keeps exiting 0.
+        return 75 if a.wait_for_lock else 0
     try:
         return run(only=a.step, force=a.force)
     finally:

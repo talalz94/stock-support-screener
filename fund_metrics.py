@@ -67,6 +67,13 @@ REGISTRY: dict[str, tuple[str, int, str]] = {
     "roe":            ("quality", +1, "return on equity"),
     "gpoa":           ("quality", +1, "gross profit / assets (Novy-Marx)"),
     "op_margin":      ("quality", +1, "operating income / revenue"),
+    # Added 2026-08-16 so the nightly provider cross-check can reach them --
+    # see the note in `compute`. Scale-free (same-currency ratios), so they
+    # need no FX and are shown for non-USD filers too.
+    "net_margin":     ("quality", +1, "net income / revenue"),
+    "gross_margin":   ("quality", +1, "gross profit / revenue"),
+    "roa":            ("quality", +1, "net income / assets"),
+    "debt_to_equity": ("safety", -1, "(long + short debt) / equity"),
     "asset_turnover": ("quality", +1, "revenue / assets"),
     "ccc":            ("quality", -1, "cash conversion cycle, days"),
 
@@ -213,7 +220,19 @@ def derive(f: pd.DataFrame) -> pd.DataFrame:
     d["cfo"] = _d(f, "cfo_ttm").fillna(_d(f, "cfo"))
     d["capex"] = _d(f, "capex_ttm").fillna(_d(f, "capex")).abs()
     d["fcf"] = d["cfo"] - d["capex"]
-    d["dna"] = _d(f, "dna_ttm").fillna(_d(f, "dna"))
+    # D&A: reported TOTAL first, else the sum of the two components.
+    #
+    # Same fix as `stock_profile._dna`, for the same reason: filers either
+    # report a combined D&A or report depreciation and intangible amortisation
+    # separately, and choosing between the halves understates badly. COLL's
+    # Q2-2026 was 1.8M depreciation vs 63.0M amortisation -- picking the former
+    # put EBITDA at $4M against a true ~$68M, and EBITDA feeds ev_ebitda and
+    # net_debt_ebitda, so the error propagated into the value pillar.
+    _tot = _d(f, "dna_ttm").fillna(_d(f, "dna"))
+    _dep = _d(f, "deprec_ttm").fillna(_d(f, "deprec"))
+    _amo = _d(f, "amort_ttm").fillna(_d(f, "amort"))
+    _comp = _sum_reported(_dep, _amo)          # NaN only if BOTH are absent
+    d["dna"] = _tot.where(_tot.notna(), _comp)
     d["ebitda"] = d["opinc"] + d["dna"]
     d["ebit"] = d["opinc"]
     d["pretax"] = _d(f, "pretax_ttm").fillna(_d(f, "pretax"))
@@ -447,6 +466,27 @@ def compute(cur: pd.DataFrame, prior: pd.DataFrame, px: pd.DataFrame) -> pd.Data
         d["equity"] > 0).clip(-10, 10)
     out["gpoa"] = _safe(d["gross_profit"], d["assets"]).clip(-5, 5)
     out["op_margin"] = _safe(d["ebit"], d["revenue"]).clip(-10, 10)
+
+    # FOUR RATIOS THE PAGE SHOWED BUT THE SCORED FRAME NEVER CARRIED.
+    #
+    # `stock_profile.DERIVED` computed net_margin, gross_margin, roa and
+    # debt_to_equity for display, but none reached `fund_metrics.REGISTRY`, so
+    # `providers.compare` had nothing on our side to compare and reported
+    # "we do not compute this" for 114 tickers x 4 fields. They were the last
+    # numbers on a page that no automated check could reach -- which is exactly
+    # the condition that let COLL's EBITDA be wrong by 17x for months.
+    #
+    # All four are one division of figures already verified against SEC, and
+    # all four are published by both providers, so adding them here makes them
+    # cross-checkable every night. Clips match the sibling ratios above.
+    out["net_margin"] = _safe(d["net_income"], d["revenue"]).clip(-10, 10)
+    out["gross_margin"] = _safe(d["gross_profit"], d["revenue"]).clip(-10, 10)
+    out["roa"] = _safe(d["net_income"], d["assets"]).clip(-5, 5)
+    # `d["debt"]` is already `_sum_reported(debt_lt, debt_st)` from `derive`,
+    # so it is NaN only when the filer tags neither leg -- reusing it keeps one
+    # definition of debt rather than a second, drifting one.
+    out["debt_to_equity"] = _safe(d["debt"], d["equity"]).where(
+        d["equity"] > 0).clip(0, 100)
     out["asset_turnover"] = _safe(d["revenue"], d["assets"]).clip(0, 20)
     out["ccc"] = cash_conversion_cycle(d)
 
@@ -480,8 +520,30 @@ def compute(cur: pd.DataFrame, prior: pd.DataFrame, px: pd.DataFrame) -> pd.Data
     # was written and simply never extended to its three siblings.
     out["ev_ebitda"] = _safe(ev, d["ebitda"]).where(
         d["ebitda"] > 0).clip(0, 300)
-    out["pe"] = _safe(mktcap, d["net_income"]).where(
-        d["net_income"] > 0).clip(0, 1000)
+    # P/E ON THE FILER'S OWN DILUTED EPS WHEN THERE IS ONE.
+    #
+    # `mktcap / net_income` and `price / diluted EPS` are not the same number,
+    # because the market cap uses the CURRENT share count from the filing
+    # cover page while net income is earned over a TRAILING average count. For
+    # a company buying back stock the two drift apart -- AAPL on 2026-08-12:
+    # 34.25 the first way, 34.70 the second, against the ~34.6 every quote
+    # site shows. The second is the convention, so a user comparing our page
+    # to anywhere else is comparing to price/EPS.
+    #
+    # Diluted, not basic, and reported rather than recomputed: the filer has
+    # already done the participating-securities arithmetic that makes
+    # net_income/shares differ from EPS by ~0.6% even when both are right.
+    # Falls back to mktcap/net_income where EPS is untagged, which is common
+    # among small caps, so coverage does not drop.
+    eps = pd.Series(index=d.index, dtype=float)
+    if "eps_diluted_ttm" in cur.columns:
+        eps = pd.to_numeric(
+            pd.Series(cur["eps_diluted_ttm"].values, index=cur["ticker"].values)
+            .reindex(d.index), errors="coerce")
+    out["pe"] = (_safe(price, eps).where(eps > 0)
+                 .fillna(_safe(mktcap, d["net_income"])
+                         .where(d["net_income"] > 0))
+                 .clip(0, 1000))
     out["pb"] = _safe(mktcap, d["equity"]).where(
         d["equity"] > 0).clip(0, 200)
     out["ev_sales"] = _safe(ev, d["revenue"]).clip(0, 200)

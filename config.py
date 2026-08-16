@@ -887,3 +887,10 @@ def dirs() -> None:
               NEWS, SENTI, SCORES, BARS_ETF, SHORTVOL, FUNDAMENTALS,
               FUNDAMENTALS_CF, *REPORT_DIRS):
         d.mkdir(parents=True, exist_ok=True)
+
+
+# Use the data provider as the SOURCE for current displayed fundamentals rather
+# than deriving them from raw XBRL. Set False to fall back to our own
+# arithmetic everywhere (useful for reproducing a historical result exactly).
+# Historical sessions are never overlaid regardless of this setting.
+PROVIDER_OVERLAY = True
