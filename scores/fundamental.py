@@ -100,7 +100,15 @@ class FundamentalModule:
         # the look-ahead the point-in-time design exists to prevent and would
         # silently invalidate every backtest. The guard is the asof comparison
         # below, not a comment.
-        if _is_current(asof) and getattr(config, "PROVIDER_OVERLAY", True):
+        _cur = _is_current(asof)
+        _on = getattr(config, "PROVIDER_OVERLAY", True)
+        if not (_cur and _on):
+            # SAY SO. A skipped overlay used to look exactly like a successful
+            # one in the log, which is how this went unnoticed indefinitely.
+            print(f"  [fundamental] provider overlay DECLINED on {asof} "
+                  f"(current={_cur}, enabled={_on}) -- figures are our own",
+                  flush=True)
+        if _cur and _on:
             try:
                 import providers
                 m, tally = providers.overlay(m, verbose=False)
@@ -211,9 +219,31 @@ def _is_current(asof: str) -> bool:
     towards False so a calendar hiccup declines the overlay rather than
     contaminating a historical row.
     """
+    # COMPARED AGAINST OUR OWN DATA FRONTIER, NOT A LIVE CLOCK.
+    #
+    # The clock version was `asof >= calendar_us.last_closed_session()`, and it
+    # was False on EVERY run. The orchestrator fixes `asof` at 05:00, but the
+    # fundamental step runs hours later -- 16h49m on 2026-08-20 -- and by then
+    # `last_closed_session()` had rolled to the NEXT day. asof=2026-08-19 was
+    # compared against 2026-08-20 and lost.
+    #
+    # It failed SILENTLY: the tally print only fires when the overlay actually
+    # ran, so a declined overlay logged nothing. Measured 2026-08-21: zero
+    # occurrences of "provider overlay on" in the entire run log. The provider
+    # layer existed, passed its selftests, and had never once replaced a
+    # displayed number.
+    #
+    # The newest session in the bar store is the right reference: it is what
+    # this run actually ingested, it does not move while the run is in flight,
+    # and it is correctly False for a BACKFILLED session -- which matters now
+    # that `fundamental` backfills, because a 2026-07-16 row must never be
+    # given today's provider snapshot.
     try:
-        import calendar_us
-        return str(asof)[:10] >= str(calendar_us.last_closed_session())[:10]
+        import store
+        stored = store.stored_dates("1d")
+        if not stored:
+            return False
+        return str(asof)[:10] >= max(stored)[:10]
     except Exception:                                            # noqa: BLE001
         return False
 
