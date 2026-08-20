@@ -652,7 +652,16 @@ def compare(tickers: list[str], asof: str | None = None,
             ours[_c] = pd.to_numeric(mi[_c], errors="coerce")
     # `ebitda` and `fcf` are levels the metrics frame does not carry; rebuild
     # them from the same legs the page uses so the check tests what is shown.
-    _d = lambda c: pd.to_numeric(fi.get(c), errors="coerce")
+    # ALWAYS A SERIES, never a scalar. `fi.get(c)` returns None when the column
+    # is absent from the frame entirely -- which happens whenever no ticker in
+    # the sample reports that concept -- and `pd.to_numeric(None)` yields a
+    # scalar NaN, so the `.fillna` below raised AttributeError. Measured
+    # 2026-08-21: compare() crashed on 1 and 2 tickers and worked on 3, purely
+    # because the third name happened to carry `deprec_ttm`.
+    def _d(c):
+        col = fi[c] if c in fi.columns else pd.Series(index=fi.index,
+                                                      dtype="float64")
+        return pd.to_numeric(col, errors="coerce")
     _tot, _dep, _amo = _d("dna_ttm"), _d("deprec_ttm"), _d("amort_ttm")
     _comp = _dep.fillna(0) + _amo.fillna(0)
     _comp = _comp.where(_dep.notna() | _amo.notna())
