@@ -47,6 +47,7 @@ import argparse
 import io
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -915,6 +916,80 @@ _READ_CACHE: dict = {}
 _READ_CACHE_MAX = 2
 
 
+# XBRL FROM A PROXY IS NOT THE FINANCIAL STATEMENTS.
+#
+# A DEF 14A carries the Item 402(v) "pay versus performance" table, whose Net
+# Income column is tagged `NetIncomeLoss` exactly like the income statement's --
+# but is reported in THOUSANDS, and covers the fiscal year with qtrs=4. The
+# proxy is filed AFTER the 10-K for the same period end, so it won the
+# `drop_duplicates(..., keep="last")` tie-break and REPLACED the annual leg.
+#
+# LOPE, measured 2026-08-21:
+#     2025-12-31  qtrs=4       216,170.0  NetIncomeLoss  DEF 14A   <- $216.17M
+#     2026-06-30  qtrs=2  121,200,000.0   ProfitLoss     10-Q      <- dollars
+#     roll-forward: 216,170 + 121,200,000 - 113,164,000 = 8,206,170
+# so `net_income_ttm` read $8.25M against a true $219.9M -- 26x low. EPS and
+# share count were both correct, which is what made it hard to see: the error
+# lived in one leg of one concept.
+#
+# 1,303 of 3,500 tradeable tickers had DEF 14A net-income rows in the store.
+#
+# Filtered at READ time, not at ingest, so every existing partition is
+# corrected without a refetch. Only the proxy family is dropped: 6-K, 20-F,
+# 40-F, 10-KT and S-1 all carry real statements and stay.
+_PROXY_FORM_RE = re.compile(r"^(DEF|DEFA|DEFM|DEFR|DEFC|PRE|PRER|PREM)\s*14[AC]",
+                            re.I)
+
+
+# Toggle so the filter's aggregate effect can be MEASURED rather than argued.
+_PROXY_FILTER_ON = os.environ.get("FD_PROXY_FILTER", "1") != "0"
+
+
+def _drop_non_statement_forms(df: pd.DataFrame) -> pd.DataFrame:
+    """Rescale proxy rows reported in thousands; never drop them outright.
+
+    DROPPING WAS WRONG, and measuring showed it. The proxy family is the only
+    place some filers tag a concept at all: HZO tags every statement figure
+    `ProfitLoss` (which INCLUDES noncontrolling interests) and its only
+    `NetIncomeLoss` -- net income attributable to the parent, the $4.0M a
+    reader wants -- comes from its DEF 14A. Dropping proxies took HZO from a
+    web-verified 3,986,000 to 35,986,000.
+
+    And the scale is not uniform: LOPE's proxy reports THOUSANDS (216,170 for
+    $216.17M) while HZO's reports DOLLARS. So the defect is the UNIT, not the
+    form, and the fix is to restore the unit.
+
+    A proxy row is treated as thousands only when the filer's own statement
+    rows for the SAME concept are at least 100x larger -- a gap no rounding or
+    restatement produces. Everything else is left exactly as filed.
+    """
+    if df.empty or "form" not in df.columns or not _PROXY_FILTER_ON:
+        return df
+    is_proxy = df["form"].astype(str).str.match(_PROXY_FORM_RE)
+    if not bool(is_proxy.any()):
+        return df
+
+    v = pd.to_numeric(df["value"], errors="coerce").abs()
+    key = [df["cik"], df["tag"]]
+    # Statement-side magnitude per (cik, tag) -- the reference scale.
+    stmt = v.where(~is_proxy)
+    ref = stmt.groupby(key).transform("median")
+    prox = v.where(is_proxy)
+
+    # 100x, not 1000x: a proxy year need not match any single statement period,
+    # so the test is an order-of-magnitude one, deliberately loose enough to
+    # survive that and far too tight to fire on rounding.
+    thousands = is_proxy & ref.notna() & prox.notna() & (prox > 0) &         (ref >= prox * 100)
+    n = int(thousands.sum())
+    if n:
+        out = df.copy()
+        out.loc[thousands, "value"] =             pd.to_numeric(out.loc[thousands, "value"], errors="coerce") * 1000.0
+        _log_once("rescaled proxy-filing rows reported in thousands "
+                  "(DEF 14A pay-versus-performance tables)")
+        return out
+    return df
+
+
 def read(start_q: str | None = None, ciks: set[int] | None = None) -> pd.DataFrame:
     # THE SAME READ, 299 TIMES. `facts_asof` filters by `filed <= asof`, so a
     # rebuild sweeping historical sessions asks this function for the identical
@@ -1049,6 +1124,7 @@ def read(start_q: str | None = None, ciks: set[int] | None = None) -> pd.DataFra
     # written before the column existed contribute NaN, and those are USD by
     # construction because the old ingest dropped everything else.
     out = _with_uom(pd.concat(frames, ignore_index=True))
+    out = _drop_non_statement_forms(out)
     # A COPY goes in and a COPY comes out, so a caller mutating the frame it
     # received cannot corrupt what the next caller sees.
     if len(_READ_CACHE) >= _READ_CACHE_MAX:
