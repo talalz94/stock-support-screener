@@ -781,12 +781,32 @@ def _step_events(asof: str) -> tuple[int, str]:
     return len(df), f"{len(df)} event class(es) recalibrated"
 
 
+# A WALL-CLOCK CEILING THE STEP ENFORCES ON ITSELF.
+#
+# `Step.timeout` is a label: it is compared against elapsed time AFTER the step
+# function returns, so it can report an overrun but never prevent one. On
+# 2026-08-16 leaderboard ran 9h31m against its 5,400s budget, held the run lock
+# past the task's own 12-hour ExecutionTimeLimit, and would have cost the next
+# day's run. A step this long has to bound itself.
+#
+# Deliberately equal to the step's `timeout`, so "over budget" and "stopped"
+# mean the same thing rather than two numbers drifting apart.
+LEADERBOARD_BUDGET_S = 5400
+
+
 def _step_leaderboard(asof: str) -> tuple[int, str]:
     import factor_lab
     out = []
+    deadline = time.time() + LEADERBOARD_BUDGET_S
     for module in config.SCORE_MODULES:
+        left = deadline - time.time()
+        if left <= 0:
+            # Reported, never silent: a module dropped for time is a gap in the
+            # scoreboard, and a gap that nothing announces reads as "no signal".
+            out.append(f"{module}:SKIPPED(budget)")
+            continue
         try:
-            lb = factor_lab.leaderboard(module, horizon=20)
+            lb = factor_lab.leaderboard(module, horizon=20, budget_s=left)
             out.append(f"{module}:{len(lb)}")
         except Exception as exc:                                 # noqa: BLE001
             # One module's leaderboard failing must not lose the other's.
