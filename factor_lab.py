@@ -117,9 +117,18 @@ def forward_returns(start: str, end: str,
 
 
 def load_metric(module: str, metric: str, start: str | None = None,
-                end: str | None = None) -> pd.DataFrame:
-    """(ticker, session, value) for one metric from the tidy score table."""
-    df = scores.read(module=module, metrics=[metric], start=start, end=end)
+                end: str | None = None,
+                frame: pd.DataFrame | None = None) -> pd.DataFrame:
+    """(ticker, session, value) for one metric from the tidy score table.
+
+    `frame` is rows this caller has ALREADY read for this metric. Passing it
+    skips `scores.read`, which opens every month partition on disk on every
+    call -- see `leaderboard`, which reads its module once instead of once per
+    metric for exactly that reason.
+    """
+    df = (frame if frame is not None
+          else scores.read(module=module, metrics=[metric],
+                           start=start, end=end))
     if df.empty:
         return df
     df = df[df["value"].notna()]
@@ -142,14 +151,31 @@ def _sector_map() -> pd.Series:
 # ===========================================================================
 def evaluate(metric_rows: pd.DataFrame, horizons: tuple[int, ...] = HORIZONS,
              quantiles: int = DEFAULT_QUANTILES, by: str | None = None,
-             seed: int = 0) -> dict:
-    """The full report for one metric. Returns a dict of frames."""
+             seed: int = 0, fwd: pd.DataFrame | None = None) -> dict:
+    """The full report for one metric. Returns a dict of frames.
+
+    `fwd` is a forward-return table the caller has already built, covering at
+    least this metric's dates. It exists because `_PX_CACHE` keys on the exact
+    `start|end` pair: metrics sharing a date range hit it, but any metric scored
+    over a different span misses and re-reads the whole daily bar store to
+    rebuild a table it mostly already had. `leaderboard` builds one table per
+    module and hands it to every metric, so the span no longer matters.
+
+    Passing a WIDER table cannot change an interior result: the merge below is
+    an inner join on (ticker, date), so rows outside this metric's dates are
+    dropped. It can only add forward legs at the tail that a narrow window
+    would have truncated to NaN -- which is the same thing `_shift_end` is
+    already there to prevent.
+    """
     if metric_rows.empty:
         return {}
 
+    # Reported in the result dict either way, so they are computed here rather
+    # than only on the cache-miss path.
     start, end = str(metric_rows["date"].min()), str(metric_rows["date"].max())
-    fwd = forward_returns(start, _shift_end(end, max(horizons)), horizons)
-    if fwd.empty:
+    if fwd is None:
+        fwd = forward_returns(start, _shift_end(end, max(horizons)), horizons)
+    if fwd is None or fwd.empty:
         return {}
 
     df = metric_rows.merge(fwd, on=["ticker", "date"], how="inner")
@@ -414,24 +440,100 @@ def is_signal(metric: str) -> bool:
 
 
 def leaderboard(module: str, horizon: int = 20, start: str | None = None,
-                end: str | None = None, min_dates: int = 10) -> pd.DataFrame:
-    """Every metric in a module, ranked by |IC|. The screen's own scoreboard."""
+                end: str | None = None, min_dates: int = 10,
+                budget_s: float | None = None,
+                verbose: bool = True) -> pd.DataFrame:
+    """Every metric in a module, ranked by |IC|. The screen's own scoreboard.
+
+    THE STORE IS READ ONCE, NOT ONCE PER METRIC
+    -------------------------------------------
+    `load_metric` calls `scores.read`, and `scores.read` opens EVERY month
+    partition and filters afterwards -- 121 files, 238 MB, on every single call.
+    MEASURED 2026-08-16: 25.5s per call, whatever the metric. Looping it per
+    metric therefore paid that 25.5s 119 times across the five modules -- about
+    50 minutes spent re-reading a store already read -- before a single IC.
+
+    That was affordable when the store held two years. After the full-depth
+    backfill to 2016 it was not: on 2026-08-16 this step ran **9h31m without
+    printing one line**, against a 90-minute budget and a 53-minute measurement
+    taken before the backfill. It held the run lock past the task's 12-hour
+    ExecutionTimeLimit, so the next day's run could not have started.
+
+    The cost split roughly in half, and only one half was the store read
+    (measured on `dip`, 2026-08-16): 25.5s re-reading the store per metric,
+    26.9s actually evaluating it. So reading once removes half; the rest is the
+    shared forward-return table below, and what remains after both is real
+    arithmetic that has to be paid.
+
+    Four changes, each aimed at one part of that:
+
+      read once   the module's rows are read in a single pass and sliced in
+                  memory -- one store scan instead of one per metric
+      one fwd     a single forward-return table per module, because `_PX_CACHE`
+                  keys on each metric's own date range and so missed on nearly
+                  every metric, re-reading the whole bar store each time
+      log         a line per metric, because silence is what made a 9-hour
+                  overrun indistinguishable from a deadlock
+      budget_s    stops the loop and returns what it has. The orchestrator's
+                  `timeout=` is only a LABEL compared against elapsed time
+                  after a step returns, so a step that never returns is never
+                  caught -- the limit has to live in here.
+    """
     scores.load_all()
     mod = scores.get(module)
-    rows = []
-    skipped = [m for m in mod.metrics() if not is_signal(m)]
-    for metric in mod.metrics():
-        if not is_signal(metric):
-            # Provenance, not signal -- see NON_SIGNAL. These outranked every
-            # real metric in the hype module (hype_cov t=3.27, bars_used t=2.78)
-            # because complete data correlates with being an established
-            # company. Reporting them invites reading "has data" as a factor.
+    # Provenance, not signal -- see NON_SIGNAL. These outranked every real
+    # metric in the hype module (hype_cov t=3.27, bars_used t=2.78) because
+    # complete data correlates with being an established company. Reporting
+    # them invites reading "has data" as a factor.
+    sigs = [m for m in mod.metrics() if is_signal(m)]
+    if not sigs:
+        return pd.DataFrame()
+
+    t0 = time.time()
+    sd = scores.read(module=module, metrics=sigs, start=start, end=end)
+    if sd.empty:
+        return pd.DataFrame()
+    # Drop what the evaluation never reads before grouping. `module` is
+    # constant here and `label` is for report legends, so carrying them just
+    # multiplies the peak footprint of an 18M-row frame.
+    sd = sd[["session", "ticker", "metric", "value"]]
+    sd = sd[sd["value"].notna()]
+    by_metric = {str(k): g for k, g in sd.groupby("metric", observed=True)}
+    t_read = time.time() - t0
+
+    # ONE forward-return table for the whole module, covering every metric's
+    # dates. `_PX_CACHE` keys on the exact date pair, so it hits only for
+    # metrics that happen to share a range and MISSES for any metric scored
+    # over a different span -- and each miss re-reads the whole daily bar store.
+    #
+    # MEASURED on dip (2026-08-16), where 7 of 8 metrics share 219 dates: the
+    # shared table saved 15s of 146.5s overall, but 13.2s of that came from the
+    # single metric whose range differs (not_extended, 210 dates, 33.9s ->
+    # 20.7s). So this is worth most on modules whose metrics were introduced at
+    # different times -- fundamental's 48 -- and near-free on uniform ones.
+    # Proven not to change any number: max |d_ic| = 0 across dip's 8 metrics.
+    fwd = forward_returns(str(sd["session"].min()),
+                          _shift_end(str(sd["session"].max()), horizon),
+                          (horizon,))
+    if verbose:
+        log(f"    [{module}] {len(sd):,} row(s), {len(by_metric)} of "
+            f"{len(sigs)} metric(s) present, {len(fwd):,} forward-return row(s)"
+            f" -- setup {time.time() - t0:.1f}s (read {t_read:.1f}s)")
+
+    rows, stopped = [], None
+    for i, metric in enumerate(sigs, 1):
+        if budget_s is not None and (time.time() - t0) > budget_s:
+            stopped = metric
+            break
+        g = by_metric.get(metric)
+        if g is None or g.empty:
             continue
         try:
-            mr = load_metric(module, metric, start, end)
+            ts = time.time()
+            mr = load_metric(module, metric, frame=g)
             if mr.empty or mr["date"].nunique() < min_dates:
                 continue
-            res = evaluate(mr, horizons=(horizon,), by=None)
+            res = evaluate(mr, horizons=(horizon,), by=None, fwd=fwd)
             ic = res.get("ic")
             if ic is None or ic.empty:
                 continue
@@ -444,8 +546,18 @@ def leaderboard(module: str, horizon: int = 20, start: str | None = None,
                 "n_dates": int(r["n_dates"]), "avg_n": r["avg_n"],
                 "turnover": res.get("turnover", np.nan),
             })
+            if verbose:
+                log(f"      {i:3d}/{len(sigs)} {metric:<28s} "
+                    f"{time.time() - ts:6.1f}s")
         except Exception as exc:                                   # noqa: BLE001
             log(f"    ! {metric}: {repr(exc)[:80]}")
+
+    if stopped is not None:
+        log(f"    [{module}] BUDGET {budget_s:.0f}s reached at {stopped!r} -- "
+            f"{len(rows)} of {len(sigs)} metric(s) evaluated, returning partial")
+    elif verbose:
+        log(f"    [{module}] {len(rows)} metric(s) in {time.time() - t0:.1f}s")
+
     if not rows:
         return pd.DataFrame()
     return (pd.DataFrame(rows)
