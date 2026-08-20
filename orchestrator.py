@@ -401,16 +401,36 @@ def _step_provider(asof: str) -> tuple[int, str]:
 # BOUNDED ON PURPOSE. If a month is missing, doing the most recent
 # BACKFILL_MAX_SESSIONS and saying so is better than silently starting a
 # multi-hour job at 05:00 that the next trigger then collides with.
-BACKFILL_MAX_SESSIONS = 10
+#
+# 25, not 10. The horizon is how far back a gap is even VISIBLE, and at 10 the
+# oldest gaps were invisible forever: on 2026-08-20 `sentiment` was missing
+# eleven sessions from 2026-07-21..2026-08-04, all of them 15-21 sessions back,
+# so no run would ever have seen them. 25 reaches them. What keeps that safe is
+# BACKFILL_BUDGET_S, not the horizon -- widening the search costs nothing
+# because the TIME budget still decides how much actually gets done per run.
+BACKFILL_MAX_SESSIONS = 25
 
-# ONLY DAILY MODULES. A weekly module has no rows for most sessions BY DESIGN --
-# `fundamental` is weekly precisely because it is filing-driven and costs
-# 486 KB/session. Treating its empty days as gaps would have "backfilled" six
-# sessions at the ~94 min/session measured on the enlarged fact store, turning
-# a 75-minute nightly run into a nine-hour one to manufacture rows nobody asked
-# for. Backfill answers "was a day MISSED", which is only meaningful where a
-# row was expected every day.
-BACKFILL_MODULES = ("hype", "dip", "combo")
+# ONLY DAILY MODULES. Backfill answers "was a day MISSED", which is only
+# meaningful where a row was expected every day.
+#
+# `fundamental` was excluded here for exactly that reason -- it was WEEKLY, so
+# its empty days were empty by design and "filling" them would have
+# manufactured rows nobody asked for. That reasoning expired when fundamental
+# moved to CADENCE_DAILY alongside the nightly provider sweep: it is now
+# expected every session, so a session with no rows is a genuine gap. MEASURED
+# 2026-08-20: `fundamental` was missing 2026-08-10 and 2026-08-11 while `dip`
+# and `combo` -- which were wrapped -- had both. Unwrapped, that loss was
+# permanent.
+#
+# `sentiment` was never wrapped either, and is missing eleven sessions from
+# 2026-07-21..2026-08-04 for the same reason. It costs ~10s/session, so it
+# clears its whole backlog in one run.
+#
+# The COST objection to fundamental (~109 min/session) is still real and is
+# answered by BACKFILL_BUDGET_S below, not by exclusion: the budget is checked
+# BEFORE each session, so an expensive module backfills exactly one session per
+# run and the daily pass is never put at risk.
+BACKFILL_MODULES = ("hype", "dip", "combo", "sentiment", "fundamental")
 
 # TIME budget for backfilling, per step, per run.
 #
@@ -442,6 +462,54 @@ def _missing_sessions(module: str, asof: str, limit: int) -> list[str]:
     return [d for d in recent if d not in stored]
 
 
+# MODULES WHOSE STEP WRITES A FIXED `latest.html`.
+#
+# `senti_screen.write_html` and `fund_screen.write_html` write BOTH a
+# session-stamped page and an unstamped `latest.html`:
+#
+#     p = config.REPORTS_SENTIMENT / f"{asof}.html"     # fine
+#     (config.REPORTS_SENTIMENT / "latest.html").write  # FIXED PATH
+#
+# So every backfilled session overwrites `latest.html`, and the LAST session
+# processed wins. Gaps are filled newest-first, which means the last one is the
+# OLDEST -- `latest.html` would have ended up showing 2026-07-16 while the
+# store held 2026-08-19. The page a reader opens would silently be a month old.
+#
+# `hype`, `dip` and `combo` are unaffected: they write no report of their own,
+# their pages come from `explore` and `dashboard`. So this map is exactly the
+# two modules wrapped on 2026-08-20, and it must grow if a future score step
+# starts writing its own landing page.
+LATEST_HTML_DIR = {
+    "sentiment": "REPORTS_SENTIMENT",
+    "fundamental": "REPORTS_FUNDAMENTAL",
+}
+
+
+def _restore_latest_html(module: str, asof: str) -> None:
+    """Point `latest.html` back at `asof` after a backfill moved it.
+
+    A copy, not a re-score: re-running the step for `asof` would cost another
+    ~109 minutes for `fundamental` to regenerate a page already written to
+    `{asof}.html` earlier in the same step.
+    """
+    attr = LATEST_HTML_DIR.get(module)
+    if not attr:
+        return
+    d = getattr(config, attr, None)
+    if d is None:
+        return
+    src = d / f"{asof}.html"
+    if not src.exists():
+        log(f"    [{module}] no {asof}.html to restore latest.html from")
+        return
+    try:
+        (d / "latest.html").write_text(src.read_text(encoding="utf-8"),
+                                       encoding="utf-8")
+        log(f"    [{module}] latest.html restored to {asof}")
+    except OSError as exc:
+        log(f"    [{module}] could NOT restore latest.html: {repr(exc)[:80]}")
+
+
 def _with_backfill(module: str, compute_one) -> Callable[[str], tuple[int, str]]:
     """Score TODAY first, then fill recent gaps within a time budget.
 
@@ -466,8 +534,15 @@ def _with_backfill(module: str, compute_one) -> Callable[[str], tuple[int, str]]
     def run(asof: str) -> tuple[int, str]:
         rows, detail = compute_one(asof)          # TODAY FIRST, always
 
-        gaps = [d for d in _missing_sessions(module, asof, BACKFILL_MAX_SESSIONS)
-                if d != asof]
+        # NEWEST GAP FIRST. `_missing_sessions` returns chronological order,
+        # which spends the budget on the oldest session available -- the exact
+        # inversion of this function's own rule that today's data must never be
+        # starved by history. With an expensive module doing one session per
+        # run, chronological order would have filled July before the 2026-08-10
+        # hole a reader would actually notice.
+        gaps = sorted(
+            (d for d in _missing_sessions(module, asof, BACKFILL_MAX_SESSIONS)
+             if d != asof), reverse=True)
         if not gaps:
             return rows, detail
 
@@ -486,6 +561,10 @@ def _with_backfill(module: str, compute_one) -> Callable[[str], tuple[int, str]]
                     f"({(time.time() - started) / 60:.0f}m spent)")
             except Exception as exc:                             # noqa: BLE001
                 log(f"    [{module}] backfill {d} failed: {repr(exc)[:90]}")
+        if filled:
+            # MUST come after the loop, never inside it: each backfilled
+            # session rewrites `latest.html` to itself.
+            _restore_latest_html(module, asof)
         if filled or len(gaps) > filled:
             detail = (f"{detail}; backfilled {filled} of {len(gaps)} "
                       f"missed session(s)")
@@ -814,6 +893,210 @@ def _step_leaderboard(asof: str) -> tuple[int, str]:
     return len(out), "  ".join(out)
 
 
+# How many names the NETWORK-dependent checks sample per run.
+#
+# The structural checks in `_step_validate` run over the whole store -- they are
+# local arithmetic and cost nothing to widen. `verify_metrics` and
+# `providers.compare` hit SEC and Finnhub, so they are sampled.
+#
+# The sample is seeded with the SESSION DATE, not a constant. A fixed seed
+# re-checks the same 60 names every night and learns nothing after the first
+# run; a session seed accumulates roughly 1,200 distinct names a month and is
+# still exactly reproducible -- the seed is readable off the date in the log.
+# (`hash()` would NOT be reproducible: Python salts string hashes per process.)
+VALIDATE_SAMPLE = 60
+
+# Wall-clock ceiling this step enforces on ITSELF, for the same reason
+# LEADERBOARD_BUDGET_S exists: `Step.timeout` is compared against elapsed time
+# only AFTER the step returns, so it labels an overrun and never prevents one.
+#
+# The store-wide `audit` always runs -- it is the check most likely to catch a
+# COLL-class bug and its cost does not depend on the sample. The network checks
+# are what scale with VALIDATE_SAMPLE and what can stall on a slow SEC or
+# Finnhub, so they are the ones skipped when the budget is gone. A skipped
+# check is RECORDED, never silent.
+VALIDATE_BUDGET_S = 20 * 60
+
+
+def _step_validate(asof: str) -> tuple[int, str]:
+    """Check displayed numbers against sources that are not us.
+
+    NOTHING IN THE PIPELINE DID THIS UNTIL 2026-08-20.
+
+    `verify_metrics`, `providers.compare`, `ttm_invariants` and `audit_metrics`
+    all existed, and on 2026-08-16 all passed. But every one of them only ever
+    ran because someone typed its name, which means the guarantee expired the
+    moment anything downstream changed. A check that runs when it is remembered
+    is not a check -- it is a story about one afternoon. The COLL bug (EBITDA
+    $4M against a real $68M) survived precisely because the things that would
+    have caught it were not wired to anything.
+
+    Four checks, and they are NOT interchangeable -- see audit_metrics for why
+    the three classes of number admit different kinds of proof:
+
+      audit         score-store invariants: coverage, constant, fabrication,
+                    range, nulls. Whole store. Catches a metric that exists
+                    only because a missing input was read as zero.
+      rollforward   every rolled cash-flow TTM re-derived from its three
+                    REPORTED legs: FY + YTD_now - YTD_prior.
+      sec/provider  independent SEC arithmetic, and our ratios against
+                    Finnhub/Yahoo.
+
+    Only `audit` runs store-wide. Everything else runs on the SAMPLE, because
+    each of them loads the fact store per call -- see the note on the TTM block.
+    Coverage comes from rotation over days, not from doing everything nightly.
+
+    WHAT COUNTS AS A PROBLEM is deliberately narrow: only checks whose failure
+    is unambiguously OURS. `audit` HIGH issues and roll-forward identity
+    failures are arithmetic or structural facts about our
+    own store. The SEC recompute and the provider cross-check are comparisons
+    against third parties that are each wrong often enough to be evidence
+    rather than verdicts -- on 2026-08-14 our FCF disagreed with Yahoo on 43%
+    of names and SEC proved US right -- so they are recorded and reported, and
+    never counted.
+
+    This step NEVER fails the run. A validation failure must not block
+    `explore`, `profiles` or `dashboard` -- the pages have to render so the
+    problem is visible, and a blocked page is indistinguishable from a quiet
+    one. Problems are counted into the detail string, which the dashboard
+    shows, and written to data/_validate.csv.
+    """
+    import numpy as np
+    import pandas as pd
+
+    _t_started = time.time()
+    parts: list[str] = []
+    problems = 0
+    rows: list[dict] = []
+
+    def note(check: str, ok: int, bad: int, detail: str = "") -> None:
+        rows.append({"asof": asof, "check": check, "ok": ok, "bad": bad,
+                     "detail": detail})
+
+    # 1. score-store invariants, whole store
+    try:
+        import audit_metrics
+        issues, _summary = audit_metrics.audit()
+        n_high = int((issues["severity"] == "HIGH").sum()) if len(issues) else 0
+        problems += n_high
+        parts.append(f"audit:{n_high}high/{len(issues)}")
+        note("audit", len(issues) - n_high, n_high,
+             "; ".join(f"{r.module}.{r.metric}:{r.issue}"
+                       for r in issues.head(5).itertuples(index=False))
+             if len(issues) else "")
+    except Exception as exc:                                     # noqa: BLE001
+        parts.append(f"audit:ERR({type(exc).__name__})")
+        note("audit", 0, 0, repr(exc)[:120])
+
+    # The rotating sample, drawn BEFORE the checks that use it.
+    sample: list[str] = []
+    try:
+        import bars
+        pool = sorted(set(bars.tradeable_universe()))
+        if pool:
+            rng = np.random.default_rng(int(str(asof).replace("-", "")))
+            sample = sorted(rng.choice(
+                pool, size=min(VALIDATE_SAMPLE, len(pool)),
+                replace=False).tolist())
+    except Exception as exc:                                     # noqa: BLE001
+        log(f"    [validate] sample unavailable: {repr(exc)[:80]}")
+
+    # 2. The roll-forward identity, ON THE SAMPLE.
+    #
+    # `ttm_invariants.check()` -- the WINDOW checker -- is deliberately NOT run
+    # here. MEASURED 2026-08-20 on unmodified code: 3 of 127 windows pass, a
+    # 2.4% pass rate, for large caps and microcaps alike. It is not detecting
+    # 97% broken data; its premise does not hold for this source. It wants four
+    # consecutive `qtrs==1` quarter-ends, and SEC bulk data does not provide
+    # them for most concepts -- 10-Q cash-flow rows are YEAR-TO-DATE, so only
+    # Q1 is `qtrs=1` and consecutive ends land a year apart, failing `no_gap`
+    # and `spans_year` by construction.
+    #
+    # Wiring a check with a 2.4% pass rate into a daily step would paint this
+    # step permanently red and teach everyone to ignore it. It stays a CLI tool
+    # until its premise is fixed; the note below records that it was skipped so
+    # the omission is visible rather than forgotten.
+    #
+    # `check_rollforward` is a different function and genuinely works (27/27
+    # measured on the same sample). It re-derives each rolled cash-flow TTM
+    # from three REPORTED legs, and reads only from 2024q1, so it is cheap.
+    note("ttm_windows", 0, 0,
+         "SKIPPED: ttm_invariants.check premise does not hold for SEC bulk "
+         "data (2.4% pass on unmodified code) -- CLI tool only")
+    parts.append("ttm:skipped")
+    if sample:
+        try:
+            import ttm_invariants as TI
+            r = TI.check_rollforward(sample)
+            rbad = int((~r["ok"]).sum()) if len(r) else 0
+            problems += rbad
+            parts.append(f"roll:{len(r) - rbad}/{len(r)}")
+            note("rollforward", len(r) - rbad, rbad, f"{len(sample)} name(s)")
+        except Exception as exc:                                 # noqa: BLE001
+            parts.append(f"roll:ERR({type(exc).__name__})")
+            note("rollforward", 0, 0, repr(exc)[:120])
+
+    # 4. sampled: independent SEC arithmetic, and provider cross-check
+    if sample and (time.time() - _t_started) > VALIDATE_BUDGET_S:
+        log(f"    [validate] budget {VALIDATE_BUDGET_S}s spent before the "
+            f"network checks; skipping them this run")
+        parts.append("sec:skipped(budget)")
+        parts.append("prov:skipped(budget)")
+        note("sec_recompute", 0, 0, "skipped: validate budget spent")
+        note("provider_cross_check", 0, 0, "skipped: validate budget spent")
+        sample = []
+
+    if sample:
+        try:
+            import verify_metrics
+            rc = verify_metrics.run(sample, asof)
+            # RECORDED, NOT COUNTED -- and this is not leniency, it is the
+            # documented limitation. `verify_metrics` cannot follow a
+            # roll-forward, so it flags every rolled cash-flow TTM as a
+            # mismatch: measured here, 29 of 68 fields, almost all cfo_ttm and
+            # capex_ttm. The `rollforward` check above re-derives those same
+            # values from three REPORTED legs and passed 27/27, which is
+            # positive proof our number is what the filings say.
+            #
+            # Counting them would put this step permanently in PROBLEM state,
+            # and a checker that cries wolf gets ignored -- which is how the
+            # COLL bug survived a wall of green checkmarks.
+            parts.append("sec:pass" if rc == 0 else "sec:see-csv")
+            note("sec_recompute", int(rc == 0), int(rc != 0),
+                 f"{len(sample)} name(s); rolled TTMs flag here by design, "
+                 f"see rollforward")
+        except Exception as exc:                                 # noqa: BLE001
+            parts.append(f"sec:ERR({type(exc).__name__})")
+            note("sec_recompute", 0, 0, repr(exc)[:120])
+
+        try:
+            import providers
+            cmp_df = providers.compare(sample, asof, verbose=False)
+            if len(cmp_df):
+                st = cmp_df["status"]
+                agree = int((st == "agree").sum())
+                dis = int((st == "DISAGREE").sum())
+                rate = agree / max(1, agree + dis)
+                # A DISAGREEMENT IS A QUESTION, NOT A VERDICT. On 2026-08-14
+                # our FCF disagreed with Yahoo on 43% of names and SEC proved
+                # US right. So this is reported, never counted as a problem.
+                parts.append(f"prov:{rate:.0%}({agree}/{agree + dis})")
+                note("provider_cross_check", agree, dis,
+                     "disagreement is a question, not a verdict")
+        except Exception as exc:                                 # noqa: BLE001
+            parts.append(f"prov:ERR({type(exc).__name__})")
+            note("provider_cross_check", 0, 0, repr(exc)[:120])
+
+    try:
+        pd.DataFrame(rows).to_csv(config.DATA / "_validate.csv", index=False)
+    except (OSError, ValueError) as exc:
+        log(f"    [validate] could not write _validate.csv: {repr(exc)[:80]}")
+
+    head = "CLEAN" if problems == 0 else f"{problems} PROBLEM(S)"
+    parts.append(f"[{time.time() - _t_started:.0f}s]")
+    return problems, f"{head} -- " + "  ".join(parts)
+
+
 def _step_retention(asof: str) -> tuple[int, str]:
     """Age-based pruning only. Every horizon derives from HISTORY_YEARS, which is
     now 10 -- see the config comment before ever lowering it."""
@@ -878,14 +1161,19 @@ REGISTRY: tuple[Step, ...] = (
     Step("senti_cache", _step_senti_cache, config.CADENCE_DAILY,
          depends_on=("news",), timeout=600,
          desc="lexicon scores per article, cached once per day"),
-    Step("sentiment", _step_sentiment, config.CADENCE_DAILY,
+    Step("sentiment", _with_backfill("sentiment", _step_sentiment),
+         config.CADENCE_DAILY,
          depends_on=("senti_cache", "bars"), timeout=900,
          desc="sentiment score module + dashboard"),
     Step("shortvol", _step_shortvol, config.CADENCE_DAILY, timeout=600,
          desc="FINRA Reg SHO daily short volume (feeds hype)"),
     Step("hype", _with_backfill("hype", _step_hype), config.CADENCE_DAILY,
          depends_on=("bars", "shortvol"),
-         timeout=1200,
+         # 7200s, not 1200s. MEASURED: median 2.1 min but last 109.0 min and
+         # slowest 116.5 min, so the old budget flagged OVER BUDGET on nearly
+         # every real run. A label that always fires is noise, and noise is how
+         # a genuine 10-hour overrun went unnoticed.
+         timeout=7200,
          desc="attention + narrative-premium score module (daily: attention "
               "is a short-horizon flow measure)"),
     Step("bounce", _step_bounce, config.CADENCE_DAILY, depends_on=("bars",),
@@ -906,8 +1194,9 @@ REGISTRY: tuple[Step, ...] = (
     # Affordable because the step's own median is 39.5s across the last eight
     # runs (the 4,313s outlier was a single run during the fact-store growth),
     # and the provider half is a cache hit measured at 0.07s.
-    Step("fundamental", _step_fundamental, config.CADENCE_DAILY,
-         depends_on=("bars", "provider"), timeout=1800,
+    Step("fundamental", _with_backfill("fundamental", _step_fundamental),
+         config.CADENCE_DAILY,
+         depends_on=("bars", "provider"), timeout=10800,
          desc="fundamental score module + dashboard (daily: it applies the "
               "provider overlay, which is refreshed nightly)"),
     Step("sec_facts", _step_sec_facts, config.CADENCE_QUARTERLY, timeout=3600,
@@ -945,6 +1234,18 @@ REGISTRY: tuple[Step, ...] = (
     # silently showed a two-day-old session. A step whose OUTPUT depends on the
     # session must have the session as its watermark; only genuinely
     # date-driven work (retention pruning, docs regeneration) may key on today.
+    # AFTER the scores are written, BEFORE the pages render. After, because it
+    # must validate what today's run actually produced rather than yesterday's.
+    # Before, because a number worth flagging is worth flagging on the page the
+    # reader opens, not after they have already read it.
+    #
+    # `depends_on` is deliberately EMPTY of hard requirements beyond combo: a
+    # validation step that gets BLOCKED by an upstream failure goes silent at
+    # exactly the moment something is most likely wrong.
+    Step("validate", _step_validate, config.CADENCE_DAILY,
+         depends_on=("combo",), timeout=3600,
+         desc="check displayed numbers against SEC, Finnhub and the "
+              "store's own invariants"),
     Step("explore", _step_explore, config.CADENCE_DAILY, depends_on=("combo",),
          timeout=300,
          desc="rebuild the sortable/filterable all-stock table"),
