@@ -1245,6 +1245,14 @@ STOCK_CONCEPTS = frozenset({
 # The right reduction is the MOST RECENT period's figure, never a sum.
 AVERAGE_CONCEPTS = frozenset({"shares_basic", "shares_diluted"})
 
+# PER-SHARE FIGURES THAT MUST NOT BE SUMMED ACROSS PERIODS.
+#
+# Distinct from AVERAGE_CONCEPTS: a weighted-average share count is a duration
+# fact reduced by LATEST, whereas EPS is a genuine twelve-month quantity -- it
+# just cannot be reached by addition, because each quarter's denominator
+# differs. See the ordering flip at the end of `_ttm`.
+NON_ADDITIVE_CONCEPTS = frozenset({"eps_basic", "eps_diluted"})
+
 
 _HIST_CACHE: dict = {}
 
@@ -1895,8 +1903,12 @@ def _latest(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     is_max = d["concept"].isin(AGGREGATE_MAX_CONCEPTS)
     d["_pref"] = d["rank"].where(~is_max, 0)
     d["_val"] = pd.to_numeric(d["value"], errors="coerce").where(is_max, 0.0)
+    # STABLE. Every sort feeding a `.tail()` in this file uses mergesort: the
+    # default quicksort is not stable, so tied rows were ordered by whatever
+    # else happened to be in the array, and the survivor of a tie changed with
+    # the BATCH. See the tie-break note at the end of `_ttm`.
     d = d.sort_values(["ddate", "_pref", "_val", "filed"],
-                      ascending=[True, False, True, True])
+                      ascending=[True, False, True, True], kind="mergesort")
     return d.groupby(keys, observed=True).tail(1).drop(
         columns=["_pref", "_val"], errors="ignore")
 
@@ -1967,7 +1979,8 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
 
     q1 = flow[flow["qtrs"] == 1]
     if not q1.empty:
-        d = (q1.sort_values(["ddate", "rank", "filed"], ascending=[True, False, True])
+        d = (q1.sort_values(["ddate", "rank", "filed"],
+                            ascending=[True, False, True], kind="mergesort")
                .groupby(["ticker", "concept", "ddate"], observed=True).tail(1))
         # DERIVE THE MISSING FISCAL Q4 FIRST, or the "four most recent
         # quarters" is not twelve months. A 10-K reports the full year and no
@@ -1977,7 +1990,8 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
         # this gap for the table; the point-in-time frame did not, so every
         # TTM-derived metric inherited the malformed window.
         d = _q4_rows(d, ann)
-        d = d.sort_values("ddate").groupby(["ticker", "concept"], observed=True).tail(4)
+        d = (d.sort_values("ddate", kind="mergesort")
+               .groupby(["ticker", "concept"], observed=True).tail(4))
         n = d.groupby(["ticker", "concept"], observed=True)["value"].transform("size")
         d = d[n == 4]
 
@@ -2074,16 +2088,42 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
         ytd = flow[flow["qtrs"].isin([1, 2, 3])]
         ann_all = flow[flow["qtrs"] == 4]
         if not ytd.empty and not ann_all.empty:
-            y = (ytd.sort_values(["ddate", "filed"])
+            y = (ytd.sort_values(["ddate", "filed"], kind="mergesort")
                     .drop_duplicates(["ticker", "concept", "ddate", "qtrs"],
                                      keep="last"))
             a = _latest(ann_all, ["ticker", "concept"])[
                 ["ticker", "concept", "value", "ddate"]].rename(
                 columns={"value": "_fy", "ddate": "_fy_end"})
             y = y.merge(a, on=["ticker", "concept"], how="inner")
+
+            # THE STUB MUST START AT THE FISCAL YEAR START, and this filter has
+            # to run BEFORE a stub is chosen.
+            #
+            # `FY + stub_now - stub_prior` is twelve months only when the stub
+            # is a YEAR-TO-DATE cumulative. A `qtrs=1` row is YTD only for
+            # fiscal Q1; anywhere else it is a single quarter, and netting it
+            # yields the fiscal year with ONE QUARTER SWAPPED -- not a trailing
+            # twelve months.
+            #
+            # HZO, measured 2026-08-21 (fiscal year ends September): the roll
+            # took the qtrs=1 quarter ending 2026-06-30 (fiscal Q3) and
+            # produced -31,631,000 + 15,647,000 - (-51,970,000) = 35,986,000
+            # against a true $4.0M. The valid qtrs=3 stub ending the same day
+            # was sitting beside it, and lost only because `cur` keeps the
+            # latest row. Filtering AFTER the pick would have dropped the roll
+            # entirely instead of choosing the right stub -- which is exactly
+            # what happened to EPS.
+            #
+            # A genuine YTD stub of n quarters ends about 3n months after the
+            # fiscal year end, so that is the test.
+            _want = (pd.to_datetime(y["ddate"], errors="coerce")
+                     - pd.to_datetime(y["_fy_end"], errors="coerce")).dt.days
+            y = y[((_want - y["qtrs"].astype(int) * 91.31).abs() <= 20)
+                  | (y["ddate"] <= y["_fy_end"])]
+
             cur = y[y["ddate"] > y["_fy_end"]]
             if not cur.empty:
-                cur = (cur.sort_values("ddate")
+                cur = (cur.sort_values("ddate", kind="mergesort")
                           .groupby(["ticker", "concept"], observed=True)
                           .tail(1)[["ticker", "concept", "qtrs", "ddate",
                                     "value", "_fy", "_fy_end"]])
@@ -2093,8 +2133,9 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
                 gap = (pd.to_datetime(m["ddate"])
                        - pd.to_datetime(m["_p_end"])).dt.days
                 m = m[(gap >= 350) & (gap <= 380)]
+
                 if not m.empty:
-                    m = (m.sort_values("_p_end")
+                    m = (m.sort_values("_p_end", kind="mergesort")
                            .groupby(["ticker", "concept"], observed=True).tail(1))
                     roll = pd.DataFrame({
                         "ticker": m["ticker"].values,
@@ -2109,7 +2150,18 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
                     out.append(roll)
 
     if not out:
-        return pd.DataFrame(columns=["ticker", "concept", "value"])
+        # AVERAGE CONCEPTS SURVIVE AN EMPTY `out`.
+        #
+        # This used to return an empty frame and silently drop `avg_out`, so a
+        # filer whose only duration facts are weighted-average share counts
+        # lost them entirely -- but ONLY when queried alone, because in a batch
+        # some other ticker kept `out` non-empty. RMIX, measured 2026-08-21:
+        # `shares_diluted_ttm` absent solo, present in a batch. Same class of
+        # bug as the tie-break below: a per-ticker answer decided by what else
+        # happened to be in the frame.
+        return (avg_out[["ticker", "concept", "value"]].reset_index(drop=True)
+                if avg_out is not None and not avg_out.empty
+                else pd.DataFrame(columns=["ticker", "concept", "value"]))
 
     # WHICHEVER WINDOW ENDS LATER WINS -- never both, never added.
     #
@@ -2126,8 +2178,44 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
     # 40.9 against a real ~35.5, and the same staleness ran through revenue,
     # margins, EV/EBITDA, FCF yield, ROE and every growth metric.
     cat = pd.concat(out, ignore_index=True)
-    cat = cat.sort_values("ddate").groupby(["ticker", "concept"],
-                                           observed=True).tail(1)
+    # A TIE ON `ddate` MUST NOT BE BROKEN BY ARRAY ORDER.
+    #
+    # `sort_values` defaults to quicksort, which is NOT stable, so when two
+    # windows ended on the same date the survivor depended on what else was in
+    # the frame. Measured 2026-08-21: HZO's `net_income_ttm` read 3,986,000
+    # queried alone and 35,986,000 queried alongside LOPE -- same rows, same
+    # candidates, different winner. `facts_asof` runs over the whole universe,
+    # so the batch answer is the one that reaches the pages, and no
+    # single-ticker check could ever reproduce it.
+    #
+    # Explicit priority, stable sort: among windows ending on the same day
+    # prefer the four reported quarters, then the roll-forward, then the
+    # annual (which is a real twelve months but the oldest of the three).
+    _PRIO = {"annual": 0, "roll": 1, "4q": 2}
+    cat["_prio"] = cat["_src"].map(_PRIO).fillna(0).astype(int)
+
+    # EPS IS NOT ADDITIVE, so four quarters must NOT simply be summed.
+    #
+    # Every per-share figure rides a weighted-average share count that changes
+    # each quarter, and in a loss quarter diluted collapses to basic because
+    # dilution is antidilutive. Adding four such numbers -- and this path adds a
+    # DERIVED Q4 on top -- compounds both effects.
+    #
+    # HZO, measured 2026-08-21 (fiscal year ends September):
+    #     4q sum   0.66 - 0.12 - 0.36 + 0.08(derived Q4) = 0.26
+    #     roll     FY -1.43 + YTD 0.21 - prior YTD -1.38 = 0.16
+    # Yahoo 0.16, Finnhub ~0.18, Simply Wall St 0.18, and net_income/shares
+    # 0.172. The sum is the outlier; every leg of the roll is a figure the
+    # company actually reported for that exact window.
+    #
+    # So for these concepts the ordering flips: prefer the roll-forward, and
+    # take the summed window only when nothing else is available.
+    _nonadd = cat["concept"].isin(NON_ADDITIVE_CONCEPTS)
+    cat.loc[_nonadd, "_prio"] = cat.loc[_nonadd, "_src"].map(
+        {"annual": 0, "4q": 1, "roll": 2}).fillna(0).astype(int)
+    cat = (cat.sort_values(["ddate", "_prio"], kind="mergesort")
+              .groupby(["ticker", "concept"], observed=True).tail(1)
+              .drop(columns="_prio"))
     if avg_out is not None:      # disjoint concepts, so no contest to resolve
         cat = pd.concat([cat, avg_out], ignore_index=True)
     return cat[["ticker", "concept", "value"]].reset_index(drop=True)
