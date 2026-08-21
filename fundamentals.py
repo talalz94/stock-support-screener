@@ -2011,6 +2011,31 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
                             kind="mergesort")
                .groupby(["ticker", "concept", "ddate"], observed=True).tail(1)
                .drop(columns="_proxy", errors="ignore"))
+
+        # COLLAPSE 52/53-WEEK NEAR-DUPLICATE PERIOD ENDS.
+        #
+        # The dedup above keys on EXACT `ddate`, so a filer on a 52/53-week
+        # calendar that reports one fiscal quarter under two period ends a few
+        # days apart keeps BOTH -- and the four-quarter sum then adds the same
+        # quarter twice.
+        #
+        # MRVL, measured 2026-08-21: 2025-07-31 and 2025-08-02 both carry
+        # 194,800,000, and the window summed
+        #     194.8 + 194.8 + 1,901.3 + 34.5 = 2,325.4M
+        # against a reported TTM of $2.53B. It also broke `_q4_rows`, which
+        # fills a fiscal Q4 only when EXACTLY three quarters sit inside the
+        # year and was finding five.
+        #
+        # `NEAR_PERIOD_DAYS` already encodes this rule for `ttm_invariants`;
+        # the production path simply never applied it. The LATER end is kept,
+        # so the window still ends on the most recently reported period.
+        if not d.empty:
+            _dd = pd.to_datetime(d["ddate"], errors="coerce")
+            d = d.assign(_dt=_dd).sort_values(["ticker", "concept", "_dt"],
+                                              kind="mergesort")
+            _nxt = d.groupby(["ticker", "concept"], observed=True)["_dt"].shift(-1)
+            d = d[~(((_nxt - d["_dt"]).dt.days <= NEAR_PERIOD_DAYS)
+                    .fillna(False))].drop(columns="_dt")
         # DERIVE THE MISSING FISCAL Q4 FIRST, or the "four most recent
         # quarters" is not twelve months. A 10-K reports the full year and no
         # 10-Q ever covers Q4, so the fourth-newest FILED quarter sits a year
