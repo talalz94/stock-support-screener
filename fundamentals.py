@@ -1903,14 +1903,36 @@ def _latest(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     is_max = d["concept"].isin(AGGREGATE_MAX_CONCEPTS)
     d["_pref"] = d["rank"].where(~is_max, 0)
     d["_val"] = pd.to_numeric(d["value"], errors="coerce").where(is_max, 0.0)
+
+    # A STATEMENT ROW BEATS A PROXY ROW, WHATEVER THE ALIAS RANK.
+    #
+    # This key sits AHEAD of `_pref` because the conflict is across tags, not
+    # within one. EE reports every statement figure as
+    # `NetIncomeLossAvailableToCommonStockholdersBasic` -- net income
+    # ATTRIBUTABLE to shareholders, FY2025 = $39.2M -- while its DEF 14A tags
+    # `NetIncomeLoss` = $167.0M, the CONSOLIDATED total including
+    # noncontrolling interests. `NetIncomeLoss` outranks the attributable tag,
+    # so the proxy won and net_income_ttm read $175.3M against a real ~$47M,
+    # putting margins, ROE and ROA on a different basis from EPS.
+    #
+    # Deprioritised rather than dropped: for some filers the proxy is the only
+    # annual row there is (LOPE), and an older figure of the right shape beats
+    # no figure at all. Rescaling still applies -- see
+    # `_drop_non_statement_forms`.
+    d["_proxy"] = (d["form"].astype(str).str.match(_PROXY_FORM_RE)
+                   if "form" in d.columns else False)
     # STABLE. Every sort feeding a `.tail()` in this file uses mergesort: the
     # default quicksort is not stable, so tied rows were ordered by whatever
     # else happened to be in the array, and the survivor of a tie changed with
     # the BATCH. See the tie-break note at the end of `_ttm`.
-    d = d.sort_values(["ddate", "_pref", "_val", "filed"],
-                      ascending=[True, False, True, True], kind="mergesort")
+    #
+    # `_proxy` descending puts proxy rows FIRST, so a statement row lands last
+    # and `.tail(1)` takes it.
+    d = d.sort_values(["ddate", "_proxy", "_pref", "_val", "filed"],
+                      ascending=[True, False, False, True, True],
+                      kind="mergesort")
     return d.groupby(keys, observed=True).tail(1).drop(
-        columns=["_pref", "_val"], errors="ignore")
+        columns=["_pref", "_val", "_proxy"], errors="ignore")
 
 
 def _q4_rows(q: pd.DataFrame, ann: pd.DataFrame) -> pd.DataFrame:
@@ -1979,9 +2001,16 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
 
     q1 = flow[flow["qtrs"] == 1]
     if not q1.empty:
-        d = (q1.sort_values(["ddate", "rank", "filed"],
-                            ascending=[True, False, True], kind="mergesort")
-               .groupby(["ticker", "concept", "ddate"], observed=True).tail(1))
+        # `_proxy` first for the same reason as in `_latest`: a statement row
+        # must win over a proxy row even when the proxy carries a
+        # higher-ranked tag.
+        q1 = q1.assign(_proxy=q1["form"].astype(str).str.match(_PROXY_FORM_RE)
+                       if "form" in q1.columns else False)
+        d = (q1.sort_values(["ddate", "_proxy", "rank", "filed"],
+                            ascending=[True, False, False, True],
+                            kind="mergesort")
+               .groupby(["ticker", "concept", "ddate"], observed=True).tail(1)
+               .drop(columns="_proxy", errors="ignore"))
         # DERIVE THE MISSING FISCAL Q4 FIRST, or the "four most recent
         # quarters" is not twelve months. A 10-K reports the full year and no
         # 10-Q ever covers Q4, so the fourth-newest FILED quarter sits a year
