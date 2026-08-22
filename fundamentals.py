@@ -1855,6 +1855,35 @@ def facts_asof(asof: str, tickers: list[str] | None = None,
         return pd.DataFrame()
     out = out.reset_index().rename_axis(None, axis=1)
 
+    # A WEIGHTED-AVERAGE SHARE COUNT THAT CONTRADICTS SHARES OUTSTANDING IS A
+    # FILER TAGGING ERROR, and publishing it is worse than publishing nothing.
+    #
+    # ALMU, measured 2026-08-21: its 10-Q tags
+    # `WeightedAverageNumberOfDilutedSharesOutstanding` = 1.735437e10 with
+    # uom="shares" while `CommonStockSharesOutstanding` in the SAME filing is
+    # 1.811355e7 -- a 958x contradiction inside one document. Reported EPS is
+    # unaffected (-0.35, and -6,004,000 / 17,354,370 = -0.346 confirms the true
+    # count is ~17.35 MILLION), but every per-share metric built on the stored
+    # count would be off by three orders of magnitude.
+    #
+    # DROPPED, not rescaled: 1000x is the obvious guess and probably right, but
+    # guessing a scale factor invents a number, and this file's rule is that an
+    # honest gap beats a fabricated value. The bound is deliberately absurd --
+    # no real buyback or issuance moves the average 100x from the outstanding
+    # count -- so it fires only on tagging errors, never on a real capital
+    # change.
+    if "shares_out" in out.columns:
+        _so = pd.to_numeric(out["shares_out"], errors="coerce")
+        for _c in ("shares_basic_ttm", "shares_diluted_ttm"):
+            if _c not in out.columns:
+                continue
+            _v = pd.to_numeric(out[_c], errors="coerce")
+            _bad = (_so > 0) & (_v > 0) & ((_v / _so > 100) | (_v / _so < 0.01))
+            if bool(_bad.any()):
+                _log_once("dropped weighted-average share counts contradicting "
+                          "shares outstanding by >100x (filer tagging error)")
+                out.loc[_bad, _c] = float("nan")
+
     meta = (df.sort_values(["ticker", "filed"])
               .groupby("ticker", observed=True)
               .agg(sic=("sic", "last"), last_filed=("filed", "last"),
@@ -1946,7 +1975,18 @@ def _q4_rows(q: pd.DataFrame, ann: pd.DataFrame) -> pd.DataFrame:
     if q.empty or ann is None or ann.empty:
         return q
     # Period AVERAGES do not decompose by subtraction -- see AVERAGE_CONCEPTS.
-    ann = ann[~ann["concept"].isin(AVERAGE_CONCEPTS)]
+    #
+    # NEITHER DO PER-SHARE FIGURES. `FY - Q1 - Q2 - Q3` on EPS subtracts three
+    # numbers computed on three different weighted-average share counts from a
+    # fourth computed on a fifth, and calls the remainder a quarter's earnings.
+    #
+    # CMP, measured 2026-08-21 (fiscal year ends September): the derived Q4 came
+    # out at -3.50, so the four-quarter window summed to -2.90 while the same
+    # frame's net_income_ttm was +18,400,000 -- our own EPS contradicting our own
+    # net income, against a reported TTM EPS of +0.17. Without a derived Q4 the
+    # window is incomplete and is dropped, and the annual figure wins instead:
+    # an honest older number beats a fabricated recent one.
+    ann = ann[~ann["concept"].isin(AVERAGE_CONCEPTS | NON_ADDITIVE_CONCEPTS)]
     if ann.empty:
         return q
     a = _latest(ann, ["ticker", "concept"])[["ticker", "concept", "value",
