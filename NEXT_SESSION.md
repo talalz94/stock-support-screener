@@ -1437,57 +1437,57 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-20 22:08 — do not edit by hand._
+_Generated 2026-08-22 11:38 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 7s | 11s | 2.0 min | 12 |
-| `bars` | daily | 35s | 39s | 54s | 10.0 min | 12 |
-| `macro` | daily | 3.4 min | 1.8 min | 3.4 min | 15.0 min | 12 |
-| `news` | daily | 5s | 5s | 10s | 10.0 min | 12 |
-| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 12 |
-| `sentiment` | daily | 11s | 9s | 14s | 15.0 min | 13 |
-| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 10 |
-| `hype` | daily | 846.8 min | 87.0 min | 846.8 min ⚠ | 120.0 min | 12 |
-| `bounce` | daily | 53s | 39s | 77s | 15.0 min | 13 |
-| `provider` | daily | 71.7 min | 57.8 min | 71.7 min | 120.0 min | 6 |
-| `fundamental` | daily | 85.8 min | 87.8 min | 668.0 min ⚠ | 180.0 min | 13 |
-| `sec_facts` | quarterly | 7s | 4s | 7s | 60.0 min | 4 |
-| `sec_gap` | weekly | 187.1 min | 95.3 min | 187.1 min ⚠ | 20.0 min | 2 |
+| `universe` | daily | 7s | 7s | 10s | 2.0 min | 13 |
+| `bars` | daily | 87s | 40s | 87s | 10.0 min | 13 |
+| `macro` | daily | 2.3 min | 2.2 min | 3.4 min | 15.0 min | 13 |
+| `news` | daily | 6s | 5s | 7s | 10.0 min | 13 |
+| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 13 |
+| `sentiment` | daily | 3.7 min | 10s | 3.7 min | 15.0 min | 14 |
+| `shortvol` | daily | 4s | 3s | 4s | 10.0 min | 11 |
+| `hype` | daily | 819.1 min | 88.9 min | 846.8 min ⚠ | 120.0 min | 13 |
+| `bounce` | daily | 40s | 40s | 77s | 15.0 min | 14 |
+| `provider` | daily | 72.7 min | 64.3 min | 72.7 min | 120.0 min | 7 |
+| `fundamental` | daily | 132.6 min | 90.5 min | 668.0 min ⚠ | 180.0 min | 15 |
+| `sec_facts` | quarterly | 31s | 4s | 31s | 60.0 min | 5 |
+| `sec_gap` | weekly | 176.9 min | 176.9 min | 187.1 min ⚠ | 20.0 min | 3 |
 | `events` | weekly | 11.3 min | 9.8 min | 13.1 min | 30.0 min | 4 |
 | `leaderboard` | weekly | 617.6 min | 23.8 min | 617.6 min ⚠ | 90.0 min | 5 |
-| `dip` | daily | 14s | 15s | 25s | 15.0 min | 14 |
-| `combo` | daily | 12s | 12s | 18s | 15.0 min | 10 |
-| `explore` | daily | 7s | 6s | 13s | 5.0 min | 16 |
-| `snapshots` | daily | 6s | 1s | 11s | 5.0 min | 18 |
+| `dip` | daily | 68s | 16s | 68s | 15.0 min | 15 |
+| `combo` | daily | 90s | 12s | 90s | 15.0 min | 11 |
+| `explore` | daily | 9s | 6s | 13s | 5.0 min | 17 |
+| `snapshots` | daily | 16s | 2s | 16s | 5.0 min | 19 |
 | `profiles` | daily | 18.4 min | 16.5 min | 25.2 min ⚠ | 15.0 min | 16 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 13 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 19 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 16 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 20 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 17 |
 
-**Daily total ≈ 253.2 min.** Weekly adds 128.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 264.8 min.** Weekly adds 210.5 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-20 22:08 — do not edit by hand._
+_Generated 2026-08-22 11:38 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 244.8 | 2016-07 → 2026-08 |
+| bars 1d | 122 | 244.9 | 2016-07 → 2026-08 |
 | bars 1h | 4 | 0.5 | 2026-05 → 2026-08 |
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
-| news | 121 | 168.4 | 2016-08 → 2026-08 |
+| news | 121 | 168.5 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 253.1 | 2016-08 → 2026-08 |
-| fundamentals | 68 | 332.9 | 2009q2 → 2026q1 |
-| short volume | 73 | 54.6 | 2020-08 → 2026-08 |
-| flags | 14 | 1.3 | 2026-07-31 → 2026-08-19 |
-| rejects | 14 | 2.9 | 2026-07-31 → 2026-08-19 |
+| scores | 121 | 259.7 | 2016-08 → 2026-08 |
+| fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
+| short volume | 73 | 54.7 | 2020-08 → 2026-08 |
+| flags | 15 | 1.3 | 2026-07-31 → 2026-08-20 |
+| rejects | 15 | 3.1 | 2026-07-31 → 2026-08-20 |
 | loose (macro, universe, jobs, study) | 29 | 3.6 | — |
 
-**`data/` total ≈ 1,077 MB.** `reports/` is a further 24 MB across 105 pages.
+**`data/` total ≈ 1,086 MB.** `reports/` is a further 26 MB across 124 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -1495,21 +1495,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-20 22:08 — do not edit by hand._
+_Generated 2026-08-22 11:38 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 328 | 2016-09-27 → 2026-08-19 |
-| `fundamental` | 52 | 188 | 2016-08-25 → 2026-08-19 |
-| `hype` | 20 | 310 | 2016-10-25 → 2026-08-19 |
-| `dip` | 10 | 235 | 2016-09-27 → 2026-08-19 |
-| `combo` | 15 | 190 | 2016-11-04 → 2026-08-19 |
+| `sentiment` | 26 | 341 | 2016-09-27 → 2026-08-20 |
+| `fundamental` | 53 | 192 | 2016-08-25 → 2026-08-21 |
+| `hype` | 20 | 312 | 2016-10-25 → 2026-08-20 |
+| `dip` | 10 | 244 | 2016-09-27 → 2026-08-21 |
+| `combo` | 15 | 199 | 2016-11-04 → 2026-08-21 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-20 22:08 — do not edit by hand._
+_Generated 2026-08-22 11:38 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
