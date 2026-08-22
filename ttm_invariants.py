@@ -56,7 +56,17 @@ config.safe_console()
 OUT = config.DATA / "_ttm_invariants.csv"
 
 SPAN_MIN, SPAN_MAX = 350, 380      # a real twelve months
-QUARTER_MIN, QUARTER_MAX = 80, 100  # one reported quarter
+# ONE REPORTED QUARTER. The upper bound is 125, not 100, because a retail
+# 4-4-5 calendar is not four equal quarters. KR files a SIXTEEN-week Q1 and
+# three twelve-week quarters: measured 2026-08-22, revenue 45.118B for the
+# 16-week period against ~33.9B for each 12-week one, and the window
+# 2025-08-16 / 2025-11-08 / 2026-01-31 / 2026-05-31 carries gaps of 84, 84 and
+# 120 days. That is 12+12+12+16 = 52 weeks -- a correct TTM that the old bound
+# failed on six concepts at once.
+#
+# Still far below a SKIPPED quarter (~182 days) or the HD 644-day window, so
+# the check keeps its teeth.
+QUARTER_MIN, QUARTER_MAX = 80, 125
 
 
 def check(tickers: list[str] | None = None,
@@ -151,11 +161,25 @@ def check_rollforward(tickers: list[str] | None = None) -> pd.DataFrame:
         tm = tm[tm["ticker"].isin(tickers)]
     raw = raw.merge(tm, on="cik", how="inner")
 
-    pref = {}
+    # ALIAS RANK, not just the concept. Several tags map to one concept and
+    # they carry DIFFERENT numbers, so ignoring rank builds an identity out of
+    # legs the production path never used -- or worse, out of a mixture.
+    #
+    # Measured 2026-08-22. SRZN maps two tags to `capex`:
+    #   PaymentsToAcquirePropertyPlantAndEquipment  rank 0  FY 128,000
+    #   PaymentsToAcquireProductiveAssets           rank 1  FY 280,000
+    # production takes rank 0 and gets 128,000 + 139,000 - 45,000 = 222,000;
+    # the checker took rank 1 and called that a 40% failure.
+    #
+    # ARKO was worse: 13,600,000 + 6,700,000 - 6,910,000 = 13,390,000 mixes two
+    # rank-1 legs with a rank-0 one inside a single identity.
+    pref, rank_of = {}, {}
     for concept, alts in FD.TAGS.items():
         for rank, t in enumerate(alts):
             pref[t] = concept
+            rank_of[t] = rank
     raw["concept"] = raw["tag"].map(pref)
+    raw["rank"] = raw["tag"].map(rank_of)
     raw = raw[raw["concept"].notna()]
 
     cum = raw[raw["concept"].isin(["cfo", "cfi", "cff", "capex", "sbc",
@@ -163,14 +187,48 @@ def check_rollforward(tickers: list[str] | None = None) -> pd.DataFrame:
     if cum.empty:
         return pd.DataFrame()
 
-    facts = FD.facts_asof(str(pd.Timestamp.today().date()),
-                          sorted(set(tm["ticker"])))
+    _asof = str(pd.Timestamp.today().date())
+    facts = FD.facts_asof(_asof, sorted(set(tm["ticker"])))
     if facts.empty:
         return pd.DataFrame()
     fi = facts.set_index("ticker")
 
+    # ONLY CHECK VALUES THAT WERE ACTUALLY ROLLED.
+    #
+    # The identity `FY + YTD_now - YTD_prior` says nothing about a figure
+    # produced by summing four quarters or by taking an annual outright, so
+    # applying it to those compares two different constructions and calls the
+    # difference a failure. Measured 2026-08-22: HTLD `sbc` (1,900,000) and
+    # SMPL `sbc` (15,712,000) are both `_src == "4q"`, and both were reported
+    # as roll-forward failures by a checker that never asked.
+    #
+    # `_ttm` records which source produced each figure; `ttm_windows` exposes
+    # it. So the checker now tests exactly the population the identity governs.
+    # (ticker, concept) -> the TAG production rolled, so the identity is
+    # re-derived from the SAME legs rather than from a guessed alias.
+    #
+    # Forcing the preferred alias was wrong and LBRDA proves it: rank 0 has no
+    # annual and no current stub, so only rank 1 supplies a complete set.
+    # Production rolls rank 1 to -389M; a rank-0 prior spliced into rank-1 legs
+    # gives -614M, and the checker reported the correct figure as a 37%
+    # failure. CAI and PLOW `capex` are the same shape.
+    try:
+        _w = FD.ttm_windows(_asof, sorted(set(tm["ticker"])))
+        _r = _w[_w["_src"] == "roll"] if not _w.empty else _w
+        _rolled = {(t, c): g for t, c, g in
+                   zip(_r["ticker"], _r["concept"], _r["_tag"])}             if len(_r) else {}
+    except Exception:                                            # noqa: BLE001
+        _rolled = {}
+
     rows = []
     for (tk, concept), g in cum.groupby(["ticker", "concept"], observed=True):
+        if _rolled and (tk, concept) not in _rolled:
+            continue
+        _use_tag = _rolled.get((tk, concept)) if _rolled else None
+        if _use_tag is not None and "tag" in g.columns:
+            g = g[g["tag"] == _use_tag]
+            if g.empty:
+                continue
         col = f"{concept}_ttm"
         if col not in fi.columns or tk not in fi.index:
             continue
@@ -178,8 +236,11 @@ def check_rollforward(tickers: list[str] | None = None) -> pd.DataFrame:
                                   errors="coerce").iloc[0]
         if pd.isna(published):
             continue
-        g = g.sort_values(["ddate", "filed"]).drop_duplicates(
-            ["ddate", "qtrs"], keep="last")
+        # rank DESCENDING so the preferred alias (rank 0) lands last and
+        # `keep="last"` takes it -- the same convention as `_latest`.
+        g = (g.sort_values(["ddate", "rank", "filed"],
+                           ascending=[True, False, True], kind="mergesort")
+              .drop_duplicates(["ddate", "qtrs"], keep="last"))
         ann = g[g["qtrs"] == 4]
         if ann.empty:
             continue

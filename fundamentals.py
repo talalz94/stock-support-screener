@@ -1281,7 +1281,22 @@ def prime_history(tickers: list[str], periods: int = 20, freq: str = "A") -> int
     return len(ciks)
 
 
-NEAR_PERIOD_DAYS = 10
+# TWO PERIOD ENDS THIS CLOSE ARE ONE PERIOD.
+#
+# 16, not 10. A filer on a 52/53-week calendar re-tags the same fiscal quarter
+# under period ends a few days apart, and 10 days was not wide enough for all
+# of them. KR, measured 2026-08-22: its Q2 net income appears at BOTH
+# 2025-08-16 (609M/610M) and 2025-08-31 (610M) -- the same quarter, the same
+# money, 15 days apart. Uncollapsed, the window took the later end and carried
+# a 69-day gap: 2025-08-31 / 2025-11-08 / 2026-01-31 / 2026-05-31, which is a
+# malformed window describing a correctly-summed figure. Its `revenue`, tagged
+# only at 2025-08-16, was fine -- so the same company failed on one concept and
+# passed on another.
+#
+# Still nowhere near a real quarter. Consecutive quarter-ends are >=80 days
+# apart (QUARTER_MIN), and a retail 4-4-5 Q1 runs to ~120, so 16 cannot merge
+# two genuinely distinct periods.
+NEAR_PERIOD_DAYS = 16
 
 # Four CONSECUTIVE quarter-ends span ~273 days (three gaps of ~91). Allow slack
 # for 52/53-week fiscal calendars and late filings, but reject anything that
@@ -2087,15 +2102,36 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
         # year and was finding five.
         #
         # `NEAR_PERIOD_DAYS` already encodes this rule for `ttm_invariants`;
-        # the production path simply never applied it. The LATER end is kept,
-        # so the window still ends on the most recently reported period.
+        # the production path simply never applied it.
+        #
+        # THE SURVIVOR IS THE END THE FILER TAGGED MOST AUTHORITATIVELY --
+        # lowest alias rank -- not simply the earlier or the later one.
+        #
+        # Neither date rule works. KR tags its Q2 net income at 2025-08-16 AND
+        # 2025-08-31, and its Q3 at 2025-11-08 AND 2025-10-31. Keeping the
+        # later end left a 69-day gap (08-31 -> 11-08); keeping the earlier one
+        # left a 76-day gap (08-16 -> 10-31). Both are malformed, because in
+        # each pair one date is genuine and one is a mis-tag, and they point in
+        # opposite directions.
+        #
+        # What separates them is WHICH TAGS appear. The real fiscal ends,
+        # 2025-08-16 and 2025-11-08, each carry `NetIncomeLoss` (rank 0) plus
+        # two more; the mis-tags carry only `ProfitLoss` (rank 1). A filer
+        # tags its primary concept on the period it actually closed.
         if not d.empty:
             _dd = pd.to_datetime(d["ddate"], errors="coerce")
             d = d.assign(_dt=_dd).sort_values(["ticker", "concept", "_dt"],
                                               kind="mergesort")
-            _nxt = d.groupby(["ticker", "concept"], observed=True)["_dt"].shift(-1)
-            d = d[~(((_nxt - d["_dt"]).dt.days <= NEAR_PERIOD_DAYS)
-                    .fillna(False))].drop(columns="_dt")
+            _prv = d.groupby(["ticker", "concept"], observed=True)["_dt"].shift(1)
+            _near = ((d["_dt"] - _prv).dt.days <= NEAR_PERIOD_DAYS).fillna(False)
+            # One cluster id per run of near-duplicate ends.
+            d["_clu"] = (~_near).groupby(
+                [d["ticker"], d["concept"]], observed=True).cumsum()
+            d = (d.sort_values(["ticker", "concept", "_clu", "rank", "_dt"],
+                               kind="mergesort")
+                  .groupby(["ticker", "concept", "_clu"], observed=True)
+                  .head(1)
+                  .drop(columns=["_dt", "_clu"]))
         # DERIVE THE MISSING FISCAL Q4 FIRST, or the "four most recent
         # quarters" is not twelve months. A 10-K reports the full year and no
         # 10-Q ever covers Q4, so the fourth-newest FILED quarter sits a year
@@ -2202,13 +2238,36 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
         ytd = flow[flow["qtrs"].isin([1, 2, 3])]
         ann_all = flow[flow["qtrs"] == 4]
         if not ytd.empty and not ann_all.empty:
+            # ALL THREE LEGS MUST COME FROM THE SAME TAG.
+            #
+            # Several tags map to one concept and carry DIFFERENT numbers, so
+            # deduping by (ddate, qtrs) alone lets the annual come from one tag
+            # and the stubs from another -- an identity built from two
+            # different definitions of the same quantity.
+            #
+            # Measured 2026-08-22 on `cfo`, where `...OperatingActivities`
+            # (rank 0) and `...OperatingActivitiesContinuingOperations`
+            # (rank 1) both appear:
+            #
+            #   HL     rank 0 has all three (562,638 / 369,165 / 197,534) but
+            #          the mixed pick gave 562,638 + 357,841 - 136,031 =
+            #          784,448 against a same-tag 734,269
+            #   LBRDA  rank 0 has NO annual and NO current stub, so rank 1 is
+            #          the only complete set: -327 + -118 - -56 = -389M, and
+            #          forcing rank 0 for the prior alone would give -614M
+            #
+            # So the rule is not "always prefer rank 0" -- it is "use the
+            # lowest-ranked tag that supplies a COMPLETE set", chosen at the
+            # end once completeness is known.
             y = (ytd.sort_values(["ddate", "filed"], kind="mergesort")
-                    .drop_duplicates(["ticker", "concept", "ddate", "qtrs"],
-                                     keep="last"))
-            a = _latest(ann_all, ["ticker", "concept"])[
-                ["ticker", "concept", "value", "ddate"]].rename(
-                columns={"value": "_fy", "ddate": "_fy_end"})
-            y = y.merge(a, on=["ticker", "concept"], how="inner")
+                    .drop_duplicates(["ticker", "concept", "tag", "ddate",
+                                      "qtrs"], keep="last"))
+            a = (ann_all.sort_values(["ddate", "filed"], kind="mergesort")
+                        .groupby(["ticker", "concept", "tag"], observed=True)
+                        .tail(1)[["ticker", "concept", "tag", "value",
+                                  "ddate"]]
+                        .rename(columns={"value": "_fy", "ddate": "_fy_end"}))
+            y = y.merge(a, on=["ticker", "concept", "tag"], how="inner")
 
             # THE STUB MUST START AT THE FISCAL YEAR START, and this filter has
             # to run BEFORE a stub is chosen.
@@ -2238,22 +2297,41 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
             cur = y[y["ddate"] > y["_fy_end"]]
             if not cur.empty:
                 cur = (cur.sort_values("ddate", kind="mergesort")
-                          .groupby(["ticker", "concept"], observed=True)
-                          .tail(1)[["ticker", "concept", "qtrs", "ddate",
-                                    "value", "_fy", "_fy_end"]])
-                prior = y[["ticker", "concept", "qtrs", "ddate", "value"]].rename(
+                          .groupby(["ticker", "concept", "tag"], observed=True)
+                          .tail(1)[["ticker", "concept", "tag", "qtrs",
+                                    "ddate", "value", "_fy", "_fy_end",
+                                    "rank"]])
+                prior = y[["ticker", "concept", "tag", "qtrs", "ddate",
+                           "value"]].rename(
                     columns={"ddate": "_p_end", "value": "_p_val"})
-                m = cur.merge(prior, on=["ticker", "concept", "qtrs"], how="inner")
+                m = cur.merge(prior, on=["ticker", "concept", "tag", "qtrs"],
+                              how="inner")
                 gap = (pd.to_datetime(m["ddate"])
                        - pd.to_datetime(m["_p_end"])).dt.days
                 m = m[(gap >= 350) & (gap <= 380)]
 
                 if not m.empty:
+                    # Newest prior per TAG. Every tag with a complete set
+                    # keeps its own candidate roll; the choice between them
+                    # belongs to the ends-later rule below, NOT here.
+                    #
+                    # Collapsing to the lowest rank at this point was wrong and
+                    # measurably so. LBRDA's rank-0 tag stops in mid-2025, so
+                    # its newest annual is 2024-12-31 and it yields a roll
+                    # ending 2025-06-30, while rank 1 runs to 2026 and yields
+                    # one ending 2026-06-30. Taking rank 0 first threw the
+                    # current window away and left the bare annual, -327M,
+                    # eight months stale, against a correct -389M.
                     m = (m.sort_values("_p_end", kind="mergesort")
-                           .groupby(["ticker", "concept"], observed=True).tail(1))
+                           .groupby(["ticker", "concept", "tag"],
+                                    observed=True).tail(1))
                     roll = pd.DataFrame({
                         "ticker": m["ticker"].values,
                         "concept": m["concept"].values,
+                        "_rank": m["rank"].values,
+                        # The tag every leg came from, so a checker can verify
+                        # THIS construction instead of guessing a leg set.
+                        "_tag": m["tag"].values,
                         "value": (m["_fy"].astype(float)
                                   + m["value"].astype(float)
                                   - m["_p_val"].astype(float)).values,
@@ -2273,8 +2351,8 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
         # `shares_diluted_ttm` absent solo, present in a batch. Same class of
         # bug as the tie-break below: a per-ticker answer decided by what else
         # happened to be in the frame.
-        _cols = (["ticker", "concept", "value", "ddate", "_src", "_window"]
-                 if with_window else ["ticker", "concept", "value"])
+        _cols = (["ticker", "concept", "value", "ddate", "_src", "_window",
+                  "_tag"] if with_window else ["ticker", "concept", "value"])
         if avg_out is not None and not avg_out.empty:
             _a = avg_out.copy()
             for _c in _cols:
@@ -2313,6 +2391,11 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
     # annual (which is a real twelve months but the oldest of the three).
     _PRIO = {"annual": 0, "roll": 1, "4q": 2}
     cat["_prio"] = cat["_src"].map(_PRIO).fillna(0).astype(int)
+    # Alias rank breaks a tie between two windows ending on the same day; it
+    # never overrides the ends-later rule. Non-roll sources have already
+    # resolved their alias, so they sort as rank 0.
+    cat["_rank"] = (pd.to_numeric(cat.get("_rank"), errors="coerce").fillna(0)
+                    if "_rank" in cat.columns else 0)
 
     # EPS IS NOT ADDITIVE, so four quarters must NOT simply be summed.
     #
@@ -2333,20 +2416,23 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
     _nonadd = cat["concept"].isin(NON_ADDITIVE_CONCEPTS)
     cat.loc[_nonadd, "_prio"] = cat.loc[_nonadd, "_src"].map(
         {"annual": 0, "4q": 1, "roll": 2}).fillna(0).astype(int)
-    cat = (cat.sort_values(["ddate", "_prio"], kind="mergesort")
+    # `_rank` DESCENDING so the preferred alias lands last and `.tail(1)`
+    # takes it, matching the convention in `_latest`.
+    cat = (cat.sort_values(["ddate", "_prio", "_rank"],
+                           ascending=[True, True, False], kind="mergesort")
               .groupby(["ticker", "concept"], observed=True).tail(1)
-              .drop(columns="_prio"))
+              .drop(columns=["_prio", "_rank"], errors="ignore"))
     if avg_out is not None:      # disjoint concepts, so no contest to resolve
         cat = pd.concat([cat, avg_out], ignore_index=True)
     if with_window:
         # `_window` is the exact period-ends the 4q path summed; the other
         # sources have no window of their own, so it stays null for them and
         # `_src` says which produced the figure.
-        for _c in ("ddate", "_src", "_window"):
+        for _c in ("ddate", "_src", "_window", "_tag"):
             if _c not in cat.columns:
                 cat[_c] = None
         return cat[["ticker", "concept", "value", "ddate", "_src",
-                    "_window"]].reset_index(drop=True)
+                    "_window", "_tag"]].reset_index(drop=True)
     return cat[["ticker", "concept", "value"]].reset_index(drop=True)
 
 

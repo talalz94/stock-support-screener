@@ -3,6 +3,124 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-22 08:40 — THE CHECKERS WERE THE BUG, FOUR TIMES
+
+Read `regression_pins.py` before changing anything in `fundamentals`. It pins 28
+figures verified against filings or issuer press releases, each with its source,
+and it is the reason today's work did not ship two regressions.
+
+### ONE STRUCTURAL CAUSE BEHIND FOUR SEPARATE BUGS
+
+Several XBRL tags map to one concept and they carry DIFFERENT numbers. Every
+place that picks a leg must pick a tag, and four places did not:
+
+| where | symptom |
+|---|---|
+| proxy vs statement definition | EE net income $175.3M vs a real ~$47M |
+| `check_rollforward` ignored rank | SRZN capex called a 40% failure; production was right |
+| `_ttm` roll mixed tags | HL published 784,448,000 from a rank-0 annual + rank-1 stubs; same-tag gives 734,269,000 |
+| near-duplicate period ends | KR tagged Q2 at 2025-08-16 AND 2025-08-31 |
+
+**If a future bug looks like "our number disagrees with the obvious
+arithmetic", check the TAGS first.** It has been the cause four times.
+
+### THE RULE THAT EMERGED, and the two wrong turns before it
+
+All three legs of a roll must come from the SAME tag. But "always prefer
+rank 0" is ALSO wrong:
+
+* HL — rank 0 has a complete set, so use it (734,269,000, not the mixed
+  784,448,000).
+* LBRDA — rank 0 stops in mid-2025, so its newest annual is 2024-12-31 and it
+  yields a roll ending 2025-06-30. Rank 1 runs to 2026. Collapsing to rank 0
+  first threw the current window away and left a bare annual eight months
+  stale: -327M against a correct -389M.
+
+So: every tag with a complete set keeps its own candidate, and the existing
+ends-later rule chooses between them. **Rank is a TIE-BREAK between windows
+ending on the same day, never an override.**
+
+### NEAR-DUPLICATE PERIOD ENDS: keep the BEST-TAGGED end, not the earliest
+
+KR tags Q2 net income at both 2025-08-16 and 2025-08-31, and Q3 at both
+2025-11-08 and 2025-10-31. Keeping the later end left a 69-day gap; keeping the
+earlier left a 76-day gap. Both malformed, because in each pair one date is
+genuine and one is a mis-tag and **they point in opposite directions**.
+
+What separates them is which tags appear: the real fiscal ends carry
+`NetIncomeLoss` (rank 0) plus two more, the mis-tags carry only `ProfitLoss`.
+A filer tags its primary concept on the period it actually closed. The collapse
+now keeps the lowest-ranked end in each cluster, and KR's `net_income` window
+finally matches its `revenue` window.
+
+`NEAR_PERIOD_DAYS` 10 -> 16, since KR's duplicates sit 15 days apart. Still far
+below QUARTER_MIN (80), so it cannot merge two genuinely distinct periods.
+
+### ttm_invariants NOW CHECKS PRODUCTION INSTEAD OF ITSELF
+
+`check()` rebuilt windows from raw `qtrs==1` rows and passed **3 of 127**. Its
+premise did not hold: no 10-K reports fiscal Q4 separately, so every filer shows
+a ~182-day hole once a year. `_ttm` has always RECORDED the window it summed;
+`fundamentals.ttm_windows()` now exposes it and `check()` validates that.
+
+    was      3/127 (2.4%)
+    now    268/268 on a random 40-name sample, 54/54 large caps
+
+A NEGATIVE CONTROL confirms it still fails an HD-style 644-day window, a
+three-quarter window and one with skipped quarters. **100% means the windows
+are clean, not that the check is asleep.** Now wired into daily `validate` and
+counted.
+
+`check_rollforward` had three defects, all making it cry wolf: it ignored alias
+rank, it applied the roll identity to values produced by a 4q sum or an annual
+(HTLD, SMPL), and it never received the YTD-stub guard `_ttm` got (NVR).
+`QUARTER_MAX` 100 -> 125, because KR's retail 4-4-5 calendar has a SIXTEEN-week
+Q1 (revenue 45.118B against ~33.9B for the twelve-week quarters).
+
+### EPS COMES FROM THE PROVIDER NOW
+
+`eps_diluted_ttm` was in neither the registry nor the metrics frame, so
+`overlay` could never reach it -- the one displayed ratio the provider layer
+could not cover. Two filers make it necessary and NEITHER is fixable by a
+refetch:
+
+* **CMP** did not tag annual diluted EPS in its FY2025 10-K at all. SEC's
+  companyfacts has `NetIncomeLoss` (fp=FY, -79,800,000) and ZERO
+  `EarningsPerShareDiluted` rows at that period end. Our EPS rolled to a window
+  ending 2025-06-30 beside a 2026-06-30 net income and read -2.90 against a
+  reported +0.17. With the overlay: **0.163**.
+* **NCDL** stopped tagging `EarningsPerShareDiluted` after 2025-12-31. Its BDC
+  replacement, `InvestmentCompanyInvestmentIncomeLossFromOperationsPerShare`,
+  is NET INVESTMENT income per share -- 1.30 against 1.86 for the same FY2025.
+  A different measure; aliasing it would repeat the EE mistake.
+
+STILL OPEN: the profile page's financial-statement TABLE reads the facts layer,
+not the overlay, so CMP still shows -2.90 there. Deriving EPS from
+net_income/shares would fabricate a figure the filer never reported.
+
+### GRACEFUL DEGRADATION HOLDS — verified, not assumed
+
+BTX has ZERO rows in the fact store. Its page renders **128 KB** with nine chart
+blocks, the price section and **92 explicit `—` empty states**. Nothing
+collapses, nothing crashes. The principle is already argued in `stock_profile`:
+a missing row is the least visible state a page has, so rows render an empty
+state rather than disappearing.
+
+### MEASURED
+
+    validate, 60 names      257-300s against a 1200s budget
+    validate problems       10 -> 4 -> (window class now 0)
+    regression pins         28/28 after every change, including the one that
+                            broke LBRDA -- which is how it was caught
+
+### NEXT
+
+1. Diagnose the 3 remaining roll failures.
+2. **Re-score and rebuild pages.** Every fix so far is in CODE; the stored
+   scores and rendered pages still hold pre-fix values.
+3. Teach the financial-statement table to prefer the overlaid EPS.
+4. A dedicated pass on multi-tag concepts, given four bugs traced to it.
+
 ## State at 2026-08-21 06:00 — SEVEN DATA BUGS FOUND AND FIXED
 
 Every fix below is applied at READ time. No stored partition was rewritten, so
