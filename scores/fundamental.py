@@ -47,6 +47,7 @@ class FundamentalModule:
     def metrics(self) -> list[str]:
         m = list(FM.REGISTRY)
         m += [f"{p}_score" for p in FM.PILLARS]
+        m += ["eps_diluted_ttm"]          # provider-overlaid; see compute()
         m += ["fund_score", "fund_cov", "has_fundamentals", "mktcap", "beta",
               "wacc", "sector", "last_filed", "days_since_filing",
               "currency", "reports_usd"]
@@ -81,6 +82,33 @@ class FundamentalModule:
         for _c in ("mktcap", "beta", "mom_12_1", "price"):
             if _c in px.columns and _c not in m.columns:
                 m = m.merge(px[["ticker", _c]], on="ticker", how="left")
+
+        # EPS IS A RATIO, SO IT COMES FROM THE PROVIDER LIKE THE OTHERS.
+        #
+        # Carried in from the facts frame purely so the overlay below has a
+        # column to replace -- `overlay` only touches names present in BOTH
+        # frames, and `eps_diluted_ttm` was in neither the registry nor here, so
+        # it was the one displayed ratio the provider layer could never reach.
+        #
+        # Two filers make the case. CMP did not tag annual diluted EPS in its
+        # FY2025 10-K at all (SEC's companyfacts has NetIncomeLoss for the
+        # period and zero EarningsPerShareDiluted rows), so our EPS rolls to a
+        # window ending 2025-06-30 beside a 2026-06-30 net income and reads
+        # -2.90 against a reported +0.17. NCDL stopped tagging
+        # EarningsPerShareDiluted after 2025-12-31 and its BDC replacement,
+        # InvestmentCompanyInvestmentIncomeLossFromOperationsPerShare, is NET
+        # INVESTMENT income per share -- 1.30 against 1.86 for the same FY2025 --
+        # a different measure, so aliasing it would repeat the EE mistake.
+        #
+        # Neither is fixable by a refetch: the data is absent at the source. The
+        # provider computes TTM EPS itself and has both.
+        #
+        # STRICTLY ADDITIVE: our SEC figure stays wherever the provider has
+        # none, and no existing metric changes. `pe` is overlaid separately and
+        # does not read this column.
+        if "eps_diluted_ttm" in cur.columns and "eps_diluted_ttm" not in m.columns:
+            m = m.merge(cur[["ticker", "eps_diluted_ttm"]], on="ticker",
+                        how="left")
 
         # PROVIDER FIRST, FOR THE CURRENT SESSION ONLY.
         #
