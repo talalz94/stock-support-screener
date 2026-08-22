@@ -1839,6 +1839,7 @@ def facts_asof(asof: str, tickers: list[str] | None = None,
 
     inst = df[df["qtrs"] == 0]                    # balance-sheet instants
     flow = df[df["qtrs"] > 0]                     # income / cash-flow durations
+    _FRAME_CACHE["last"] = (asof, tuple(sorted(tm["ticker"])), inst, flow)
 
     wide = _latest(inst, ["ticker", "concept"])
     ttm = _ttm(flow)
@@ -2027,7 +2028,7 @@ def _q4_rows(q: pd.DataFrame, ann: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([q, pd.DataFrame(rows)], ignore_index=True) if rows else q
 
 
-def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
+def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
     """Trailing twelve months per (ticker, concept).
 
     Prefers an annual (qtrs==4) figure when one is visible; otherwise sums the
@@ -2272,9 +2273,15 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
         # `shares_diluted_ttm` absent solo, present in a batch. Same class of
         # bug as the tie-break below: a per-ticker answer decided by what else
         # happened to be in the frame.
-        return (avg_out[["ticker", "concept", "value"]].reset_index(drop=True)
-                if avg_out is not None and not avg_out.empty
-                else pd.DataFrame(columns=["ticker", "concept", "value"]))
+        _cols = (["ticker", "concept", "value", "ddate", "_src", "_window"]
+                 if with_window else ["ticker", "concept", "value"])
+        if avg_out is not None and not avg_out.empty:
+            _a = avg_out.copy()
+            for _c in _cols:
+                if _c not in _a.columns:
+                    _a[_c] = None
+            return _a[_cols].reset_index(drop=True)
+        return pd.DataFrame(columns=_cols)
 
     # WHICHEVER WINDOW ENDS LATER WINS -- never both, never added.
     #
@@ -2331,7 +2338,42 @@ def _ttm(flow: pd.DataFrame) -> pd.DataFrame:
               .drop(columns="_prio"))
     if avg_out is not None:      # disjoint concepts, so no contest to resolve
         cat = pd.concat([cat, avg_out], ignore_index=True)
+    if with_window:
+        # `_window` is the exact period-ends the 4q path summed; the other
+        # sources have no window of their own, so it stays null for them and
+        # `_src` says which produced the figure.
+        for _c in ("ddate", "_src", "_window"):
+            if _c not in cat.columns:
+                cat[_c] = None
+        return cat[["ticker", "concept", "value", "ddate", "_src",
+                    "_window"]].reset_index(drop=True)
     return cat[["ticker", "concept", "value"]].reset_index(drop=True)
+
+
+_FRAME_CACHE: dict = {}
+
+
+def ttm_windows(asof: str, tickers: list[str] | None = None) -> pd.DataFrame:
+    """The TTM windows `facts_asof` ACTUALLY used, not a re-derivation.
+
+    `ttm_invariants.check()` rebuilt windows from raw `qtrs==1` rows and passed
+    3 of 127 -- not because the data was 97% broken but because its premise did
+    not hold: no 10-K reports fiscal Q4 separately, so every filer shows a
+    182-day hole once a year, and `_ttm` fills it by derivation. A checker that
+    re-derives is testing itself, not production.
+
+    This runs the real path and returns what `_ttm` recorded: `_src` (annual,
+    4q or roll) and, for the summed windows, the exact period-ends in
+    `_window`. A violation here is unambiguously OUR bug.
+    """
+    facts_asof(asof, tickers)           # populates _FRAME_CACHE
+    got = _FRAME_CACHE.get("last")
+    if not got:
+        return pd.DataFrame()
+    _asof, _tks, _inst, flow = got
+    if flow is None or flow.empty:
+        return pd.DataFrame()
+    return _ttm(flow, with_window=True)
 
 
 def _q_back(asof: str, n: int) -> str:

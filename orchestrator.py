@@ -937,6 +937,8 @@ def _step_validate(asof: str) -> tuple[int, str]:
       audit         score-store invariants: coverage, constant, fabrication,
                     range, nulls. Whole store. Catches a metric that exists
                     only because a missing input was read as zero.
+      ttm windows   the window `_ttm` actually summed spans a year, does not
+                    overlap, skips no quarter and holds exactly four ends
       rollforward   every rolled cash-flow TTM re-derived from its three
                     REPORTED legs: FY + YTD_now - YTD_prior.
       sec/provider  independent SEC arithmetic, and our ratios against
@@ -947,8 +949,8 @@ def _step_validate(asof: str) -> tuple[int, str]:
     Coverage comes from rotation over days, not from doing everything nightly.
 
     WHAT COUNTS AS A PROBLEM is deliberately narrow: only checks whose failure
-    is unambiguously OURS. `audit` HIGH issues and roll-forward identity
-    failures are arithmetic or structural facts about our
+    is unambiguously OURS. `audit` HIGH issues, TTM window violations and
+    roll-forward identity failures are arithmetic or structural facts about our
     own store. The SEC recompute and the provider cross-check are comparisons
     against third parties that are each wrong often enough to be evidence
     rather than verdicts -- on 2026-08-14 our FCF disagreed with Yahoo on 43%
@@ -1020,13 +1022,27 @@ def _step_validate(asof: str) -> tuple[int, str]:
     # `check_rollforward` is a different function and genuinely works (27/27
     # measured on the same sample). It re-derives each rolled cash-flow TTM
     # from three REPORTED legs, and reads only from 2024q1, so it is cheap.
-    note("ttm_windows", 0, 0,
-         "SKIPPED: ttm_invariants.check premise does not hold for SEC bulk "
-         "data (2.4% pass on unmodified code) -- CLI tool only")
-    parts.append("ttm:skipped")
     if sample:
         try:
             import ttm_invariants as TI
+            # NOW WIRED IN. It was skipped while it re-derived windows from raw
+            # `qtrs==1` rows and passed 3 of 127 -- its premise, not the data,
+            # was wrong. It now reads the window `_ttm` actually recorded via
+            # `fundamentals.ttm_windows`, which restored it to 268/268 on a
+            # random 40-name sample, and a negative control confirms it still
+            # fails an HD-style 644-day window, an incomplete window and a
+            # skipped quarter. A violation here is unambiguously OUR bug, so it
+            # COUNTS.
+            w = TI.check(sample, asof=asof)
+            wbad = int((~w["ok"]).sum()) if len(w) else 0
+            problems += wbad
+            parts.append(f"ttm:{len(w) - wbad}/{len(w)}")
+            note("ttm_windows", len(w) - wbad, wbad, f"{len(sample)} name(s)")
+        except Exception as exc:                                 # noqa: BLE001
+            parts.append(f"ttm:ERR({type(exc).__name__})")
+            note("ttm_windows", 0, 0, repr(exc)[:120])
+
+        try:
             r = TI.check_rollforward(sample)
             rbad = int((~r["ok"]).sum()) if len(r) else 0
             problems += rbad

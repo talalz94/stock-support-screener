@@ -59,69 +59,74 @@ SPAN_MIN, SPAN_MAX = 350, 380      # a real twelve months
 QUARTER_MIN, QUARTER_MAX = 80, 100  # one reported quarter
 
 
-def check(tickers: list[str] | None = None) -> pd.DataFrame:
-    """One row per (ticker, concept) TTM value, with every invariant verdict."""
+def check(tickers: list[str] | None = None,
+          asof: str | None = None) -> pd.DataFrame:
+    """Check the windows PRODUCTION ACTUALLY USED, not a re-derivation.
+
+    THE OLD VERSION TESTED ITSELF. It rebuilt windows from raw `qtrs==1` rows
+    and passed 3 of 127 -- measured 2026-08-21 on untouched code, for large caps
+    and microcaps alike. It was not detecting 97% broken data; its premise did
+    not hold for this source. No 10-K reports fiscal Q4 separately (it is
+    derived FY - Q1 - Q2 - Q3), so every filer shows a ~182-day hole once a
+    year. AAPL revenue: 2025-06-28, 2025-12-27, 2026-03-28, 2026-06-27 --
+    2025-09-27 absent, identical at every history depth.
+
+    A checker with a 2.4% pass rate cannot gate anything, which is why it was
+    kept out of the daily `validate` step.
+
+    `_ttm` already RECORDS the window it summed, Q4 derivation included, and
+    `fundamentals.ttm_windows` now exposes it. So this reads production's own
+    answer and checks the properties that must hold of it:
+
+      spans_year   four consecutive quarter-ends span ~273 days first to last
+      no_overlap   no period counted twice
+      no_gap       consecutive ends ~91 days apart; a hole means a skipped
+                   quarter, which is the 644-day HD window seen from the front
+      complete     exactly four distinct ends
+
+    Only `_src == "4q"` rows have a window to check. `annual` is one reported
+    period, `roll` is three reported legs whose identity `check_rollforward`
+    verifies, and `avg` is a point-in-time reduction -- none has period-ends to
+    validate, so they are counted and reported rather than judged.
+    """
     import fundamentals as FD
 
-    raw = FD.read()
-    if tickers:
-        tm = FD.ticker_map()
-        keep = set(tm[tm["ticker"].isin(tickers)]["cik"])
-        raw = raw[raw["cik"].isin(keep)]
-    tm = FD.ticker_map()
-    raw = raw.merge(tm, on="cik", how="inner")
-
-    pref = {}
-    for concept, alts in FD.TAGS.items():
-        for rank, t in enumerate(alts):
-            pref[t] = (concept, rank)
-    raw["concept"] = raw["tag"].map(lambda t: pref.get(t, (None, 99))[0])
-    raw = raw[raw["concept"].notna()]
-
-    flows = raw[(raw["qtrs"] == 1)
-                & ~raw["concept"].isin(FD.AVERAGE_CONCEPTS)
-                & ~raw["concept"].isin(FD.STOCK_CONCEPTS)].copy()
-    if flows.empty:
+    w = FD.ttm_windows(asof or str(pd.Timestamp.today().date()), tickers)
+    if w.empty:
         return pd.DataFrame()
-    flows["end"] = pd.to_datetime(flows["ddate"], errors="coerce")
-    flows = flows[flows["end"].notna()]
+
+    # `itertuples` RENAMES columns beginning with an underscore to positional
+    # names (_1, _2 ...), so `_src` and `_window` are unreachable by attribute.
+    # Renamed here rather than debugged again later.
+    w = w.rename(columns={"_src": "src", "_window": "window_ends"})
 
     rows = []
-    for (tk, concept), g in flows.groupby(["ticker", "concept"], observed=True):
-        ends = sorted(g["end"].unique())
+    for r in w.itertuples(index=False):
+        src = getattr(r, "src", None)
+        win = getattr(r, "window_ends", None)
+        if src != "4q" or not isinstance(win, str) or not win:
+            continue
+        ends = sorted(pd.Timestamp(x) for x in win.split(",") if x)
+        # `_ttm` already collapses 52/53-week near-duplicates, so anything
+        # still here is a distinct period.
         if len(ends) < 2:
             continue
-        # Collapse the 52/53-week double-labelling before judging anything --
-        # two ends within NEAR_PERIOD_DAYS are one quarter, not two.
-        collapsed, last = [], None
-        for e in ends:
-            if last is not None and (e - last).days <= FD.NEAR_PERIOD_DAYS:
-                continue
-            collapsed.append(e)
-            last = e
-        win = collapsed[-4:]
-        if len(win) < 4:
-            continue
-
-        gaps = [(win[i + 1] - win[i]).days for i in range(len(win) - 1)]
-        span = (win[-1] - win[0]).days
-        newest = collapsed[-1]
+        gaps = [(ends[i + 1] - ends[i]).days for i in range(len(ends) - 1)]
+        span = (ends[-1] - ends[0]).days
         rows.append({
-            "ticker": tk, "concept": concept,
-            "window": ",".join(d.strftime("%Y-%m-%d") for d in win),
-            "span_days": span,
-            # first-to-last END of four consecutive quarters is ~273 days
+            "ticker": r.ticker, "concept": r.concept, "src": src,
+            "window": win, "n_ends": len(ends), "span_days": span,
             "spans_year": 240 <= span <= 300,
-            "no_overlap": all(gp > 0 for gp in gaps),
-            "no_gap": all(QUARTER_MIN <= gp <= QUARTER_MAX for gp in gaps),
-            "ends_latest": win[-1] == newest,
+            "no_overlap": all(g > 0 for g in gaps),
+            "no_gap": all(QUARTER_MIN <= g <= QUARTER_MAX for g in gaps),
+            "complete": len(ends) == 4,
             "max_gap_days": max(gaps) if gaps else 0,
         })
 
     df = pd.DataFrame(rows)
     if df.empty:
         return df
-    df["ok"] = (df.spans_year & df.no_overlap & df.no_gap & df.ends_latest)
+    df["ok"] = (df.spans_year & df.no_overlap & df.no_gap & df.complete)
     return df
 
 
@@ -180,6 +185,24 @@ def check_rollforward(tickers: list[str] | None = None) -> pd.DataFrame:
             continue
         ar = ann.iloc[-1]
         stub = g[(g["qtrs"].isin([1, 2, 3])) & (g["ddate"] > ar["ddate"])]
+
+        # THE STUB MUST BE A TRUE YEAR-TO-DATE CUMULATIVE -- the same guard
+        # `_ttm` got on 2026-08-21, which this checker never received.
+        #
+        # `stub.iloc[-1]` takes the newest row regardless of `qtrs`, and a
+        # `qtrs=1` row is YTD only for fiscal Q1. NVR, measured 2026-08-22:
+        # the checker paired the single quarter ending 2026-06-30 (19,293,000)
+        # against the single quarter a year earlier (17,813,000) and computed
+        # 70,693,000, then reported production's 65,454,000 as a failure.
+        # Production was right -- 69,213,000 + 32,580,000 - 36,339,000 uses the
+        # qtrs=2 YTD legs the filer actually published.
+        #
+        # A YTD stub of n quarters ends about 3n months after the fiscal year
+        # end; anything else is a bare quarter wearing a cumulative's label.
+        if not stub.empty:
+            _d = (pd.to_datetime(stub["ddate"], errors="coerce")
+                  - pd.Timestamp(ar["ddate"])).dt.days
+            stub = stub[(_d - stub["qtrs"].astype(int) * 91.31).abs() <= 20]
         if stub.empty:
             continue
         c = stub.iloc[-1]
