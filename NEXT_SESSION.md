@@ -3,6 +3,143 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-21 06:00 — SEVEN DATA BUGS FOUND AND FIXED
+
+Every fix below is applied at READ time. No stored partition was rewritten, so
+nothing needs a rebuild and nothing was lost. `FD_PROXY_FILTER=0` disables the
+proxy handling if it ever needs isolating.
+
+### The one that mattered most: values depended on the BATCH
+
+`facts_asof` returned a different number for a ticker depending on which OTHER
+tickers were queried with it. HZO's `net_income_ttm` read 3,986,000 alone and
+35,986,000 next to LOPE — identical input rows, identical candidates, different
+winner. The pipeline runs `facts_asof` over the whole universe, so the BATCH
+answer is the one that reaches the pages, and **no single-ticker check could
+ever reproduce it.** Three independent causes:
+
+1. `sort_values` defaulted to quicksort, which is not stable, so a tie on
+   `ddate` was broken by array order. All six sorts are mergesort now, with an
+   explicit `_prio` tie-break.
+2. The roll-forward accepted a `qtrs=1` stub as if it were year-to-date. It is
+   YTD only for fiscal Q1; elsewhere it yields the fiscal year with one quarter
+   swapped out. The validity filter runs BEFORE the stub is chosen.
+3. `_ttm` returned early on an empty `out` and discarded `avg_out`, losing
+   share counts for filers whose only duration facts are share counts.
+
+### DEF 14A proxies corrupt net income two different ways
+
+A proxy carries the Item 402(v) pay-versus-performance table, tagged
+`NetIncomeLoss` exactly like the income statement, and is filed AFTER the 10-K
+so it won the `keep="last"` tie-break.
+
+* **Units.** LOPE's proxy reports THOUSANDS (216,170 for $216.17M) so
+  `net_income_ttm` read $8.25M against $219.9M. Now rescaled, but only when the
+  filer's own statement rows for the same concept are >=100x larger.
+* **Definition.** EE's proxy reports the CONSOLIDATED total ($167.0M) while its
+  statements report ATTRIBUTABLE ($39.2M) under a lower-ranked tag, so
+  `net_income_ttm` read $175.3M against ~$47M — margins/ROE/ROA on a different
+  basis from EPS. A statement row now beats a proxy row AHEAD of alias rank.
+  Deprioritised, not dropped: for LOPE the proxy is the only annual row there is.
+
+**Do not "fix" this by dropping proxy rows.** That was tried, and HZO regressed
+to $36M — which turned out to be the batch bug, not the drop. HZO has no proxy
+rows at all.
+
+### EPS is not additive
+
+Each quarter's weighted-average share count differs, and in a loss quarter
+diluted collapses to basic. The 4q path summed four quarters AND added a
+derived Q4. HZO: 0.66 - 0.12 - 0.36 + 0.08 = 0.26, against Yahoo 0.16,
+Finnhub ~0.18, Simply Wall St 0.18. `NON_ADDITIVE_CONCEPTS` now (a) flips the
+ordering so the roll-forward wins and (b) is excluded from `_q4_rows`.
+
+### 52/53-week filers double-counted a quarter
+
+The quarterly dedup keys on EXACT `ddate`, so a filer reporting one fiscal
+quarter under two period ends kept both. MRVL: 2025-07-31 and 2025-08-02 both
+194,800,000, summing to 2,325.4M against a reported TTM of $2.53B. It also
+broke `_q4_rows`, which needs exactly three quarters inside the year and found
+five. `NEAR_PERIOD_DAYS` already encoded this rule and `ttm_invariants` always
+applied it — **the production path never did.**
+
+### Impossible share counts are dropped
+
+Filers contradict themselves inside one document. ALMU tags
+`WeightedAverageNumberOfDilutedSharesOutstanding` = 1.735437e10 while
+`CommonStockSharesOutstanding` in the SAME filing is 1.811355e7 — 958x. TEM is
+the mirror image at 182,397 for a company with ~180 MILLION shares, and has no
+`shares_out` row at all, so the reference falls back to net_income / EPS (both
+reported). Dropped, never rescaled: 1000x is the obvious guess and probably
+right, but guessing a scale factor invents a number.
+
+### The provider overlay had NEVER run
+
+Zero occurrences of "provider overlay on" in the entire run log. `_is_current`
+compared `asof` against a LIVE clock, and the orchestrator fixes `asof` at
+05:00 while the fundamental step runs 13-17h later — by then
+`last_closed_session()` had rolled to the next day and the comparison lost,
+every single day, silently. It now compares against the newest session in the
+bar store: what the run ingested, stable mid-run, and correctly False for a
+BACKFILLED session. A declined overlay now says so.
+
+### Verification
+
+| check | result |
+|---|---|
+| batch-dependence | 0 differences across ~1,500 (ticker, field) comparisons |
+| EPS vs net_income/shares | 23% -> 11% inconsistent; median error 0.0291 -> 0.0136 |
+| `_selftest_rollforward` | PASS (KO/HD/UPS pinned) |
+| `fundamentals.selftest` | OK |
+
+Confirmed against filings/third parties: STX eps 13.90 vs $13.90 and revenue
+$12.2B; MRVL eps 2.91 vs $2.91 and ni 2,526,700,000 vs $2.53B; RGTI net loss
+-238,672,000 vs $238.672M to the dollar; BETA eps -10.01 vs -10.02; LASR three
+quarterly legs exact; HHH Q2 eps 2.68 exact; CACI/NVDA/QCOM/MU/NOW/HOOD/SCCO/
+MRNA/DK/VIRT/PARR/FCFS all internally consistent.
+
+### KNOWN AND DELIBERATELY NOT FIXED
+
+* **CMP** — its FY2025 annual carries 17 rows including `NetIncomeLoss` and the
+  diluted share count but NO `EarningsPerShareDiluted`. The tag is in our map;
+  that row is absent from the source we hold. EPS therefore rolls to a window
+  ending 2025-06-30 beside a 2026-06-30 net income and reads -2.90 against a
+  reported +0.17. Deriving it from net income / shares would fabricate a figure
+  the filer never reported. **Fix = targeted companyfacts refetch for CMP.**
+* **NCDL** — a BDC that stopped tagging per-share results under our mapped tags
+  in 2026, so EPS sits at FY2025. Needs new tags AND a refetch, because the
+  store filters to `TAGS` at write time.
+* **A share-count change breaks the EPS/net-income cross-check, not the data.**
+  BETA (~10x at IPO) and USAR (~2x at SPAC listing) both flag as inconsistent
+  and both are correct — BETA's -10.01 matches the reported -10.02. Treat that
+  check as a SCREEN, never a verdict.
+* **NCDL / ROIV / HRI / CTRI** — noncontrolling interests and preferred
+  dividends legitimately separate "net income" from "income available to
+  common". Not errors.
+* **`ttm_invariants.check()`** — still 3/127 windows passing on untouched code.
+  Its premise does not hold for SEC bulk data: no 10-K reports fiscal Q4
+  separately, so every filer shows a 182-day gap once a year. Deliberately NOT
+  wired into the daily `validate` step. **Fix = read the `_window` that `_ttm`
+  already records instead of re-deriving it from raw rows.**
+* **No us-gaap at all:** ARM, IQMX, FUTU, DAO, CBRS, SPCX, BTX. Foreign private
+  issuers (20-F/40-F) and recent listings. NEXA, ERO and BTDR have partial data
+  ending 2025-12-31.
+
+### NEXT STEPS, in the order I would do them
+
+1. **Refetch CMP and NCDL companyfacts** — closes the two stale-EPS cases.
+   Cheap, targeted, no logic change.
+2. **Fix `ttm_invariants.check()`** to read `_window`, then wire it into
+   `validate`. It is the only structural check that could have caught the
+   52/53-week double-count automatically.
+3. **Add `eps_diluted_ttm` to the fundamental module's declared metrics** so
+   the provider overlay covers it. EPS is a ratio, and the standing rule is
+   that ratios come from the API.
+4. **Measure `validate` at the full 60-name sample.** Only ever measured at 6
+   names (282s). `VALIDATE_BUDGET_S` bounds it meanwhile.
+5. **Re-run the leaderboard** once the corrected TTM values are scored — every
+   IC in the current scoreboard was computed on pre-fix numbers.
+
 ## State at 2026-08-16 08:00 — ALL TRACKED ITEMS CLOSED
 
 ### Read this first: which number to quote
@@ -1182,57 +1319,57 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-19 18:45 — do not edit by hand._
+_Generated 2026-08-20 22:08 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 7s | 7s | 11s | 2.0 min | 11 |
-| `bars` | daily | 38s | 40s | 54s | 10.0 min | 11 |
-| `macro` | daily | 89s | 89s | 3.2 min | 15.0 min | 11 |
-| `news` | daily | 4s | 5s | 10s | 10.0 min | 11 |
-| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 11 |
-| `sentiment` | daily | 14s | 9s | 14s | 15.0 min | 12 |
-| `shortvol` | daily | 4s | 3s | 4s | 10.0 min | 9 |
-| `hype` | daily | 85.1 min | 85.1 min | 109.0 min ⚠ | 20.0 min | 11 |
-| `bounce` | daily | 38s | 39s | 77s | 15.0 min | 12 |
-| `provider` | daily | 64.3 min | 51.3 min | 66.3 min | 120.0 min | 5 |
-| `fundamental` | daily | 654.8 min | 89.2 min | 668.0 min ⚠ | 30.0 min | 12 |
+| `universe` | daily | 6s | 7s | 11s | 2.0 min | 12 |
+| `bars` | daily | 35s | 39s | 54s | 10.0 min | 12 |
+| `macro` | daily | 3.4 min | 1.8 min | 3.4 min | 15.0 min | 12 |
+| `news` | daily | 5s | 5s | 10s | 10.0 min | 12 |
+| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 12 |
+| `sentiment` | daily | 11s | 9s | 14s | 15.0 min | 13 |
+| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 10 |
+| `hype` | daily | 846.8 min | 87.0 min | 846.8 min ⚠ | 120.0 min | 12 |
+| `bounce` | daily | 53s | 39s | 77s | 15.0 min | 13 |
+| `provider` | daily | 71.7 min | 57.8 min | 71.7 min | 120.0 min | 6 |
+| `fundamental` | daily | 85.8 min | 87.8 min | 668.0 min ⚠ | 180.0 min | 13 |
 | `sec_facts` | quarterly | 7s | 4s | 7s | 60.0 min | 4 |
 | `sec_gap` | weekly | 187.1 min | 95.3 min | 187.1 min ⚠ | 20.0 min | 2 |
 | `events` | weekly | 11.3 min | 9.8 min | 13.1 min | 30.0 min | 4 |
 | `leaderboard` | weekly | 617.6 min | 23.8 min | 617.6 min ⚠ | 90.0 min | 5 |
-| `dip` | daily | 13s | 16s | 25s | 15.0 min | 13 |
-| `combo` | daily | 12s | 11s | 18s | 15.0 min | 9 |
-| `explore` | daily | 7s | 5s | 13s | 5.0 min | 15 |
-| `snapshots` | daily | 7s | 0s | 11s | 5.0 min | 17 |
-| `profiles` | daily | 17.3 min | 15.7 min | 25.2 min ⚠ | 15.0 min | 15 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 12 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 18 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 15 |
+| `dip` | daily | 14s | 15s | 25s | 15.0 min | 14 |
+| `combo` | daily | 12s | 12s | 18s | 15.0 min | 10 |
+| `explore` | daily | 7s | 6s | 13s | 5.0 min | 16 |
+| `snapshots` | daily | 6s | 1s | 11s | 5.0 min | 18 |
+| `profiles` | daily | 18.4 min | 16.5 min | 25.2 min ⚠ | 15.0 min | 16 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 13 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 19 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 16 |
 
-**Daily total ≈ 245.1 min.** Weekly adds 128.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 253.2 min.** Weekly adds 128.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-19 18:45 — do not edit by hand._
+_Generated 2026-08-20 22:08 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 244.7 | 2016-07 → 2026-08 |
+| bars 1d | 122 | 244.8 | 2016-07 → 2026-08 |
 | bars 1h | 4 | 0.5 | 2026-05 → 2026-08 |
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
-| news | 121 | 168.3 | 2016-08 → 2026-08 |
+| news | 121 | 168.4 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 251.6 | 2016-08 → 2026-08 |
+| scores | 121 | 253.1 | 2016-08 → 2026-08 |
 | fundamentals | 68 | 332.9 | 2009q2 → 2026q1 |
 | short volume | 73 | 54.6 | 2020-08 → 2026-08 |
-| flags | 13 | 1.2 | 2026-07-31 → 2026-08-18 |
-| rejects | 13 | 2.6 | 2026-07-31 → 2026-08-18 |
+| flags | 14 | 1.3 | 2026-07-31 → 2026-08-19 |
+| rejects | 14 | 2.9 | 2026-07-31 → 2026-08-19 |
 | loose (macro, universe, jobs, study) | 29 | 3.6 | — |
 
-**`data/` total ≈ 1,075 MB.** `reports/` is a further 24 MB across 101 pages.
+**`data/` total ≈ 1,077 MB.** `reports/` is a further 24 MB across 105 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -1240,21 +1377,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-19 18:45 — do not edit by hand._
+_Generated 2026-08-20 22:08 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 327 | 2016-09-27 → 2026-08-18 |
-| `fundamental` | 52 | 187 | 2016-08-25 → 2026-08-18 |
-| `hype` | 20 | 309 | 2016-10-25 → 2026-08-18 |
-| `dip` | 10 | 234 | 2016-09-27 → 2026-08-18 |
-| `combo` | 15 | 189 | 2016-11-04 → 2026-08-18 |
+| `sentiment` | 26 | 328 | 2016-09-27 → 2026-08-19 |
+| `fundamental` | 52 | 188 | 2016-08-25 → 2026-08-19 |
+| `hype` | 20 | 310 | 2016-10-25 → 2026-08-19 |
+| `dip` | 10 | 235 | 2016-09-27 → 2026-08-19 |
+| `combo` | 15 | 190 | 2016-11-04 → 2026-08-19 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-19 18:45 — do not edit by hand._
+_Generated 2026-08-20 22:08 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
