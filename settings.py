@@ -81,8 +81,19 @@ DEFAULT_PROFILE: dict[str, Any] = {
                             "eps_diluted", "fcf", "gross_margin", "op_margin",
                             "net_margin", "roe"],
                    "basis": "yoy"},
-        "fundamentals": {"enabled": True, "limit": 12,
-                         "metrics": ["pe", "pb", "ev_ebitda", "fcf_yield",
+        # `eps_diluted_ttm` sits directly under `pe` for the same reason
+        # `sent_age` sits under the sentiment score: a P/E without its earnings
+        # denominator is unreadable. CMP is the case -- its P/E reads 157 on
+        # EPS of 0.16, and before the provider overlay reached EPS the same
+        # page would have rendered a NEGATIVE P/E off our own -2.90. The
+        # denominator is what tells the reader which of those they are looking
+        # at.
+        #
+        # It was stored for 3,296 names and displayed for none: not being in
+        # `fund_metrics.REGISTRY`, it had no label and no slot here.
+        "fundamentals": {"enabled": True, "limit": 13,
+                         "metrics": ["pe", "eps_diluted_ttm", "pb",
+                                     "ev_ebitda", "fcf_yield",
                                      "roe", "roic", "f_score", "z_score",
                                      "m_score", "accruals", "net_issuance",
                                      "ccc"]},

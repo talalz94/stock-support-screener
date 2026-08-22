@@ -535,6 +535,30 @@ def fetch(tickers: list[str], ttl_hours: float = TTL_HOURS,
 # should match to a cent. A P/E built on different TTM windows can legitimately
 # differ by a few percent when a quarter lands between the two sources' cutoffs
 # -- Yahoo often has a quarter our bulk files have not received yet.
+# WHAT THE AGREEMENT RATE ACTUALLY MEASURES -- read this before "fixing" it.
+#
+# It is tempting to read 71% as "29% of our numbers are wrong". It is not.
+# MEASURED 2026-08-23 on a 60-name sample, FINNHUB against YAHOO -- two
+# commercial vendors, us not involved:
+#
+#     eps_growth      14%        op_margin       35%
+#     revenue_growth  15%        pb              41%
+#     dividend_yield  19%        roe             58%
+#     roa             21%        eps_diluted_ttm 59%
+#                                current_ratio   82%
+#
+# The two vendors agree with each other LESS than we agree with either. `roa`
+# is not one quantity: average vs ending assets, net income vs EBIT, different
+# trailing windows. At 21% vendor-to-vendor there is no right answer to match.
+#
+# So a gap here is EVIDENCE, never a verdict -- the same conclusion SEC forced
+# on 2026-08-14, when our FCF disagreed with Yahoo on 43% of names and the
+# filings proved us right because Yahoo's `freeCashflow` exceeded its own CFO.
+#
+# The fields worth acting on are the ones the vendors themselves agree on:
+# `current_ratio` (82%), and the level facts (`revenue_ttm`, `shares_out`)
+# where a disagreement means someone read a filing wrong. Treat a `roa` gap as
+# a definition difference until a filing says otherwise.
 COMPARE = {
     "price":       0.02,
     "mktcap":      0.05,
@@ -673,11 +697,47 @@ def compare(tickers: list[str], asof: str | None = None,
     ours["our_period"] = fi.get("last_ddate")
 
     y = yah.set_index("ticker")
+
+    # Is the bar store behind the market? Computed once, not per row.
+    _PRICE_DERIVED = {"price", "mktcap", "pe"}
+    try:
+        import calendar_us
+        import store as _store
+        _dates = _store.stored_dates("1d")
+        _px_end = max(_dates) if _dates else ""
+        _lcs = str(calendar_us.last_closed_session())[:10]
+        _px_stale = bool(_px_end) and _px_end < _lcs
+    except Exception:                                            # noqa: BLE001
+        _px_end, _lcs, _px_stale = "", "", False
+    if _px_stale:
+        _log(f"bars end {_px_end} but the last closed session is {_lcs} -- "
+             f"price, mktcap and pe are not compared this run")
+
     rows = []
     for tk in tickers:
         if tk not in ours.index:
             continue
         for field, tol in COMPARE.items():
+            # A PRICE FROM ANOTHER DAY IS NOT A DISAGREEMENT.
+            #
+            # Our price is the close of the newest session in the bar store;
+            # the provider quotes NOW. Whenever the bar store lags the last
+            # closed session, every price-derived field compares two different
+            # days and books the market's movement as our error.
+            #
+            # Measured 2026-08-23: bars ended 2026-08-20 while the last closed
+            # session was 2026-08-21, and 19 of 57 names "disagreed" on price
+            # -- ours lower in 11 of the worst 12, median gap 3.4%, which is
+            # the market rising, not a data fault. BKKT 7.50 vs 8.59, TGTX
+            # 50.56 vs 54.27: our figures are the 08-20 closes exactly.
+            #
+            # Reported as its own status so the staleness is visible instead of
+            # being laundered into an agreement rate.
+            if field in _PRICE_DERIVED and _px_stale:
+                rows.append((tk, field, None, None, None,
+                             f"stale price (bars end {_px_end}, "
+                             f"session {_lcs})"))
+                continue
             # A field we do not compute is not a failure -- it is outside the
             # comparison. Say so explicitly so the coverage number stays
             # honest rather than crashing or silently shrinking.

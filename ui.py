@@ -329,6 +329,19 @@ def _fund_labels() -> dict[str, tuple[str, str]]:
 
 # Modules with no REGISTRY of their own.
 _EXTRA_LABELS = {
+    # STORED FOR 3,296 NAMES AND RENDERED FOR NONE until 2026-08-23.
+    #
+    # `eps_diluted_ttm` became a declared metric when the provider overlay was
+    # extended to cover it, but it is not in `fund_metrics.REGISTRY`, so
+    # `_fund_labels()` never gave it a name and `metric_row` skipped it. The
+    # figure the overlay exists to correct -- CMP reads 0.1628 here against the
+    # -2.90 our own arithmetic produced -- was invisible on the page.
+    #
+    # This file's own rule: a missing row is the least visible state a page
+    # has, and the reader cannot ask about a number they cannot see.
+    "eps_diluted_ttm": ("EPS (diluted, TTM)",
+                        "trailing twelve-month diluted earnings per share; "
+                        "provider-sourced where published"),
     "fund_score": ("Fundamental composite", "equal-weight mean of the four pillars"),
     "quality_score": ("Quality pillar", "rank of the quality metrics"),
     "value_score": ("Value pillar", "rank of the valuation metrics"),
