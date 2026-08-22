@@ -1872,8 +1872,27 @@ def facts_asof(asof: str, tickers: list[str] | None = None,
     # no real buyback or issuance moves the average 100x from the outstanding
     # count -- so it fires only on tagging errors, never on a real capital
     # change.
-    if "shares_out" in out.columns:
-        _so = pd.to_numeric(out["shares_out"], errors="coerce")
+    # THE REFERENCE IS shares_out WHEN PRESENT, ELSE net_income / EPS.
+    #
+    # TEM has NO `CommonStockSharesOutstanding` row at all, so a shares_out-only
+    # guard could not see that its `WeightedAverageNumberOfDilutedSharesOutstanding`
+    # is 182,397 with uom="shares" for a company with ~180 MILLION shares -- the
+    # filer reported thousands and declared shares, the mirror image of ALMU.
+    #
+    # Net income and EPS are both REPORTED figures, so their quotient is an
+    # independent implied share count: 254,425,000 / 1.44 = 176.7M against a
+    # stored 182,397, a 968x gap. `|eps| > 0.01` keeps a near-zero EPS from
+    # manufacturing an enormous reference.
+    if "shares_out" in out.columns or (
+            "net_income_ttm" in out.columns and "eps_diluted_ttm" in out.columns):
+        _so = (pd.to_numeric(out["shares_out"], errors="coerce")
+               if "shares_out" in out.columns
+               else pd.Series(float("nan"), index=out.index))
+        if "net_income_ttm" in out.columns and "eps_diluted_ttm" in out.columns:
+            _ni = pd.to_numeric(out["net_income_ttm"], errors="coerce")
+            _ep = pd.to_numeric(out["eps_diluted_ttm"], errors="coerce")
+            _alt = (_ni / _ep).abs().where(_ep.abs() > 0.01)
+            _so = _so.where(_so > 0, _alt)
         for _c in ("shares_basic_ttm", "shares_diluted_ttm"):
             if _c not in out.columns:
                 continue
