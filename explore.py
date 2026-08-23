@@ -236,7 +236,9 @@ border:1px solid var(--line);border-radius:9px;position:sticky;top:46px;z-index:
   background:var(--panel);cursor:pointer;font-size:12px;color:inherit}
 .rail button.on{border-color:var(--accent);background:var(--posbg)}
 .rail button b{display:block;font-size:13px;margin-bottom:2px}
-.rail button span{color:var(--muted);font-size:11px}
+.rail button span{display:block;color:var(--muted);font-size:11px}
+.rail button .warnflag{color:var(--warn);margin-top:2px}
+.rail .note{font-size:11px;color:var(--muted);margin-top:8px;line-height:1.4}
 .filters .count{color:var(--muted);font-size:12px;margin-left:auto;
 font-variant-numeric:tabular-nums}
 .tblwrap{overflow:auto;max-height:72vh;border:1px solid var(--line);
@@ -283,11 +285,24 @@ def _rail_html(cols: list[str], strat_cov: dict | None) -> str:
     for key, cov in strat_cov.items():
         if cov["column"] not in cols:
             continue
+        ev = cov.get("evidence") or ""
+        # The verdict rides ON the button, not in a tooltip. A strategy that
+        # has not been shown to predict anything must say so where the choice
+        # is made -- hiding it behind a hover is how four unproven models come
+        # to look like four working ones.
+        mark = ("&#9888; unmeasured" if ev.startswith("UNMEASURED")
+                else "&#9888; no edge measured" if ev.startswith("NO EDGE")
+                else "")
         out.append(
             f'<button data-si="{cols.index(cov["column"])}" '
-            f'title="{ui.esc(cov["doc"])}"><b>{ui.esc(cov["title"])}</b>'
+            f'title="{ui.esc(cov["doc"])}{chr(10)}{chr(10)}{ui.esc(ev)}">'
+            f'<b>{ui.esc(cov["title"])}</b>'
             f'<span>{cov["ranked"]:,} of {cov["universe"]:,} ranked</span>'
-            f'</button>')
+            + (f'<span class="warnflag">{mark}</span>' if mark else "")
+            + '</button>')
+    out.append('<div class="note">A strategy orders stocks by the things it '
+               'names. None of these has been shown to predict returns &mdash; '
+               'hover a tab for what was measured.</div>')
     out.append("</div>")
     return "".join(out)
 
@@ -767,7 +782,7 @@ def build(metrics: list[str] | None = None, verbose: bool = True,
         for _s in STRAT.STRATEGIES:
             wide[_s.column] = STRAT.rank(wide, _s)
             _c = STRAT.coverage(wide, _s)
-            _c.update(column=_s.column, doc=_s.doc)
+            _c.update(column=_s.column, doc=_s.doc, evidence=_s.evidence)
             strat_cov[_s.key] = _c
             if verbose:
                 print(f"    strategy {_s.key:16s} ranked "

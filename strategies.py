@@ -70,6 +70,13 @@ class Strategy:
     title: str
     inputs: tuple[tuple[str, int, float], ...]
     doc: str = ""
+    # WHAT THE MEASUREMENT SAYS, shown on the tab. Empty means never measured.
+    #
+    # A strategy that has not been shown to predict anything is an ORGANISING
+    # PRINCIPLE, not a signal, and the page has to say which it is. Four
+    # confident-looking tabs implying four working models would be the most
+    # expensive kind of wrong this project can produce.
+    evidence: str = ""
 
     @property
     def metrics(self) -> tuple[str, ...]:
@@ -94,7 +101,9 @@ STRATEGIES: tuple[Strategy, ...] = (
                 ("eps_growth", +1, 1.0)),
         doc="Revenue and earnings growing, with the sequential rate as a "
             "tiebreak so a name whose growth has already rolled over ranks "
-            "behind one still accelerating."),
+            "behind one still accelerating.",
+        evidence="UNMEASURED -- rev_growth_q has no history yet (added "
+                 "2026-08-23), so there is nothing to measure over."),
     Strategy(
         key="quality_growth",
         title="Quality growth",
@@ -103,7 +112,9 @@ STRATEGIES: tuple[Strategy, ...] = (
                 ("roic", +1, 1.0),
                 ("f_score", +1, 0.5)),
         doc="Growing revenue AND expanding margins AND earning a real return "
-            "on capital -- growth that is not being bought with margin."),
+            "on capital -- growth that is not being bought with margin.",
+        evidence="UNMEASURED -- gross_margin_chg has no history yet (added "
+                 "2026-08-23), so there is nothing to measure over."),
     Strategy(
         key="value",
         title="Value",
@@ -111,7 +122,10 @@ STRATEGIES: tuple[Strategy, ...] = (
                 ("ev_ebitda", -1, 1.0),
                 ("fcf_yield", +1, 1.0)),
         doc="Cheap on earnings, on enterprise value and on cash. Note this "
-            "needs FX-sensitive metrics, so non-USD filers are excluded."),
+            "needs FX-sensitive metrics, so non-USD filers are excluded.",
+        evidence="NO EDGE MEASURED. 73 sessions to 2026-08-21, ~871 names: "
+                 "IC -0.0006 (t=-0.01) at h=20, IC -0.0097 (t=-0.13) at h=60. "
+                 "Indistinguishable from a random ranking of the same names."),
     Strategy(
         key="quality",
         title="Quality",
@@ -120,7 +134,11 @@ STRATEGIES: tuple[Strategy, ...] = (
                 ("f_score", +1, 1.0),
                 ("interest_cover", +1, 0.5)),
         doc="High return on capital, gross profitability and accounting "
-            "quality, with enough interest cover to survive a bad year."),
+            "quality, with enough interest cover to survive a bad year.",
+        evidence="NO EDGE MEASURED. 73 sessions to 2026-08-21, ~949 names: "
+                 "IC +0.0186 (t=+0.37) at h=20, hit 61.7%. It beats the "
+                 "random control but t=0.37 is far below the |t|>=2 bar, so "
+                 "the hit rate is not evidence of anything."),
 )
 
 
