@@ -71,8 +71,27 @@ class FundamentalModule:
             prior = cur.iloc[0:0]
         prior = _align(prior, cur["ticker"])
 
+        # A THIRD point-in-time query, one QUARTER back, for the sequential
+        # growth metrics. Exactly the same move as the year-back frame above
+        # and for the same reason: what was visible then, not a shift of what
+        # is visible now.
+        #
+        # Cheap: this step's median is 39.5s against a 10,800s budget, and the
+        # read cache in `fundamentals.read` serves a narrower window from the
+        # wider one already loaded.
+        prior_q = FD.facts_asof(_quarter_before(asof), tickers)
+        if prior_q.empty:
+            prior_q = cur.iloc[0:0]
+        prior_q = _align(prior_q, cur["ticker"])
+
+        # And a fourth, three years back, for the CAGR metrics.
+        prior_3y = FD.facts_asof(_years_before(asof, 3), tickers)
+        if prior_3y.empty:
+            prior_3y = cur.iloc[0:0]
+        prior_3y = _align(prior_3y, cur["ticker"])
+
         px = _price_inputs(asof, cur["ticker"].tolist(), cur)
-        m = FM.compute(cur, prior, px)
+        m = FM.compute(cur, prior, px, prior_q=prior_q, prior_3y=prior_3y)
 
         # Carry the price-derived inputs into the output. `FM.compute` consumes
         # them (mktcap feeds every valuation ratio) but does not pass them
@@ -278,6 +297,22 @@ def _is_current(asof: str) -> bool:
 
 def _year_before(asof: str) -> str:
     return (pd.Timestamp(asof) - pd.DateOffset(years=1)).strftime("%Y-%m-%d")
+
+
+def _years_before(asof: str, n: int) -> str:
+    """`n` years back, for the compound-rate metrics."""
+    return (pd.Timestamp(asof) - pd.DateOffset(years=n)).strftime("%Y-%m-%d")
+
+
+def _quarter_before(asof: str) -> str:
+    """One quarter back, for the sequential growth metrics.
+
+    `DateOffset(months=3)` rather than 91 days so the anniversary lands on the
+    same day of the month regardless of month length -- the fact store is
+    keyed on period ends, and a drifting probe date would sometimes land a
+    filing early or late for no reason connected to the company.
+    """
+    return (pd.Timestamp(asof) - pd.DateOffset(months=3)).strftime("%Y-%m-%d")
 
 
 def _align(prior: pd.DataFrame, tickers: pd.Series) -> pd.DataFrame:

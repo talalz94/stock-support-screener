@@ -160,7 +160,14 @@ THEMES = {
                       "du_leverage", "net_issuance", "debt_equity",
                       "current_ratio", "quick_ratio", "altman_z"},
     "growth":        {"rev_growth", "eps_growth", "fcf_growth", "ebitda_growth",
-                      "book_growth", "mom_12_1"},
+                      "book_growth", "mom_12_1",
+                      # Sequential growth and margin direction, added
+                      # 2026-08-23. `ebitda_growth` and `book_growth` were
+                      # listed here long before they existed in
+                      # `fund_metrics.REGISTRY`, so `admitted` could never
+                      # take them; they are real now.
+                      "rev_growth_q", "eps_growth_q",
+                      "gross_margin_chg", "op_margin_chg"},
     "efficiency":    {"asset_turnover", "du_asset_turnover", "accruals",
                       "cash_conversion", "inventory_turns", "ccc"},
     "sentiment":     {"sent_mean_5d", "sent_mean_30d", "sent_mean_90d",

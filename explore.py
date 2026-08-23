@@ -56,7 +56,13 @@ OUT = config.REPORTS_EXPLORE / "latest.html"
 DEFAULT_METRICS = [
     "fund_score", "quality_score", "value_score", "growth_score", "safety_score",
     "pe", "pb", "ev_ebitda", "fcf_yield", "roe", "roic", "f_score", "z_score",
-    "rev_growth", "net_issuance", "mktcap",
+    # The growth pillar went from 5 metrics to 11 on 2026-08-23. The sequential
+    # and margin-direction ones are here because "revenue growing AND margins
+    # expanding" is the thesis this table exists to express, and it was
+    # previously unsayable.
+    "rev_growth", "rev_growth_q", "eps_growth", "eps_growth_q",
+    "gross_margin_chg", "op_margin_chg",
+    "net_issuance", "mktcap",
     "hype_score", "premium_score", "attention_score", "ps_ratio",
     # `sent_age` travels WITH the sentiment score, never without it. A 30-day
     # mean says nothing about when its inputs arrived: DPRO read 0.50 from three
@@ -208,6 +214,22 @@ CSS = """
 margin:0 0 10px;padding:10px 12px;background:var(--panel);
 border:1px solid var(--line);border-radius:9px;position:sticky;top:46px;z-index:20}
 .filters input.num{width:82px}
+.filters .rule{display:inline-flex;gap:4px;align-items:center;
+  padding:2px 4px;border:1px solid var(--line);border-radius:6px}
+.filters .rule button{padding:0 6px;line-height:1.4}
+/* Strategy rail. Sits to the RIGHT of the table so the eye reads the data
+   first and the model second -- the model is a lens, not the subject. */
+.layout{display:flex;gap:14px;align-items:flex-start}
+.layout>.main{flex:1;min-width:0}
+.rail{width:190px;flex:none;position:sticky;top:10px}
+.rail h3{margin:0 0 6px;font-size:12px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.05em}
+.rail button{display:block;width:100%;text-align:left;margin-bottom:6px;
+  padding:7px 9px;border:1px solid var(--line);border-radius:7px;
+  background:var(--panel);cursor:pointer;font-size:12px;color:inherit}
+.rail button.on{border-color:var(--accent);background:var(--posbg)}
+.rail button b{display:block;font-size:13px;margin-bottom:2px}
+.rail button span{color:var(--muted);font-size:11px}
 .filters .count{color:var(--muted);font-size:12px;margin-left:auto;
 font-variant-numeric:tabular-nums}
 .tblwrap{overflow:auto;max-height:72vh;border:1px solid var(--line);
@@ -242,9 +264,31 @@ def _dropped_note(dropped) -> str:
             f'{more}.</div>')
 
 
+def _rail_html(cols: list[str], strat_cov: dict | None) -> str:
+    """The strategy rail. Each button states its own coverage, because a
+    strategy that can only rank half the universe must say so BEFORE anyone
+    reads its top ten -- that is the whole contract of this page."""
+    if not strat_cov:
+        return ""
+    out = ['<div class="rail"><h3>Strategy</h3>',
+           '<button data-si="-1" class="on"><b>None</b>'
+           '<span>ticker order</span></button>']
+    for key, cov in strat_cov.items():
+        if cov["column"] not in cols:
+            continue
+        out.append(
+            f'<button data-si="{cols.index(cov["column"])}" '
+            f'title="{ui.esc(cov["doc"])}"><b>{ui.esc(cov["title"])}</b>'
+            f'<span>{cov["ranked"]:,} of {cov["universe"]:,} ranked</span>'
+            f'</button>')
+    out.append("</div>")
+    return "".join(out)
+
+
 def render(cols: list[str], rows: list, prov: dict, asof: str,
            sessions: list[str] | None = None,
-           dropped: list[str] | None = None) -> str:
+           dropped: list[str] | None = None,
+           strat_cov: dict | None = None) -> str:
     navbar = ui.nav("explore", 1,
                     ui.session_picker(asof, sessions or [],
                                       "{d}.html",
@@ -283,9 +327,8 @@ scores from {src} </div>
 <div class="filters">
   <input id="q" placeholder="ticker or name..." autocomplete="off">
   <select id="sector"><option value="">all sectors</option>{sec_opts}</select>
-  <select id="mcol"></select>
-  <input class="num" id="mmin" placeholder="min" autocomplete="off">
-  <input class="num" id="mmax" placeholder="max" autocomplete="off">
+  <span id="rules"></span>
+  <button id="addRule" title="add another condition, ANDed with the rest">+ filter</button>
   <button id="reset">reset</button>
   <span class="chooser" id="chooser">
     <button id="colsBtn">columns &#9662;</button>
@@ -301,9 +344,14 @@ scores from {src} </div>
   <span class="count" id="count"></span>
 </div>
 
+<div class="layout">
+<div class="main">
 <div class="tblwrap" id="scroller">
   <table><thead><tr id="head">{head}</tr></thead>
   <tbody id="body"></tbody></table>
+</div>
+</div>
+{_rail_html(cols, strat_cov)}
 </div>
 
 {_dropped_note(dropped)}
@@ -329,10 +377,76 @@ const PAGE = 120;
 
 const body = document.getElementById('body');
 const scroller = document.getElementById('scroller');
-const mcol = document.getElementById('mcol');
-COLS.forEach((c,i) => {{
-  const o = document.createElement('option'); o.value = i + NCOL; o.textContent = c;
-  mcol.appendChild(o);
+// ---- filter rules -------------------------------------------------------
+// Each rule is {{ci, lo, hi}} against one metric column. They are ANDed in
+// apply(). Persisted, because the page is rebuilt nightly and a screen you
+// set up should survive that -- same reasoning as the column chooser.
+const RULEKEY = 'explore.filters.v1';
+const rulesBox = document.getElementById('rules');
+
+function metricSelect(sel){{
+  const s = document.createElement('select');
+  COLS.forEach(function(c, i){{
+    const o = document.createElement('option');
+    o.value = i + NCOL; o.textContent = c;
+    if ((i + NCOL) === sel) o.selected = true;
+    s.appendChild(o);
+  }});
+  return s;
+}}
+
+function addRule(ci, lo, hi){{
+  const row = document.createElement('span');
+  row.className = 'rule';
+  const sel = metricSelect(ci === undefined ? NCOL : ci);
+  const a = document.createElement('input');
+  a.className = 'num'; a.placeholder = 'min'; a.autocomplete = 'off';
+  if (lo !== undefined && lo !== null && lo === lo) a.value = lo;
+  const b = document.createElement('input');
+  b.className = 'num'; b.placeholder = 'max'; b.autocomplete = 'off';
+  if (hi !== undefined && hi !== null && hi === hi) b.value = hi;
+  const x = document.createElement('button');
+  x.textContent = '×'; x.title = 'remove this condition';
+  x.addEventListener('click', function(){{ row.remove(); saveRules(); apply(); }});
+  [sel, a, b].forEach(function(el){{
+    el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input',
+                        function(){{ saveRules(); apply(); }});
+  }});
+  row.appendChild(sel); row.appendChild(a); row.appendChild(b); row.appendChild(x);
+  rulesBox.appendChild(row);
+}}
+
+function readRules(){{
+  return Array.prototype.map.call(rulesBox.children, function(row){{
+    const el = row.querySelectorAll('select,input');
+    return {{ci: parseInt(el[0].value, 10),
+            lo: parseFloat(el[1].value), hi: parseFloat(el[2].value)}};
+  }});
+}}
+
+function saveRules(){{
+  try {{
+    localStorage.setItem(RULEKEY, JSON.stringify(readRules().map(function(r){{
+      return [r.ci, isNaN(r.lo) ? null : r.lo, isNaN(r.hi) ? null : r.hi];
+    }})));
+  }} catch (e) {{}}
+}}
+
+function loadRules(){{
+  let saved = null;
+  try {{ saved = JSON.parse(localStorage.getItem(RULEKEY) || 'null'); }} catch (e) {{}}
+  if (saved && saved.length){{
+    // A saved rule points at a column INDEX. If the column set changed since
+    // it was saved, that index means a different metric -- so drop anything
+    // out of range rather than silently filtering on the wrong thing.
+    saved.forEach(function(r){{
+      if (r[0] >= NCOL && r[0] < NCOL + COLS.length) addRule(r[0], r[1], r[2]);
+    }});
+  }}
+  if (!rulesBox.children.length) addRule();
+}}
+document.getElementById('addRule').addEventListener('click', function(){{
+  addRule(); apply();
 }});
 
 function fmt(v, name){{
@@ -390,26 +504,31 @@ scroller.addEventListener('scroll', function(){{
 function apply(){{
   const q = document.getElementById('q').value.trim().toUpperCase();
   const sec = document.getElementById('sector').value;
-  const ci = parseInt(mcol.value, 10);
-  const lo = parseFloat(document.getElementById('mmin').value);
-  const hi = parseFloat(document.getElementById('mmax').value);
+  const rules = readRules();
   view = ROWS.filter(function(r){{
     if (q && r[0].indexOf(q) < 0 && (r[1]||'').toUpperCase().indexOf(q) < 0)
       return false;
     if (sec && r[2] !== sec) return false;
-    if (!isNaN(lo) || !isNaN(hi)){{
-      const v = r[ci];
+    // EVERY rule must pass -- conditions are ANDed, which is what makes this
+    // a screener rather than a sorted table. One rule at a time could not
+    // express "growing AND cheap AND not distressed".
+    for (var k = 0; k < rules.length; k++){{
+      const ru = rules[k];
+      if (isNaN(ru.lo) && isNaN(ru.hi)) continue;
+      const v = r[ru.ci];
       // A row with NO value is excluded by a numeric filter rather than
       // treated as 0 -- same rule as the sort.
       if (v === null || v === undefined) return false;
-      if (!isNaN(lo) && v < lo) return false;
-      if (!isNaN(hi) && v > hi) return false;
+      if (!isNaN(ru.lo) && v < ru.lo) return false;
+      if (!isNaN(ru.hi) && v > ru.hi) return false;
     }}
     return true;
   }});
   if (sortI !== null) doSort(sortI, sortAsc, false);
+  const nf = rules.filter(function(x){{ return !isNaN(x.lo) || !isNaN(x.hi); }}).length;
   document.getElementById('count').textContent =
-    view.length.toLocaleString() + ' of ' + ROWS.length.toLocaleString();
+    view.length.toLocaleString() + ' of ' + ROWS.length.toLocaleString()
+    + (nf ? '  (' + nf + ' filter' + (nf > 1 ? 's' : '') + ')' : '');
   paint(true);
 }}
 
@@ -437,15 +556,14 @@ document.getElementById('head').addEventListener('click', function(e){{
   doSort(i, sortAsc, true);
 }});
 
-['q','sector','mcol','mmin','mmax'].forEach(function(id){{
+['q','sector'].forEach(function(id){{
   const el = document.getElementById(id);
   el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', apply);
 }});
 document.getElementById('reset').addEventListener('click', function(){{
   document.getElementById('q').value = '';
   document.getElementById('sector').value = '';
-  document.getElementById('mmin').value = '';
-  document.getElementById('mmax').value = '';
+  rulesBox.innerHTML = ''; addRule(); saveRules();
   sortI = null; apply();
 }});
 
@@ -511,6 +629,28 @@ document.querySelector('#chooser .acts').addEventListener('click', function(e){{
 var _paint = paint;
 paint = function(reset){{ _paint(reset); applyCols(); }};
 
+// ---- strategy rail ------------------------------------------------------
+// A strategy is just a column, so "select a strategy" is "sort by that
+// column, best first". No separate view, no second code path.
+Array.prototype.forEach.call(document.querySelectorAll('.rail button'),
+  function(b){{
+    b.addEventListener('click', function(){{
+      Array.prototype.forEach.call(document.querySelectorAll('.rail button'),
+        function(o){{ o.classList.remove('on'); }});
+      b.classList.add('on');
+      const si = parseInt(b.getAttribute('data-si'), 10);
+      if (si < 0){{ sortI = null; apply(); return; }}
+      Array.prototype.forEach.call(document.querySelectorAll('#head th'),
+        function(th){{ th.classList.remove('sorted'); }});
+      const th = document.querySelectorAll('#head th')[si];
+      if (th) th.classList.add('sorted');
+      sortAsc = false;               // a strategy score is best-first
+      doSort(si, false, false);
+      paint(true);
+    }});
+  }});
+
+loadRules();
 apply();
 applyCols();
 </script>
@@ -521,15 +661,57 @@ def build(metrics: list[str] | None = None, verbose: bool = True,
           session: str | None = None) -> Path:
     asof = session or calendar_us.last_closed_session()
     metrics = metrics or DEFAULT_METRICS
-    wide, prov = collect(metrics, asof)
+
+    # EVERY metric a strategy names must be COLLECTED, even when it is not a
+    # displayed column. `collect` only reads the metrics it is asked for, and a
+    # strategy whose input is absent ranks nobody -- by design, since scoring on
+    # a subset would silently answer a different question. That rule turned a
+    # missing fetch into three strategies reading "0 of 3,506" rather than into
+    # three plausible-looking but wrong rankings.
+    try:
+        import strategies as STRAT
+        _need = sorted({m for st in STRAT.STRATEGIES for m in st.metrics})
+    except Exception:                                            # noqa: BLE001
+        _need = []
+    wide, prov = collect(sorted(set(metrics) | set(_need)), asof)
     if wide.empty:
         raise RuntimeError("no score rows found -- run the score modules first")
+
+    # STRATEGY COLUMNS. A strategy is a ranking model over metrics already in
+    # this frame, so it becomes an ordinary column and every existing feature
+    # -- sorting, filtering, the column chooser, the session picker -- works on
+    # it without a line of new table code. That is the whole reason this is a
+    # column and not a second page.
+    #
+    # Computed here rather than stored, because a strategy is a re-rank of data
+    # already on disk: it costs milliseconds and cannot drift from what the
+    # page is showing.
+    strat_cov = {}
+    try:
+        import strategies as STRAT
+        # `collect` returns a TICKER-INDEXED frame -- the pivot uses
+        # index="ticker" and it is never reset -- so the engine reads it
+        # directly and the assignment aligns on that index.
+        for _s in STRAT.STRATEGIES:
+            wide[_s.column] = STRAT.rank(wide, _s)
+            _c = STRAT.coverage(wide, _s)
+            _c.update(column=_s.column, doc=_s.doc)
+            strat_cov[_s.key] = _c
+            if verbose:
+                print(f"    strategy {_s.key:16s} ranked "
+                      f"{_c['ranked']:,} of {_c['universe']:,}")
+        metrics = [s.column for s in STRAT.STRATEGIES] + list(metrics)
+    except Exception as exc:                                     # noqa: BLE001
+        # A strategy failing must not cost the whole table. Say so rather than
+        # rendering a page that silently has no strategy columns.
+        print(f"    [explore] strategies unavailable: {exc!r}")
+
     cols, rows, dropped = _payload(wide, metrics)
     config.REPORTS_EXPLORE.mkdir(parents=True, exist_ok=True)
     out = OUT if session is None else \
         config.REPORTS_EXPLORE / f"{session}.html"
     out.write_text(render(cols, rows, prov, asof, available_sessions(),
-                          dropped=dropped),
+                          dropped=dropped, strat_cov=strat_cov),
                    encoding="utf-8")
     if verbose:
         print(f"  explore: {out}  ({len(rows):,} tickers x {len(cols)} metrics, "
