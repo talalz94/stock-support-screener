@@ -111,6 +111,23 @@ REGISTRY: dict[str, tuple[str, int, str]] = {
     # which reads on a dashboard as "no data for this company" forever rather
     # than "this is not implemented". Add it back the same commit that wires it.
     "asset_growth":   ("growth", -1, "YoY asset growth (Cooper: high = bad)"),
+    # Sequential growth: TTM now vs TTM one quarter back, so seasonality
+    # cancels. Withheld unless the filer actually reported a new period --
+    # see the `_q_ok` guard in `compute`.
+    "rev_growth_q":   ("growth", +1, "QoQ revenue growth, TTM vs TTM one quarter back"),
+    "eps_growth_q":   ("growth", +1, "QoQ EPS growth, TTM vs TTM one quarter back"),
+    # Listed in combo.THEMES["growth"] since it was written, but never defined
+    # here, so combo could never admit them.
+    # Compound rates over three years. A trend, where one YoY figure is a
+    # single comparison. Defined only when both ends are positive.
+    "rev_cagr_3y":    ("growth", +1, "3-year revenue CAGR"),
+    "eps_cagr_3y":    ("growth", +1, "3-year EPS CAGR"),
+    "ebitda_growth":  ("growth", +1, "YoY EBITDA growth"),
+    "book_growth":    ("growth", +1, "YoY book value (equity) growth"),
+    # Margin DIRECTION in percentage points. Expanding margins is a standard
+    # thesis and was inexpressible before this.
+    "gross_margin_chg": ("growth", +1, "YoY change in gross margin, percentage points"),
+    "op_margin_chg":  ("growth", +1, "YoY change in operating margin, percentage points"),
     "mom_12_1":       ("growth", +1, "12-month return excluding the last month"),
 }
 
@@ -422,17 +439,80 @@ def sue(eps_hist: pd.DataFrame) -> pd.Series:
 # ===========================================================================
 # Assembly
 # ===========================================================================
-def compute(cur: pd.DataFrame, prior: pd.DataFrame, px: pd.DataFrame) -> pd.DataFrame:
+def compute(cur: pd.DataFrame, prior: pd.DataFrame, px: pd.DataFrame,
+            prior_q: pd.DataFrame | None = None,
+            prior_3y: pd.DataFrame | None = None) -> pd.DataFrame:
     """All metrics for one date.
 
     `cur`/`prior` are wide point-in-time frames from fundamentals.facts_asof;
     `px` carries ticker, price, mktcap, beta, mom_12_1.
+
+    `prior_q` is the same frame a QUARTER back, for the sequential growth
+    metrics. `prior_3y` is three years back, for the CAGR metrics. Both are
+    optional and default to None so callers that only want the year-on-year set
+    -- `providers.compare` passes the current frame twice -- keep working
+    unchanged and simply get NaN for those metrics.
     """
     d = derive(cur)
     p = derive(prior)
     d.index = cur["ticker"].values
     p.index = prior["ticker"].values
     p = p.reindex(d.index)
+
+    # A GROWTH RATE NEEDS TWO DIFFERENT PERIODS. If the filer published nothing
+    # in between, the "period back" frame IS the current frame and every growth
+    # metric computes as exactly 0.0 -- a fabricated number that ranks
+    # mid-pack, which is worse than a missing one. Measured 2026-08-23: 19% of
+    # names last filed more than 91 days ago, so this fires on ~640 stocks.
+    #
+    # Compared on `last_ddate`, the PERIOD end, not `last_filed`: an amended
+    # filing covering the same period changes when it was filed but not the
+    # economics, and would produce the same spurious zero.
+    #
+    # The upper bound matters as much as the lower one. Without it a frame that
+    # actually lands two quarters back gets relabelled as one quarter's growth.
+    def _ends(frame):
+        return pd.to_datetime(
+            pd.Series(frame["last_ddate"].values,
+                      index=frame["ticker"].values), errors="coerce")
+
+    def _moved(then_ends, lo: int, hi: int) -> pd.Series:
+        """True where `then` is a genuinely earlier period, lo..hi days back."""
+        if then_ends is None:
+            return pd.Series(False, index=d.index)
+        gap = (_d_end - then_ends.reindex(d.index)).dt.days
+        return (gap.notna() & (gap >= lo) & (gap <= hi)).reindex(d.index).fillna(False)
+
+    _d_end = _ends(cur) if "last_ddate" in cur.columns else pd.Series(
+        pd.NaT, index=d.index)
+    _p_end = _ends(prior) if "last_ddate" in prior.columns else None
+    # A year-back point-in-time frame normally sits a quarter either side of
+    # 365 days; anything outside 270-550 is not a year-on-year comparison.
+    _yoy_ok = _moved(_p_end, 270, 550)
+
+    q = None
+    _q_ok = pd.Series(False, index=d.index)
+    if prior_q is not None and not prior_q.empty:
+        q = derive(prior_q)
+        q.index = prior_q["ticker"].values
+        q = q.reindex(d.index)
+        _q_end = _ends(prior_q) if "last_ddate" in prior_q.columns else None
+        # 45-140 days: a quarter is ~91. The upper bound deliberately excludes
+        # ~182, so a semi-annual filer is dropped rather than having half a
+        # year's growth reported as a quarter's.
+        _q_ok = _moved(_q_end, 45, 140)
+
+    t3 = None
+    _t3_ok = pd.Series(False, index=d.index)
+    if prior_3y is not None and not prior_3y.empty:
+        t3 = derive(prior_3y)
+        t3.index = prior_3y["ticker"].values
+        t3 = t3.reindex(d.index)
+        _t3_end = _ends(prior_3y) if "last_ddate" in prior_3y.columns else None
+        # 900-1300 days around the 1,095 of three years. A CAGR annualises by
+        # dividing by 3, so a frame that is really two or four years back would
+        # silently rescale the whole rate.
+        _t3_ok = _moved(_t3_end, 900, 1300)
 
     px = px.set_index("ticker").reindex(d.index)
     mktcap = pd.to_numeric(px.get("mktcap"), errors="coerce")
@@ -551,14 +631,83 @@ def compute(cur: pd.DataFrame, prior: pd.DataFrame, px: pd.DataFrame) -> pd.Data
     out["shareholder_yield"] = _safe(d["dividends"].fillna(0)
                                      + d["buybacks"].fillna(0), mktcap).clip(-1, 2)
 
-    # growth
-    out["rev_growth"] = _safe(d["revenue"] - p["revenue"], p["revenue"].abs()).clip(-1, 10)
-    out["fcf_growth"] = _safe(d["fcf"] - p["fcf"], p["fcf"].abs()).clip(-10, 10)
+    # growth -- TWO guards, and the second was found by checking the first.
+    #
+    # `_period_ok` says the FRAME moved on. That is necessary and not
+    # sufficient: `last_ddate` is the newest period across ALL concepts, so a
+    # filer can advance on one line item while the metric in hand still comes
+    # from the same stale annual. Measured 2026-08-23, 250-name sample: six
+    # names passed the period guard and still produced an exact 0.0 because
+    # their TTM revenue was byte-identical across the two frames --
+    # CBIO 11,883,000, COLB 177,000,000, NAVI 271,000,000, and three more.
+    #
+    # So the value must have CHANGED too. Identical TTM revenue to the dollar
+    # across a quarter is not a coincidence at 6-in-170; it means one report,
+    # read twice. A growth rate needs two reports.
+    def _growth(now, then, ok, lo, hi):
+        now = pd.Series(now).reindex(d.index)
+        then = pd.Series(then).reindex(d.index)
+        moved = ok & now.notna() & then.notna() & (now != then)
+        return _safe(now - then, then.abs()).clip(lo, hi).where(moved)
+
     eps_c = _safe(d["net_income"], d["shares"])
     eps_p = _safe(p["net_income"], p["shares"])
-    out["eps_growth"] = _safe(eps_c - eps_p, eps_p.abs()).clip(-10, 10)
-    out["asset_growth"] = _safe(d["assets"] - p["assets"], p["assets"]).clip(-1, 10)
+    out["rev_growth"] = _growth(d["revenue"], p["revenue"], _yoy_ok, -1, 10)
+    out["fcf_growth"] = _growth(d["fcf"], p["fcf"], _yoy_ok, -10, 10)
+    out["eps_growth"] = _growth(eps_c, eps_p, _yoy_ok, -10, 10)
+    out["asset_growth"] = _growth(d["assets"], p["assets"], _yoy_ok, -1, 10)
     out["mom_12_1"] = pd.to_numeric(px.get("mom_12_1"), errors="coerce")
+
+    # EBITDA and book growth. `combo.THEMES["growth"]` has listed both since it
+    # was written, but neither existed in REGISTRY, so `combo.admitted` could
+    # never admit them -- a dead reference that looked like a configured metric.
+    out["ebitda_growth"] = _growth(d["ebitda"], p["ebitda"], _yoy_ok, -10, 10)
+    out["book_growth"] = _growth(d["equity"], p["equity"], _yoy_ok, -10, 10)
+
+    # MARGIN DIRECTION, in percentage points, not a ratio of ratios. A margin
+    # that went 4% -> 6% is +2pp; expressing it as +50% growth makes a
+    # thin-margin company look transformed by a rounding change.
+    #
+    # Nearly free: the year-back frame is already in hand for the YoY block.
+    _gm_c, _gm_p = _safe(d["gross_profit"], d["revenue"]), _safe(p["gross_profit"], p["revenue"])
+    _om_c, _om_p = _safe(d["ebit"], d["revenue"]), _safe(p["ebit"], p["revenue"])
+    out["gross_margin_chg"] = (_gm_c - _gm_p).clip(-1, 1).where(
+        _yoy_ok & _gm_c.notna() & _gm_p.notna() & (_gm_c != _gm_p))
+    out["op_margin_chg"] = (_om_c - _om_p).clip(-1, 1).where(
+        _yoy_ok & _om_c.notna() & _om_p.notna() & (_om_c != _om_p))
+
+    # THREE-YEAR CAGR. One YoY figure is a single comparison and inherits
+    # whatever was odd about either end; a compound rate over three years is a
+    # trend, which is what a "consistent grower" screen actually wants.
+    #
+    # Only defined when BOTH ends are positive. A CAGR across a sign change is
+    # arithmetically expressible and financially meaningless -- the same rule
+    # `peg` already applies.
+    def _cagr(now, then, ok):
+        r = (_safe(now, then).where((now > 0) & (then > 0))) ** (1.0 / 3.0) - 1.0
+        return r.replace([np.inf, -np.inf], np.nan).clip(-1, 3).where(ok)
+
+    if t3 is not None:
+        out["rev_cagr_3y"] = _cagr(d["revenue"], t3["revenue"], _t3_ok)
+        out["eps_cagr_3y"] = _cagr(_safe(d["net_income"], d["shares"]),
+                                   _safe(t3["net_income"], t3["shares"]), _t3_ok)
+    else:
+        out["rev_cagr_3y"] = np.nan
+        out["eps_cagr_3y"] = np.nan
+
+    # QUARTER-OVER-QUARTER: TTM now against TTM one quarter back.
+    #
+    # NOT raw Q vs Q-1. A TTM sum spans four quarters, so seasonality cancels by
+    # construction and the sequential change is a clean momentum read. Raw
+    # Q/Q-1 would be dominated by the season and would need SUE-style seasonal
+    # adjustment before it meant anything.
+    if q is not None:
+        eps_q = _safe(q["net_income"], q["shares"])
+        out["rev_growth_q"] = _growth(d["revenue"], q["revenue"], _q_ok, -1, 5)
+        out["eps_growth_q"] = _growth(eps_c, eps_q, _q_ok, -10, 10)
+    else:
+        out["rev_growth_q"] = np.nan
+        out["eps_growth_q"] = np.nan
     # PEG only means anything when both legs are positive; a negative-growth PEG
     # is arithmetically fine and financially nonsense.
     g = out["eps_growth"] * 100.0
