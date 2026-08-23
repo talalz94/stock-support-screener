@@ -3,6 +3,120 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-23 — THE SCREENER BECAME A SCREENER
+
+Three things landed: the metrics strategies need, a strategy template, and a
+watchlist that drives verification rather than decorating a page.
+
+### THE CONTRACT, stated once and enforced in code
+
+**A stock missing any input a strategy names is NOT LISTED for that strategy.**
+Never imputed, never renormalised over the inputs that happen to exist.
+
+Renormalising would let a name scored on one of three inputs sit beside one
+scored on three and look comparable. `strategies.selftest` asserts the rule, so
+a later refactor cannot quietly reintroduce it.
+
+It earned its keep within minutes: three strategies read `0 of 3,506` instead
+of producing plausible-but-wrong rankings, which is how I found that
+`explore.collect` only fetched DISPLAYED metrics and never loaded `gpoa` or
+`interest_cover`.
+
+### METRICS: 32 -> 40, growth pillar 5 -> 13
+
+Growth was the thinnest pillar and the one most strategies key on; one of its
+five members was price momentum.
+
+| added | why |
+|---|---|
+| `rev_growth_q`, `eps_growth_q` | sequential growth, TTM vs TTM one quarter back |
+| `rev_cagr_3y`, `eps_cagr_3y` | a trend, where one YoY figure is one comparison |
+| `gross_margin_chg`, `op_margin_chg` | margin DIRECTION, in percentage points |
+| `ebitda_growth`, `book_growth` | `combo.THEMES["growth"]` listed both and NEITHER existed -- a dead reference reading as configured |
+
+QoQ is TTM-over-TTM, not raw Q vs Q-1: a TTM sum spans four quarters so
+seasonality cancels by construction. All eight are scale-free, so non-USD
+filers keep them.
+
+### TWO GUARDS, and the second exists because I checked the first
+
+A growth rate needs two different reports. Unguarded, a filer that published
+nothing since the prior frame yields exactly `0.0` -- a fabricated number that
+ranks mid-pack, which is worse than a missing one. 19% of names last filed more
+than 91 days ago.
+
+    guard 1   the PERIOD moved, bounded both sides so a two-quarter jump is
+              not relabelled as one quarter's growth
+    guard 2   the VALUE changed too
+
+**Guard 1 alone was not enough.** `last_ddate` is the newest period across ALL
+concepts, so a filer can advance on one line item while the metric in hand
+still comes from the same stale annual. Six names passed guard 1 and still
+produced an exact `0.0` with byte-identical TTM revenue on both sides -- CBIO
+11,883,000, COLB 177,000,000, NAVI 271,000,000 and three more. Identical TTM
+revenue to the dollar across a quarter, six times in 170, is one report read
+twice.
+
+    exact zeros across all ten growth metrics: 6 -> 0
+
+The pre-existing YoY metrics had no guard of any kind. They now route through
+the same `_growth()` helper.
+
+### `strategies.py` — the template
+
+A strategy is DATA: name, inputs, directions, weights. Adding one is appending
+an entry; tabs, columns, coverage counts and checks all derive from the
+registry. One engine (`rank`), two callers (the page, and anything that wants
+to measure it).
+
+Explore gained a **strategy rail on the right**, **ANDed multi-filters**
+(add/remove rows, persisted to localStorage so a nightly rebuild does not wipe
+a screen you set up), and the new growth columns.
+
+**A strategy is a metric column.** That is the whole simplification -- sorting,
+filtering, the column chooser and the session picker work on it with no new
+table code.
+
+Each tab states its own coverage, because a strategy that ranks a quarter of
+the universe must say so BEFORE anyone reads its top ten.
+
+**Coverage falls as a strategy adds inputs.** `quality` needs all four of roic,
+gpoa, f_score and interest_cover and ranks 950 of 3,286; `value` ranks 1,018.
+That is the direct cost of the all-or-nothing rule and it makes strategy design
+partly a coverage decision. Sanity check: `quality`'s top names are IDXX, NATR,
+TPR, APP, GIC, FICO, RL, AAPL -- what a ROIC and gross-profitability screen
+should produce.
+
+### THE WATCHLIST DRIVES VERIFICATION — this is the point of it
+
+`data/_watchlist.json`, not localStorage, because a browser-local list is
+invisible to everything else.
+
+`validate` samples 60 rotating names a night out of ~3,500, so any one name
+waits weeks for its turn. **Starred names are checked EVERY run**, PREPENDED to
+the sample so if the budget cuts the network checks short it is the random tail
+that drops, not the names that were asked for.
+
+Three ways in, one source of truth: the star in Explore, `python watchlist.py
+--add NVDA,HZO`, or the page adopting the server's copy on load. Served, it
+persists through `/api/watchlist`; opened as a plain file it falls back to
+localStorage and the star still works.
+
+Deliberately NOT a portfolio tracker -- no notes, targets or position sizes.
+Unknown tickers are REPORTED, not dropped: a delisted name you still watch is
+legitimate.
+
+### NEXT
+
+1. `growth` and `quality_growth` rank 0 until `fundamental` next runs and writes
+   the new metrics. Stated on the tab rather than hidden.
+2. Measure the strategies: `factor_lab --module ...`, bar stated first --
+   |t| >= 2 and beat a random control, else the tab says "unmeasured".
+3. `sue` (earnings surprise) is implemented at `fund_metrics.py:396` and still
+   unregistered; it needs a per-ticker EPS panel, a different data path.
+4. The level/bounce factor: when `scores/level.py` emits distance-to-support for
+   ALL stocks, it becomes an ordinary metric any strategy can name.
+
 ## State at 2026-08-22 08:40 — THE CHECKERS WERE THE BUG, FOUR TIMES
 
 Read `regression_pins.py` before changing anything in `fundamentals`. It pins 28

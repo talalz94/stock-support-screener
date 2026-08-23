@@ -214,6 +214,13 @@ CSS = """
 margin:0 0 10px;padding:10px 12px;background:var(--panel);
 border:1px solid var(--line);border-radius:9px;position:sticky;top:46px;z-index:20}
 .filters input.num{width:82px}
+.tk .star{cursor:pointer;margin-right:5px;color:var(--muted);
+  user-select:none;font-size:13px}
+.tk .star:hover{color:var(--warn)}
+.tk .star.on{color:var(--warn)}
+.watchtog{display:inline-flex;align-items:center;gap:4px;font-size:12px;
+  color:var(--muted);cursor:pointer}
+.watchn{color:var(--warn)}
 .filters .rule{display:inline-flex;gap:4px;align-items:center;
   padding:2px 4px;border:1px solid var(--line);border-radius:6px}
 .filters .rule button{padding:0 6px;line-height:1.4}
@@ -329,6 +336,9 @@ scores from {src} </div>
   <select id="sector"><option value="">all sectors</option>{sec_opts}</select>
   <span id="rules"></span>
   <button id="addRule" title="add another condition, ANDed with the rest">+ filter</button>
+  <label class="watchtog" title="show only starred names">
+    <input type="checkbox" id="watchOnly"> &#9733; only
+    <span id="watchN" class="watchn"></span></label>
   <button id="reset">reset</button>
   <span class="chooser" id="chooser">
     <button id="colsBtn">columns &#9662;</button>
@@ -377,6 +387,60 @@ const PAGE = 120;
 
 const body = document.getElementById('body');
 const scroller = document.getElementById('scroller');
+// ---- watchlist ----------------------------------------------------------
+// Persisted to data/_watchlist.json through /api/watchlist when a server is
+// running, and mirrored to localStorage so the star still works when this page
+// is opened as a plain file. The FILE is the source of truth, because that is
+// what `validate` reads -- starred names are checked against filings every
+// night instead of waiting weeks for the rotating sample to reach them.
+const WKEY = 'explore.watch.v1';
+let WATCH = new Set();
+try {{ WATCH = new Set(JSON.parse(localStorage.getItem(WKEY) || '[]')); }}
+catch (e) {{}}
+
+function saveWatch(){{
+  const list = Array.from(WATCH).sort();
+  try {{ localStorage.setItem(WKEY, JSON.stringify(list)); }} catch (e) {{}}
+  // Fire-and-forget: a page opened from disk has no server and must keep
+  // working, so a failed POST is not an error the reader needs to see.
+  try {{
+    fetch('/api/watchlist', {{method: 'POST', cache: 'no-store',
+      headers: {{'Content-Type': 'application/json', 'X-Screener': '1'}},
+      body: JSON.stringify({{tickers: list}})}}).catch(function(){{}});
+  }} catch (e) {{}}
+  const el = document.getElementById('watchN');
+  if (el) el.textContent = list.length ? list.length + ' starred' : '';
+}}
+
+function toggleWatch(tk, span){{
+  if (WATCH.has(tk)) {{ WATCH.delete(tk); span.textContent = '☆';
+                       span.classList.remove('on'); }}
+  else {{ WATCH.add(tk); span.textContent = '★';
+         span.classList.add('on'); }}
+  saveWatch();
+  if (document.getElementById('watchOnly').checked) apply();
+}}
+
+document.addEventListener('click', function(ev){{
+  const sp = ev.target.closest ? ev.target.closest('.star') : null;
+  if (sp) {{ ev.preventDefault(); toggleWatch(sp.getAttribute('data-tk'), sp); }}
+}});
+
+// Adopt the server's copy when there is one, so a list starred on another
+// browser -- or added with `python watchlist.py --add` -- shows up here.
+try {{
+  fetch('/api/watchlist', {{cache: 'no-store'}})
+    .then(function(r){{ return r.ok ? r.json() : null; }})
+    .then(function(j){{
+      if (!j || !j.tickers) return;
+      WATCH = new Set(j.tickers);
+      try {{ localStorage.setItem(WKEY, JSON.stringify(j.tickers)); }} catch (e) {{}}
+      const el = document.getElementById('watchN');
+      if (el) el.textContent = j.tickers.length ? j.tickers.length + ' starred' : '';
+      paint(true);
+    }}).catch(function(){{}});
+}} catch (e) {{}}
+
 // ---- filter rules -------------------------------------------------------
 // Each rule is {{ci, lo, hi}} against one metric column. They are ANDed in
 // apply(). Persisted, because the page is rebuilt nightly and a screen you
@@ -478,7 +542,12 @@ function rowHTML(r){{
     ? '<a href="../stock/' + tk + '.html">' + tk + '</a>'
     : '<span title="no profile page built yet — python stock_profile.py ' + tk
       + '">' + tk + '</span>';
-  let h = '<tr><td class="tk">' + cell
+  let h = '<tr><td class="tk">'
+        + '<span class="star' + (WATCH.has(tk) ? ' on' : '') + '"'
+        + ' data-tk="' + tk + '" role="button" tabindex="0"'
+        + ' title="watchlist -- these names are verified against filings every'
+        + ' night, not sampled">' + (WATCH.has(tk) ? '★' : '☆')
+        + '</span>' + cell
         + '<a class="tv" href="' + tvLink(tk, r[3]) + '" target="_blank"'
         + ' rel="noopener" title="TradingView">&#9741;</a></td>'
         + '<td class="sec">' + (r[2] || '') + '</td>';
@@ -505,7 +574,9 @@ function apply(){{
   const q = document.getElementById('q').value.trim().toUpperCase();
   const sec = document.getElementById('sector').value;
   const rules = readRules();
+  const only = document.getElementById('watchOnly').checked;
   view = ROWS.filter(function(r){{
+    if (only && !WATCH.has(r[0])) return false;
     if (q && r[0].indexOf(q) < 0 && (r[1]||'').toUpperCase().indexOf(q) < 0)
       return false;
     if (sec && r[2] !== sec) return false;
@@ -556,6 +627,7 @@ document.getElementById('head').addEventListener('click', function(e){{
   doSort(i, sortAsc, true);
 }});
 
+document.getElementById('watchOnly').addEventListener('change', apply);
 ['q','sector'].forEach(function(id){{
   const el = document.getElementById(id);
   el.addEventListener(el.tagName === 'SELECT' ? 'change' : 'input', apply);
