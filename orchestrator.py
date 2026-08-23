@@ -1003,6 +1003,26 @@ def _step_validate(asof: str) -> tuple[int, str]:
     except Exception as exc:                                     # noqa: BLE001
         log(f"    [validate] sample unavailable: {repr(exc)[:80]}")
 
+    # THE WATCHLIST IS ALWAYS CHECKED, never sampled.
+    #
+    # The rotating sample reaches ~1,200 distinct names a month out of ~3,500,
+    # so any one name waits weeks for its turn. That is fine for measuring the
+    # store's health and useless for trusting a name you are about to act on.
+    # Names on the watchlist are the ones where a wrong number costs something,
+    # so they are appended to every run's sample regardless of the draw.
+    #
+    # Prepended, so if the budget cuts the network checks short it is the
+    # random tail that gets dropped, not the names that were asked for.
+    try:
+        import watchlist
+        _watch = [t for t in watchlist.load() if t not in set(sample)]
+        if _watch:
+            sample = _watch + sample
+            log(f"    [validate] watchlist: {len(_watch)} name(s) checked "
+                f"every run in addition to the rotating sample")
+    except Exception as exc:                                     # noqa: BLE001
+        log(f"    [validate] watchlist unavailable: {repr(exc)[:80]}")
+
     # 2. The roll-forward identity, ON THE SAMPLE.
     #
     # `ttm_invariants.check()` -- the WINDOW checker -- is deliberately NOT run

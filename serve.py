@@ -461,6 +461,16 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = self.path.split("?", 1)[0]
 
+        # The watchlist, so the star on the explore page persists to disk
+        # instead of living only in one browser. Read is open; writing goes
+        # through do_POST and its header guard.
+        if path == "/api/watchlist":
+            try:
+                import watchlist
+                return self._json(200, {"tickers": watchlist.load()})
+            except Exception as exc:                             # noqa: BLE001
+                return self._json(500, {"error": repr(exc)[:200]})
+
         if path == "/api/steps":
             return self._json(200, {"steps": [
                 {"name": s.name, "cadence": s.cadence, "desc": s.desc}
@@ -557,6 +567,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(403, {"error": f"missing {GUARD_HEADER} header"})
 
         path = self.path.split("?", 1)[0]
+
+        if path == "/api/watchlist":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+                body = json.loads(self.rfile.read(n) or b"{}")
+                # REPLACE, not merge. The page owns the list and sends the
+                # whole thing, so unstarring actually removes -- a merge would
+                # make removal impossible and the list would only ever grow.
+                import watchlist
+                keep = watchlist.save(body.get("tickers") or [])
+                return self._json(200, {"tickers": keep})
+            except Exception as exc:                             # noqa: BLE001
+                return self._json(400, {"error": repr(exc)[:200]})
+
         if not path.startswith("/api/run/"):
             return self._json(404, {"error": "not found"})
 
