@@ -106,6 +106,54 @@ Deliberately NOT a portfolio tracker -- no notes, targets or position sizes.
 Unknown tickers are REPORTED, not dropped: a delisted name you still watch is
 legitimate.
 
+### THE STRATEGIES WERE MEASURED. NEITHER PASSES.
+
+Bar stated BEFORE running, the same one `combo.admitted` applies to any metric:
+`|t| >= 2.0` AND `|IC| > |IC_random|`.
+
+    73 sessions, 2024-01-30 .. 2026-08-21
+
+    Value    ~871 names   IC -0.0006 (t=-0.01) h=20   IC -0.0097 (t=-0.13) h=60
+    Quality  ~949 names   IC +0.0186 (t=+0.37) h=20   hit 61.7%
+
+**Value is indistinguishable from a random ranking of the same stocks.**
+**Quality beats its random control (+0.0186 vs -0.0017) and has a 61.7% hit
+rate -- and t=0.37 against a bar of 2.0 means that hit rate is noise landing
+above half, not evidence.** A hit rate without a t-stat is the same mistake as
+the bounce screen's +2.16% that turned out to be +1.60% for a random pick from
+the same pool.
+
+`Growth` and `Quality growth` are NOT MEASURABLE: `rev_growth_q` and
+`gross_margin_chg` were added 2026-08-23 and have zero sessions of history.
+There is no past to measure over, and running the test anyway would produce a
+number that looks like evidence and is not.
+
+WHAT WAS DONE ABOUT IT. `Strategy.evidence` carries the verdict and the rail
+prints it ON the button -- `no edge measured` / `unmeasured` -- not in a
+tooltip, plus a note under the rail. Hiding it behind a hover is how four
+unproven models come to look like four working ones.
+
+**Read the strategies as a way to FIND CANDIDATES, not as a reason to buy.**
+That is what the evidence supports and what the page now says.
+
+To re-measure after history accrues: `/tmp/measure.py` pattern -- compute the
+strategy rank per stored session, feed `(date, ticker, value)` to
+`factor_lab.evaluate`. No storage module needed, because a strategy is a
+re-rank of metrics already on disk.
+
+### A SCHEDULING TRAP WORTH KNOWING
+
+`fundamental` skips when it has already run for the current `asof`. On a
+weekend the last closed session does not move, so new metrics added on a
+Saturday do not reach the store until the next trading session is scored --
+two days later. Force it with `orchestrator.py --force --step fundamental`.
+
+And when chaining a job to wait for the daily run: `pgrep -f "pythonw.*orchestrator"`
+does NOT match on Windows. A wait built on it fires immediately, the forced run
+hits `ANOTHER RUN HOLDS THE LOCK` and exits having done nothing -- silently,
+because that is a normal message. Check with `Get-CimInstance Win32_Process`
+and read the log to confirm the work actually happened.
+
 ### NEXT
 
 1. `growth` and `quality_growth` rank 0 until `fundamental` next runs and writes
@@ -1551,57 +1599,58 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-22 11:38 — do not edit by hand._
+_Generated 2026-08-23 09:40 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 7s | 7s | 10s | 2.0 min | 13 |
-| `bars` | daily | 87s | 40s | 87s | 10.0 min | 13 |
-| `macro` | daily | 2.3 min | 2.2 min | 3.4 min | 15.0 min | 13 |
-| `news` | daily | 6s | 5s | 7s | 10.0 min | 13 |
-| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 13 |
-| `sentiment` | daily | 3.7 min | 10s | 3.7 min | 15.0 min | 14 |
-| `shortvol` | daily | 4s | 3s | 4s | 10.0 min | 11 |
-| `hype` | daily | 819.1 min | 88.9 min | 846.8 min ⚠ | 120.0 min | 13 |
-| `bounce` | daily | 40s | 40s | 77s | 15.0 min | 14 |
-| `provider` | daily | 72.7 min | 64.3 min | 72.7 min | 120.0 min | 7 |
+| `universe` | daily | 6s | 7s | 7s | 2.0 min | 14 |
+| `bars` | daily | 31s | 39s | 87s | 10.0 min | 14 |
+| `macro` | daily | 1.8 min | 2.0 min | 3.4 min | 15.0 min | 14 |
+| `news` | daily | 5s | 5s | 6s | 10.0 min | 14 |
+| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 14 |
+| `sentiment` | daily | 14s | 11s | 3.7 min | 15.0 min | 15 |
+| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 12 |
+| `hype` | daily | 154.0 min | 93.1 min | 846.8 min ⚠ | 120.0 min | 14 |
+| `bounce` | daily | 33s | 39s | 53s | 15.0 min | 15 |
+| `provider` | daily | 63.3 min | 63.8 min | 72.7 min | 120.0 min | 8 |
 | `fundamental` | daily | 132.6 min | 90.5 min | 668.0 min ⚠ | 180.0 min | 15 |
 | `sec_facts` | quarterly | 31s | 4s | 31s | 60.0 min | 5 |
 | `sec_gap` | weekly | 176.9 min | 176.9 min | 187.1 min ⚠ | 20.0 min | 3 |
-| `events` | weekly | 11.3 min | 9.8 min | 13.1 min | 30.0 min | 4 |
-| `leaderboard` | weekly | 617.6 min | 23.8 min | 617.6 min ⚠ | 90.0 min | 5 |
+| `events` | weekly | 7.0 min | 8.3 min | 13.1 min | 30.0 min | 5 |
+| `leaderboard` | weekly | 28.2 min | 26.0 min | 617.6 min ⚠ | 90.0 min | 6 |
 | `dip` | daily | 68s | 16s | 68s | 15.0 min | 15 |
 | `combo` | daily | 90s | 12s | 90s | 15.0 min | 11 |
+| `validate` | daily | 3.9 min | 3.9 min | 3.9 min | 60.0 min | 1 |
 | `explore` | daily | 9s | 6s | 13s | 5.0 min | 17 |
-| `snapshots` | daily | 16s | 2s | 16s | 5.0 min | 19 |
-| `profiles` | daily | 18.4 min | 16.5 min | 25.2 min ⚠ | 15.0 min | 16 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 13 |
+| `snapshots` | daily | 0s | 1s | 16s | 5.0 min | 20 |
+| `profiles` | daily | 21.1 min | 17.3 min | 25.2 min ⚠ | 15.0 min | 17 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 14 |
 | `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 20 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 17 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 18 |
 
-**Daily total ≈ 264.8 min.** Weekly adds 210.5 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 273.0 min.** Weekly adds 211.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-22 11:38 — do not edit by hand._
+_Generated 2026-08-23 09:40 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 244.9 | 2016-07 → 2026-08 |
+| bars 1d | 122 | 245.1 | 2016-07 → 2026-08 |
 | bars 1h | 4 | 0.5 | 2026-05 → 2026-08 |
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
 | news | 121 | 168.5 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 259.7 | 2016-08 → 2026-08 |
+| scores | 121 | 260.5 | 2016-08 → 2026-08 |
 | fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
 | short volume | 73 | 54.7 | 2020-08 → 2026-08 |
-| flags | 15 | 1.3 | 2026-07-31 → 2026-08-20 |
-| rejects | 15 | 3.1 | 2026-07-31 → 2026-08-20 |
+| flags | 16 | 1.4 | 2026-07-31 → 2026-08-21 |
+| rejects | 16 | 3.3 | 2026-07-31 → 2026-08-21 |
 | loose (macro, universe, jobs, study) | 29 | 3.6 | — |
 
-**`data/` total ≈ 1,086 MB.** `reports/` is a further 26 MB across 124 pages.
+**`data/` total ≈ 1,087 MB.** `reports/` is a further 27 MB across 130 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -1609,13 +1658,13 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-22 11:38 — do not edit by hand._
+_Generated 2026-08-23 09:40 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 341 | 2016-09-27 → 2026-08-20 |
+| `sentiment` | 26 | 342 | 2016-09-27 → 2026-08-21 |
 | `fundamental` | 53 | 192 | 2016-08-25 → 2026-08-21 |
-| `hype` | 20 | 312 | 2016-10-25 → 2026-08-20 |
+| `hype` | 20 | 314 | 2016-10-25 → 2026-08-21 |
 | `dip` | 10 | 244 | 2016-09-27 → 2026-08-21 |
 | `combo` | 15 | 199 | 2016-11-04 → 2026-08-21 |
 <!-- /GENERATED:modules -->
@@ -1623,7 +1672,7 @@ _Generated 2026-08-22 11:38 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-22 11:38 — do not edit by hand._
+_Generated 2026-08-23 09:40 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
