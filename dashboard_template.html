@@ -112,6 +112,49 @@ table.m td.v{text-align:right;font-variant-numeric:tabular-nums}
 .nm td{padding:4px 10px 4px 0;border-bottom:1px solid var(--grid);
   font-variant-numeric:tabular-nums}
 .nm td.g{color:var(--warn)}
+.uni{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:12px 14px;margin-top:8px}
+.ubar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
+.ubar2{padding-top:8px;border-top:1px solid var(--grid)}
+.ulab{color:var(--muted);font-size:11.5px;margin-right:2px}
+#usearch{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:7px;padding:5px 9px;font:inherit;font-size:12.5px;min-width:170px}
+.uchip{background:var(--bg);color:var(--ink);border:1px solid var(--line);
+  border-radius:999px;padding:4px 10px;font:inherit;font-size:11.5px;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px}
+.uchip:hover{border-color:var(--accent)}
+/* Selection is ink-on-panel, not accent fill: --accent measures 4.47:1 on the
+   light panel, so accent as TEXT or as a fill behind text cannot reach AA 4.5
+   in either direction. Ink inverts cleanly in both themes. */
+.uchip.on{background:var(--ink);border-color:var(--ink);color:var(--panel)}
+.uchip .un{opacity:.7;font-variant-numeric:tabular-nums}
+.uchip.clr{border-style:dashed}
+.uwrap{max-height:70vh;overflow:auto;border:1px solid var(--grid);border-radius:8px}
+#utab{width:100%;border-collapse:collapse;font-size:12.5px;min-width:820px}
+#utab th{position:sticky;top:0;z-index:1;background:var(--head);text-align:left;
+  color:var(--muted);font-weight:500;font-size:11.5px;padding:6px 10px;
+  border-bottom:1px solid var(--line);cursor:pointer;white-space:nowrap}
+#utab th:hover{color:var(--ink)}
+#utab th.asc::after{content:" \2191"}
+#utab th.desc::after{content:" \2193"}
+#utab th.n,#utab td:nth-child(n+4){text-align:right;font-variant-numeric:tabular-nums}
+#utab td{padding:4px 10px;border-bottom:1px solid var(--grid);white-space:nowrap}
+#utab tbody tr:hover{background:var(--grid)}
+/* The stop reason is the whole point of the row for a dismissed name, so it is
+   ink, not --warn (#c47f00 measures 3.29:1 on white at this size). */
+#utab td.g{color:var(--ink);font-size:11.5px;text-align:left}
+.vf{color:var(--pos)}
+.vm{color:var(--ink)}
+.vp{color:var(--muted)}
+.ufoot{display:flex;gap:10px;align-items:center;margin-top:8px;
+  color:var(--muted);font-size:11.5px}
+.umore{background:var(--panel);color:var(--ink);border:1px solid var(--line);
+  border-radius:7px;padding:4px 10px;font:inherit;font-size:11.5px;cursor:pointer}
+.umore:hover{border-color:var(--accent)}
+.ukey{margin-top:10px;padding-top:8px;border-top:1px solid var(--grid);
+  color:var(--muted);font-size:11px;display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:2px 16px}
+.ukey code{color:var(--ink);font-size:10.5px}
 .empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;
   padding:28px;text-align:center;color:var(--muted)}
 .caution{background:var(--panel);border:1px solid var(--warn);
@@ -198,6 +241,7 @@ code{background:var(--chip);padding:1px 4px;border-radius:4px;font-size:11px}
 
   <div id="nmwrap">{{ near_miss }}</div>
   <div id="dropwrap">{{ dropped }}</div>
+  <div id="uniwrap">{{ universe }}</div>
 
   <footer id="foot"></footer>
 </div>

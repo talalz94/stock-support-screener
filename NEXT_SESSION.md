@@ -3,6 +3,108 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-24 — THE BOUNCE TAB NOW SHOWS EVERY STOCK IT SCREENED
+
+The page showed 10 flags and a 12-row near-miss list, which made a screen that
+examines the whole market look like one that examines a handful of names. It
+now shows **all 5,439**, each with where it stopped and why.
+
+### THE STORED RECORD WAS MISSING 88% OF THE RUN
+
+`screen_universe` computed two tiers of reject and returned one. `panel_rej`
+was built, had `asof_date` assigned to it on the line above — and then
+`return passed, rej_out` dropped it. So the daily file held **669 rows on a day
+the screen looked at 5,439**, and the 4,760 names dismissed by the vectorized
+prefilter left no trace at all.
+
+Both tiers are now returned, and `--gates-only` and the no-rows path return the
+same shape the full run does, so a file written by any path renders identically.
+
+    5,439 in the panel
+      NEAR_HIGHS      2,500   within reach of the 250d high - no drawdown to bounce from
+      ILLIQUID          941
+      SHORT_HISTORY     691
+      PENNY             523
+      FLAT_RANGE         84
+      STALE_DATA         20
+      NO_TRADES           1
+      -> 679 reached the pattern math -> 669 rejected, 10 flagged
+
+**NEAR_HIGHS is the answer to "why only ten names".** It is not a data gap and
+not a fetch that failed: 2,500 stocks are too close to their highs for a
+support bounce to be a coherent question. A dismissal is a stated reason.
+
+Cost of storing 8x the rows: **none.** 193 KB before, 193 KB after — the panel
+rows are almost all null and zstd dictionary-encodes them away.
+
+### `tier`, BECAUSE THE REJECT CODE CANNOT TELL YOU WHICH PASS REJECTED A NAME
+
+SHORT_HISTORY, PENNY, ILLIQUID and NO_TRADES are declared at stage 0 AND run in
+the panel prefilter. 20 names pass the panel test and fail the same test in the
+pattern math on fresher per-ticker data. The code alone is ambiguous, so rows
+carry `tier` = `panel` | `pattern`. Files written before the column existed are
+read back by testing `run_x` for null, which is what reaching the pattern math
+actually implies.
+
+### THE REAL BUG: `_blank()` SEEDS EVERY PATTERN METRIC WITH 0.0
+
+`screen._blank()` initialises `score`, `run_x`, `dd_from_peak`,
+`retrace_of_run` and `touches_prior` to `0.0`, and every early return keeps the
+seed. A name rejected at stage 1 therefore carries `score 0.0` that was never
+computed — and displayed as `0.00` it sorts as *measured, and the worst on the
+page* rather than *never measured*. **639 of 669 pattern rows had a fabricated
+score.** Fifth place this project has hit not-reported-is-not-zero.
+
+A metric is real only if the math reached the line that assigns it:
+
+| field | assigned before | real only if |
+|---|---|---|
+| `run_x` | stage-2 gate | stage >= 2 |
+| `dd_from_peak`, `retrace_of_run` | stage-3 gate | stage >= 3 |
+| `touches_prior` | stage-5 gate | stage >= 4 |
+| `score` | after stage 5 passes | stage >= 6 |
+
+Result: 40 real scores (10 flags + 30 stage-6), **0 exact zeros**. Everything
+else renders as a dash.
+
+**How the threshold error was caught, because the method matters more than the
+fix:** `dd_from_peak` was first assigned 2, and AAON then showed a 2.06x run
+with a 0.0 drawdown while trading 47% below its high. Those cannot both be
+true. `dd_from_peak` comes from `pattern.retrace_metrics`, which runs *after*
+the stage-2 gate. The cross-check that found it is now a standing assertion in
+`report.universe_invariants`: **no row may have `dd_from_peak == 0.0` while
+`pct_of_250d_high < 0.9`.** Run `python report.py --selftest`; it also runs
+nightly as validate's `screen` group, which additionally asserts the stored
+run covers the whole panel. Verified to FAIL (451 rows) when the stage-2 bug
+is reintroduced -- a check that cannot fail is not a check.
+`touches_prior` is additionally withheld on NO_LEVEL_NEAR_LOW, where no level
+was selected for a touch to be counted against.
+
+### THE PAGE
+
+One inlined JSON array, rendered client-side — the only place the page does
+this, and for the opposite reason the cards blob was removed: at 5,400 rows the
+JSON is ~429 KB against ~1.9 MB for the same table server-rendered, and sorting
+a numeric array beats re-sorting 5,400 DOM nodes. Page is 550 KB total.
+
+Sort any column (blanks last in **both** directions, ties break on score then
+ticker), filter by outcome or by any of 27 stop reasons, search tickers, 300
+rows rendered until "show all". Verified in-browser, not by grepping the HTML:
+search `co` -> 88 matches COIN first, NEAR_HIGHS chip -> 2,500 all matching,
+show-all -> 5,439 rows, sticky headers, both themes.
+
+### NOT DONE, AND WHY
+
+**No backfill was run.** The measured cost for Jun 1 - Aug 21 is ~170 h (~7
+days continuous): `fundamental` 40 missing sessions x 185 min, `hype` 35 x 78
+min, the rest ~1 h combined. It buys **measurement history only** — today's
+screening is already complete, and bounce needs no ticker backfill at all.
+Worth knowing before paying for it: adding `prior_q`/`prior_3y` on 2026-08-23
+doubled `facts_asof` calls per session from 2 to 4, which is why a backfilled
+`fundamental` session now costs 185 min instead of ~90. **Cut that cost before
+backfilling, not after.**
+
+
 ## State at 2026-08-23 — THE SCREENER BECAME A SCREENER
 
 Three things landed: the metrics strategies need, a strategy template, and a
@@ -1599,7 +1701,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-23 09:40 — do not edit by hand._
+_Generated 2026-08-24 05:00 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -1613,7 +1715,7 @@ _Generated 2026-08-23 09:40 — do not edit by hand._
 | `hype` | daily | 154.0 min | 93.1 min | 846.8 min ⚠ | 120.0 min | 14 |
 | `bounce` | daily | 33s | 39s | 53s | 15.0 min | 15 |
 | `provider` | daily | 63.3 min | 63.8 min | 72.7 min | 120.0 min | 8 |
-| `fundamental` | daily | 132.6 min | 90.5 min | 668.0 min ⚠ | 180.0 min | 15 |
+| `fundamental` | daily | 633.7 min | 99.7 min | 654.8 min ⚠ | 180.0 min | 16 |
 | `sec_facts` | quarterly | 31s | 4s | 31s | 60.0 min | 5 |
 | `sec_gap` | weekly | 176.9 min | 176.9 min | 187.1 min ⚠ | 20.0 min | 3 |
 | `events` | weekly | 7.0 min | 8.3 min | 13.1 min | 30.0 min | 5 |
@@ -1622,19 +1724,19 @@ _Generated 2026-08-23 09:40 — do not edit by hand._
 | `combo` | daily | 90s | 12s | 90s | 15.0 min | 11 |
 | `validate` | daily | 3.9 min | 3.9 min | 3.9 min | 60.0 min | 1 |
 | `explore` | daily | 9s | 6s | 13s | 5.0 min | 17 |
-| `snapshots` | daily | 0s | 1s | 16s | 5.0 min | 20 |
+| `snapshots` | daily | 0s | 0s | 16s | 5.0 min | 21 |
 | `profiles` | daily | 21.1 min | 17.3 min | 25.2 min ⚠ | 15.0 min | 17 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 14 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 15 |
 | `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 20 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 18 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 19 |
 
-**Daily total ≈ 273.0 min.** Weekly adds 211.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 282.2 min.** Weekly adds 211.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-23 09:40 — do not edit by hand._
+_Generated 2026-08-24 05:00 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -1643,14 +1745,14 @@ _Generated 2026-08-23 09:40 — do not edit by hand._
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
 | news | 121 | 168.5 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 260.5 | 2016-08 → 2026-08 |
+| scores | 121 | 260.8 | 2016-08 → 2026-08 |
 | fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
 | short volume | 73 | 54.7 | 2020-08 → 2026-08 |
 | flags | 16 | 1.4 | 2026-07-31 → 2026-08-21 |
 | rejects | 16 | 3.3 | 2026-07-31 → 2026-08-21 |
 | loose (macro, universe, jobs, study) | 29 | 3.6 | — |
 
-**`data/` total ≈ 1,087 MB.** `reports/` is a further 27 MB across 130 pages.
+**`data/` total ≈ 1,088 MB.** `reports/` is a further 27 MB across 131 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -1658,12 +1760,12 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-23 09:40 — do not edit by hand._
+_Generated 2026-08-24 05:00 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
 | `sentiment` | 26 | 342 | 2016-09-27 → 2026-08-21 |
-| `fundamental` | 53 | 192 | 2016-08-25 → 2026-08-21 |
+| `fundamental` | 61 | 193 | 2016-08-25 → 2026-08-21 |
 | `hype` | 20 | 314 | 2016-10-25 → 2026-08-21 |
 | `dip` | 10 | 244 | 2016-09-27 → 2026-08-21 |
 | `combo` | 15 | 199 | 2016-11-04 → 2026-08-21 |
@@ -1672,7 +1774,7 @@ _Generated 2026-08-23 09:40 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-23 09:40 — do not edit by hand._
+_Generated 2026-08-24 05:00 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

@@ -380,6 +380,28 @@ def _fundamentals() -> dict[str, float]:
     return dict(zip(f["ticker"].astype(str), f["market_cap"].astype(float)))
 
 
+_PANEL_COLS = {"last_close": "close", "dollar_vol_20": "adv_usd",
+               "trades_20": "trades_20", "n_bars": "n_bars",
+               "pct_of_250d_high": "pct_of_250d_high"}
+
+
+def _panel_reject_rows(rej, ps, asof_date: str):
+    """Give panel rejects the column names the pattern-math rows already use.
+
+    They carry no pattern metrics -- they never reached the pattern math, and
+    inventing zeros for `run_x` or `retrace_of_run` would make an unexamined name
+    look like a measured one. Price, liquidity, history depth and distance below
+    the 250d high ARE computed for them, and those four are exactly the numbers
+    that explain every panel rejection.
+    """
+    if rej is None or rej.empty:
+        return rej if rej is not None else pd.DataFrame()
+    cols = ["ticker"] + [c for c in _PANEL_COLS if c in ps.columns]
+    out = (rej.merge(ps[cols], on="ticker", how="left")
+              .rename(columns={**_PANEL_COLS, "reason": "reject_code"}))
+    return out.assign(asof_date=asof_date, passed=False, tier="panel")
+
+
 def screen_universe(asof_date: str | None = None, only: list[str] | None = None,
                     gates_only: bool = False, workers: int | None = None,
                     cfg=config, verbose: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -402,7 +424,7 @@ def screen_universe(asof_date: str | None = None, only: list[str] | None = None,
                     print(f"    {r:18} {n:>6,}")
 
     if gates_only or not survivors:
-        return pd.DataFrame(), panel_rej
+        return pd.DataFrame(), _panel_reject_rows(panel_rej, ps, asof_date)
 
     t0 = time.time()
     # Only the survivors' history is read -- a few hundred tickers, not 5,374.
@@ -441,7 +463,7 @@ def screen_universe(asof_date: str | None = None, only: list[str] | None = None,
 
     allrows = pd.DataFrame(rows)
     if allrows.empty:
-        return pd.DataFrame(), panel_rej
+        return pd.DataFrame(), _panel_reject_rows(panel_rej, ps, asof_date)
 
     passed = allrows[allrows.get("passed", False) == True].copy()   # noqa: E712
     rejected = allrows[allrows.get("passed", False) != True].copy()  # noqa: E712
@@ -464,16 +486,28 @@ def screen_universe(asof_date: str | None = None, only: list[str] | None = None,
     if not passed.empty:
         passed = passed.sort_values("score", ascending=False).reset_index(drop=True)
 
-    # Two-tier rejects: cheap panel gates get four columns, names that reached the
-    # pattern math keep their full metric row plus every gate they failed.
-    if not panel_rej.empty:
-        panel_rej = panel_rej.assign(asof_date=asof_date)
+    # Two-tier rejects: cheap panel gates get the panel columns, names that reached
+    # the pattern math keep their full metric row plus every gate they failed. BOTH
+    # tiers are returned. Returning only the second made the stored record claim the
+    # screen looked at 679 names on a day it looked at every one of 5,439 -- the
+    # 4,760 it dismissed in one vectorized pass are examined names with a stated
+    # reason, not names that went unconsidered.
     rej_out = rejected.copy()
     if not rej_out.empty:
         rej_out["failed_gates"] = rej_out["failed_gates"].map(
             lambda x: ",".join(x) if isinstance(x, list) else str(x))
         rej_out["stage"] = rej_out["reject_code"].map(
             lambda c: _GATE_STAGE.get(c, 9))
+        # SHORT_HISTORY/PENNY/ILLIQUID/NO_TRADES are declared at stage 0 AND run in
+        # the panel prefilter, so the code alone cannot say which tier rejected a
+        # name. `tier` is what separates "dismissed in the vectorized pass" from
+        # "measured per-ticker and failed the same test on fresher data".
+        rej_out["tier"] = "pattern"
+
+    if not panel_rej.empty:
+        panel_rej = _panel_reject_rows(panel_rej, ps, asof_date)
+        rej_out = (panel_rej if rej_out.empty
+                   else pd.concat([rej_out, panel_rej], ignore_index=True))
 
     return passed, rej_out
 
