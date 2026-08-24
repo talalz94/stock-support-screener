@@ -681,6 +681,261 @@ def near_misses(asof: str, max_rows: int = 12) -> list[dict]:
     return rows
 
 
+# ------------------------------------------------------------------ full universe
+# Verdict codes travel to the browser as ints because they are also the sort key
+# and the filter key: 2 flagged, 1 measured in full, 0 dismissed by the panel pass.
+_V_FLAG, _V_PATTERN, _V_PANEL = 2, 1, 0
+
+_REASON_TEXT = {
+    "NEAR_HIGHS":    "within reach of its 250d high - no drawdown to bounce from",
+    "ILLIQUID":      "20d dollar volume below the floor",
+    "SHORT_HISTORY": "not enough bars to measure a run",
+    "PENNY":         "price below the floor",
+    "FLAT_RANGE":    "250d range too narrow to have a level",
+    "STALE_DATA":    "no bar for this session",
+    "NO_TRADES":     "too few trades a day",
+    "SUSPECT_SPLIT": "unadjusted split suspected - metrics not trusted",
+}
+
+
+def universe_rows(asof: str, flags: pd.DataFrame) -> tuple[list, dict]:
+    """Every name the screen looked at, with where it stopped and why.
+
+    The panel tier genuinely has no pattern metrics -- it never reached the pattern
+    math -- so those cells go out as null and render as a dash. Sending 0.0 would
+    make an unexamined name sort as a measured one holding the worst possible
+    score, which is the "not reported is not zero" failure this project keeps
+    hitting.
+    """
+    p = config.REJECTS / f"{asof}.parquet"
+    try:
+        rej = pd.read_parquet(p) if p.exists() else pd.DataFrame()
+    except Exception:                                  # noqa: BLE001
+        rej = pd.DataFrame()
+
+    frames = []
+    if flags is not None and not flags.empty:
+        f = flags.copy()
+        f["_verdict"], f["_reason"] = _V_FLAG, ""
+        frames.append(f)
+    if not rej.empty:
+        r = rej.copy()
+        if "tier" in r.columns:
+            is_panel = r["tier"].astype(str) == "panel"
+        else:
+            # Files written before the tier column existed hold the pattern tier
+            # only; run_x is the marker that a row reached the pattern math.
+            is_panel = (r["run_x"].isna() if "run_x" in r.columns
+                        else pd.Series(False, index=r.index))
+        r["_verdict"] = np.where(is_panel, _V_PANEL, _V_PATTERN)
+        r["_reason"] = (r["reject_code"] if "reject_code" in r.columns
+                        else pd.Series("", index=r.index)).fillna("")
+        frames.append(r)
+    if not frames:
+        return [], {}
+
+    d = pd.concat(frames, ignore_index=True, sort=False)
+    d = d.drop_duplicates(subset=["ticker"], keep="first")
+
+    # `n_bars` means two different things depending on the tier: the panel rows
+    # carry the ticker's whole history, while a pattern row carries only the bars
+    # loaded into the analysis window (COIN read 896 against 2,531 available). One
+    # column cannot hold both meanings, so the whole column is taken from the panel,
+    # where it consistently means "sessions of history this ticker has".
+    try:
+        import bars as _bars
+        _ps = _bars.load_panel_stats()
+        if not _ps.empty and "n_bars" in _ps.columns:
+            hist = dict(zip(_ps["ticker"].astype(str),
+                            pd.to_numeric(_ps["n_bars"], errors="coerce")))
+            d["n_bars"] = d["ticker"].astype(str).map(hist).fillna(
+                pd.to_numeric(d.get("n_bars"), errors="coerce"))
+    except Exception:                                  # noqa: BLE001
+        pass                                           # keep whatever the rows hold
+
+    def col(name):
+        return d[name] if name in d.columns else pd.Series(np.nan, index=d.index)
+
+    def num(v):
+        try:
+            fv = float(v)
+        except (TypeError, ValueError):
+            return None
+        return None if not np.isfinite(fv) else round(fv, 4)
+
+    # A pattern metric is real only if the math reached the line that assigns it.
+    # `screen._blank()` seeds every one of them with 0.0 and the early returns keep
+    # that seed, so a name rejected at stage 1 carries run_x 0.0 and score 0.0 that
+    # were never computed. Displayed as 0.00 they sort as "measured, and the worst
+    # on the page" rather than "never measured" -- the same not-reported-is-not-zero
+    # error this project has now hit in five separate places. The stage at which a
+    # field is assigned is the only thing that separates the two.
+    # dd_from_peak and retrace_of_run are BOTH returned by pattern.retrace_metrics,
+    # which runs after the stage-2 gate -- so dd_from_peak is real from 3, not 2.
+    # Caught because AAON showed a 2.06x run with a 0.0 drawdown while trading 47%
+    # below its high, which cannot both be true.
+    VALID_FROM = {"run_x": 2, "dd_from_peak": 3, "retrace_of_run": 3,
+                  "touches_prior": 4, "score": 6}
+    _stage = pd.to_numeric(col("stage"), errors="coerce")
+    _stage = _stage.mask(d["_verdict"] == _V_FLAG, 99)   # a flag cleared every gate
+
+    def metric(name):
+        v = pd.to_numeric(col(name), errors="coerce")
+        need = VALID_FROM.get(name)
+        v = v if need is None else v.where(_stage >= need)
+        if name == "touches_prior":
+            # No level was selected, so there is nothing for a touch to be counted
+            # against. LEVEL_TOO_FEW_TOUCHES is the opposite case -- a level exists
+            # and the count is genuinely low -- and must keep its number.
+            v = v.where(d["_reason"].astype(str) != "NO_LEVEL_NEAR_LOW")
+        return v
+
+    out = []
+    for t, verdict, reason, close, adv, hi, nb, sc, rx, dd, rt, tp in zip(
+            d["ticker"].astype(str), d["_verdict"], d["_reason"].astype(str),
+            col("close"), col("adv_usd"), col("pct_of_250d_high"), col("n_bars"),
+            metric("score"), metric("run_x"), metric("dd_from_peak"),
+            metric("retrace_of_run"), metric("touches_prior")):
+        out.append([t, int(verdict), reason, num(close), num(adv), num(hi),
+                    num(nb), num(sc), num(rx), num(dd), num(rt), num(tp)])
+
+    out.sort(key=lambda r: (-r[1], -(r[7] if r[7] is not None else -1), r[0]))
+    n_flag = sum(1 for r in out if r[1] == _V_FLAG)
+    n_pat = sum(1 for r in out if r[1] == _V_PATTERN)
+    counts = {"total": len(out), "flagged": n_flag,
+              "measured": n_flag + n_pat,
+              "panel": sum(1 for r in out if r[1] == _V_PANEL)}
+    by_reason: dict[str, int] = {}
+    for r in out:
+        if r[2]:
+            by_reason[r[2]] = by_reason.get(r[2], 0) + 1
+    counts["by_reason"] = dict(sorted(by_reason.items(), key=lambda kv: -kv[1]))
+    return out, counts
+
+
+def universe_html(rows: list, counts: dict) -> str:
+    """The whole universe as one sortable table, rendered in the browser.
+
+    This is the ONE place the page inlines its data instead of server-rendering it,
+    and the reason is the opposite of the one that removed the cards blob: at 5,400
+    rows the JSON is roughly a quarter of the HTML the same table would need, and
+    sorting a numeric array beats re-sorting 5,400 DOM nodes. Tickers are the only
+    strings in the payload and they are escaped for the script context.
+    """
+    if not rows:
+        return ""
+    blob = (json.dumps(rows, separators=(",", ":"))
+            .replace("<", "\\u003c").replace(">", "\\u003e")
+            .replace("&", "\\u0026").replace("\u2028", "\\u2028")
+            .replace("\u2029", "\\u2029"))
+    chips = "".join(
+        f'<button class="uchip" data-reason="{_esc(k)}" '
+        f'title="{_esc(_REASON_TEXT.get(k, ""))}">{_esc(k)}'
+        f'<span class="un">{v:,}</span></button>'
+        for k, v in counts.get("by_reason", {}).items())
+    notes = "".join(f'<div><code>{_esc(k)}</code> &mdash; {_esc(v)}</div>'
+                    for k, v in _REASON_TEXT.items()
+                    if k in counts.get("by_reason", {}))
+    head = (f'<div class="sect"><h2>Every stock screened</h2>'
+            f'<span class="cnt">{counts["total"]:,}</span><span class="help">The '
+            f'whole panel, not just the flags. <b>{counts["measured"]:,}</b> reached '
+            f'the pattern math and were measured in full; <b>{counts["panel"]:,}</b> '
+            f'were dismissed in one vectorized pass and carry no pattern metrics, '
+            f'which is why those cells are blank rather than zero. A dismissal is a '
+            f'stated reason, not a gap in the data.</span></div>')
+    controls = (
+        f'<div class="uni"><div class="ubar">'
+        f'<input id="usearch" type="search" placeholder="filter tickers..." autocomplete="off">'
+        f'<button class="uchip on" data-v="all">all<span class="un">{counts["total"]:,}</span></button>'
+        f'<button class="uchip" data-v="2">flagged<span class="un">{counts["flagged"]:,}</span></button>'
+        f'<button class="uchip" data-v="1">measured, no flag'
+        f'<span class="un">{counts["measured"] - counts["flagged"]:,}</span></button>'
+        f'<button class="uchip" data-v="0">dismissed by panel'
+        f'<span class="un">{counts["panel"]:,}</span></button></div>'
+        f'<div class="ubar ubar2"><span class="ulab">stopped at</span>{chips}'
+        f'<button class="uchip clr" id="uclear">clear</button></div>')
+    table = (
+        '<div class="uwrap"><table id="utab"><thead><tr>'
+        '<th data-c="0" class="s">ticker</th><th data-c="1" class="s">outcome</th>'
+        '<th data-c="2" class="s">stopped at</th><th data-c="3" class="s n">close</th>'
+        '<th data-c="4" class="s n">ADV</th><th data-c="5" class="s n">% of 250d high</th>'
+        '<th data-c="6" class="s n">bars</th><th data-c="7" class="s n">score</th>'
+        '<th data-c="8" class="s n">run</th><th data-c="9" class="s n">drawdown</th>'
+        '<th data-c="10" class="s n">retrace</th><th data-c="11" class="s n">touches</th>'
+        '</tr></thead><tbody id="ubody"></tbody></table></div>'
+        '<div class="ufoot"><span id="ucount"></span>'
+        '<button id="umore" class="umore">show all matches</button></div>'
+        f'<div class="ukey">{notes}</div></div>')
+    return head + controls + table + _UNIVERSE_JS.replace("__DATA__", blob)
+
+
+# Kept out of the f-string above so the JS braces need no doubling -- doubling them
+# is how a working script turns into a syntax error on the next edit.
+_UNIVERSE_JS = """<script>
+(function(){
+const U=__DATA__;
+const CAP=300; let cap=CAP, vf='all', rf=new Set(), q='';
+let sc=1, sd=-1;   // sort column / direction: outcome, best first
+const $=s=>document.getElementById(s);
+const money=v=>v==null?'&ndash;':v>=1e9?(v/1e9).toFixed(1)+'B':v>=1e6?(v/1e6).toFixed(0)+'M':v>=1e3?(v/1e3).toFixed(0)+'K':v.toFixed(0);
+const f2=(v,n)=>v==null?'&ndash;':v.toFixed(n===undefined?2:n);
+const pc=v=>v==null?'&ndash;':(v*100).toFixed(0)+'%';
+const VN={2:'<b class="vf">FLAGGED</b>',1:'<span class="vm">measured</span>',0:'<span class="vp">dismissed</span>'};
+// Ties break on score, then ticker. Alphabetical alone put ABAT above COIN inside
+// the flagged group, which buries the best name on the page under the first one.
+function tie(a,b){
+  var x=(a[7]==null?-1:a[7]), y=(b[7]==null?-1:b[7]);
+  if(x!==y) return y-x;
+  return a[0]<b[0]?-1:1;
+}
+function match(r){
+  if(vf!=='all'&&r[1]!==+vf) return false;
+  if(rf.size&&!rf.has(r[2])) return false;
+  if(q&&r[0].toLowerCase().indexOf(q)<0) return false;
+  return true;
+}
+function render(){
+  const m=U.filter(match);
+  const s=m.slice().sort(function(a,b){
+    var x=a[sc],y=b[sc];
+    if(x==null&&y==null) return tie(a,b);
+    if(x==null) return 1; if(y==null) return -1;   // blanks last, both directions
+    if(x===y) return tie(a,b);
+    return (x>y?1:-1)*sd;
+  });
+  const show=s.slice(0,cap);
+  $('ubody').innerHTML=show.map(function(r){return '<tr><td><b>'+r[0]+'</b></td><td>'+VN[r[1]]+'</td>'+
+    '<td class="g">'+(r[2]||'&ndash;')+'</td><td>'+f2(r[3])+'</td>'+
+    '<td>'+money(r[4])+'</td><td>'+pc(r[5])+'</td><td>'+(r[6]==null?'&ndash;':r[6])+'</td>'+
+    '<td>'+f2(r[7])+'</td><td>'+(r[8]==null?'&ndash;':f2(r[8])+'x')+'</td>'+
+    '<td>'+pc(r[9])+'</td><td>'+f2(r[10])+'</td><td>'+(r[11]==null?'&ndash;':r[11])+'</td></tr>';}).join('');
+  $('ucount').innerHTML=show.length<m.length
+    ? 'showing '+show.length.toLocaleString()+' of '+m.length.toLocaleString()+' matches'
+    : m.length.toLocaleString()+(m.length===1?' match':' matches');
+  $('umore').style.display=show.length<m.length?'':'none';
+}
+$('usearch').addEventListener('input',function(e){q=e.target.value.trim().toLowerCase();cap=CAP;render();});
+$('umore').addEventListener('click',function(){cap=U.length;render();});
+$('uclear').addEventListener('click',function(){
+  rf.clear();document.querySelectorAll('.uchip[data-reason]').forEach(function(b){b.classList.remove('on');});cap=CAP;render();});
+document.querySelectorAll('.uchip[data-v]').forEach(function(b){b.addEventListener('click',function(){
+  vf=b.dataset.v;cap=CAP;
+  document.querySelectorAll('.uchip[data-v]').forEach(function(o){o.classList.toggle('on',o===b);});render();});});
+document.querySelectorAll('.uchip[data-reason]').forEach(function(b){b.addEventListener('click',function(){
+  const k=b.dataset.reason;
+  if(rf.has(k)){rf.delete(k);b.classList.remove('on');} else {rf.add(k);b.classList.add('on');}
+  cap=CAP;render();});});
+document.querySelectorAll('#utab th.s').forEach(function(th){th.addEventListener('click',function(){
+  const c=+th.dataset.c;
+  if(c===sc){sd=-sd;} else {sc=c;sd=(c===0||c===2)?1:-1;}
+  document.querySelectorAll('#utab th').forEach(function(o){o.classList.remove('asc','desc');});
+  th.classList.add(sd>0?'asc':'desc');
+  cap=CAP;render();});});
+render();
+})();
+</script>"""
+
+
 # ------------------------------------------------------------------ payload
 def _sentiment_lookup(asof: str) -> dict[str, dict] | None:
     """{ticker: badge} from the score table, or None if the module is not in use.
@@ -827,6 +1082,8 @@ def build_payload(flags: pd.DataFrame, asof: str,
     if tagged is not None and not tagged.empty:
         counts = tagged["bucket"].value_counts().to_dict()
 
+    _uni_rows, _uni_counts = universe_rows(asof, flags)
+
     return {
         "asof": asof,
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -836,6 +1093,8 @@ def build_payload(flags: pd.DataFrame, asof: str,
         "truncated": truncated,
         "near_misses": near_misses(asof),
         "dropped": state.dropped_off(asof),
+        "universe": _uni_rows,
+        "universe_counts": _uni_counts,
         "config": {
             "min_price": config.MIN_PRICE, "min_adv": config.MIN_DOLLAR_VOL,
             "min_run_x": config.MIN_RUN_X, "min_run_z": config.MIN_RUN_Z,
@@ -893,6 +1152,8 @@ def write_html(payload: dict, asof: str) -> "object":
         sections=Markup(sections_html(cards, "bucket")),
         near_miss=Markup(near_miss_html(payload.get("near_misses") or [])),
         dropped=Markup(dropped_html(payload.get("dropped") or [])),
+        universe=Markup(universe_html(payload.get("universe") or [],
+                                      payload.get("universe_counts") or {})),
         sessions=Markup(sessions_html(asof)),
         bucket_order_js=Markup(json.dumps(list(config.BUCKET_ORDER))),
         min_price=config.MIN_PRICE,
@@ -1029,12 +1290,92 @@ def build(asof: str | None = None, verbose: bool = True) -> dict:
     return payload
 
 
+def universe_invariants(asof: str | None = None) -> tuple[list[str], dict]:
+    """Invariants the universe table must hold. Returns (failures, counts).
+
+    These are cross-checks, not restatements of the code that produces the rows --
+    a check that only re-derives the same expression cannot catch the expression
+    being wrong. The drawdown check is the one that earned its place: it caught
+    `dd_from_peak` being cleared at stage 2 when the value is not assigned until
+    stage 3, by noticing a name with a 2.06x run and a 0.0 drawdown that was
+    trading 47% below its high.
+
+    Shared by `report.py --selftest` and validate's `screen` group so the two
+    cannot drift into disagreeing about what a valid row is.
+    """
+    asof = asof or calendar_us.last_closed_session()
+    p = config.FLAGS / f"{asof}.parquet"
+    flags = pd.read_parquet(p) if p.exists() else pd.DataFrame()
+    rows, counts = universe_rows(asof, flags)
+    if not rows:
+        return [], {}
+
+    I_V, I_HI, I_SC, I_RX, I_DD, I_RT, I_TP = 1, 5, 7, 8, 9, 10, 11
+    fails: list[str] = []
+
+    def bad(name, hits, why):
+        if hits:
+            fails.append(f"{name}: {len(hits)} row(s) -- {why}\n     e.g. {hits[:3]}")
+
+    # 1. A name the pattern math never saw cannot carry a pattern metric.
+    bad("panel rows carry pattern metrics",
+        [r[0] for r in rows if r[I_V] == _V_PANEL
+         and any(r[i] is not None for i in (I_SC, I_RX, I_DD, I_RT, I_TP))],
+        "dismissed by the panel pass, so every pattern cell must be null")
+
+    # 2. `_blank()` seeds score 0.0; a real composite score is never exactly zero.
+    bad("fabricated zero scores", [r[0] for r in rows if r[I_SC] == 0.0],
+        "score 0.0 is the _blank() seed leaking through an early return")
+
+    # 3. Cross-check: deep below the high and a zero drawdown cannot both be true.
+    bad("impossible drawdown",
+        [r[0] for r in rows if r[I_DD] == 0.0 and r[I_HI] is not None and r[I_HI] < 0.9],
+        "dd_from_peak 0.0 while trading >10% below the 250d high")
+
+    # 4. Scoring happens after the stage-5 gate, so anything scored cleared the
+    #    gates that come before it -- a scored row must have its run measured too.
+    bad("scored without a run",
+        [r[0] for r in rows if r[I_SC] is not None and r[I_RX] is None],
+        "score is assigned after the run metrics, so run_x cannot be null")
+
+    # 5. Every name in the panel is accounted for exactly once.
+    seen = [r[0] for r in rows]
+    if len(seen) != len(set(seen)):
+        fails.append(f"duplicate tickers: {len(seen) - len(set(seen))}")
+    if counts["flagged"] + (counts["measured"] - counts["flagged"]) + counts["panel"] != counts["total"]:
+        fails.append("verdict counts do not sum to the total")
+
+    counts = dict(counts, real_scores=sum(1 for r in rows if r[I_SC] is not None))
+    return fails, counts
+
+
+def selftest(asof: str | None = None) -> int:
+    """`python report.py --selftest`"""
+    asof = asof or calendar_us.last_closed_session()
+    fails, counts = universe_invariants(asof)
+    if not counts:
+        print(f"report selftest: no rows for {asof} -- nothing to check")
+        return 0
+    for f in fails:
+        print(f"  FAIL {f}")
+    if fails:
+        print(f"report selftest: {len(fails)} FAILURE(S)")
+        return 1
+    print(f"report selftest OK  ({counts['total']:,} screened: {counts['flagged']} flagged, "
+          f"{counts['measured'] - counts['flagged']:,} measured, {counts['panel']:,} dismissed; "
+          f"{counts['real_scores']} real scores, 0 fabricated)")
+    return 0
+
+
 def main() -> int:
     config.safe_console()
     ap = argparse.ArgumentParser(description="Build the daily report.")
     ap.add_argument("--date", default=None)
+    ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     config.dirs()
+    if a.selftest:
+        return selftest(a.date)
     build(a.date)
     return 0
 

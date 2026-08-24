@@ -620,6 +620,42 @@ def check_pages(asof: str, quick: bool) -> None:
         record("pages", "rendered page audit", WARN, repr(exc)[:110])
 
 
+def check_screen(asof: str, quick: bool) -> None:
+    """The bounce funnel: is every name in the panel accounted for, and is every
+    displayed pattern metric one the pattern math actually computed?
+
+    The failure this guards is specific. `screen._blank()` seeds score, run_x,
+    dd_from_peak, retrace_of_run and touches_prior with 0.0, and every early
+    return keeps the seed -- so an unexamined name reads as measured-and-worst
+    rather than not-measured unless the metric is withheld by the stage that
+    assigns it.
+    """
+    try:
+        import report
+        fails, counts = report.universe_invariants(asof)
+        if not counts:
+            record("screen", "universe table", WARN, f"no rejects stored for {asof}")
+            return
+        record("screen", "every pattern metric was actually computed",
+               FAIL if fails else OK,
+               "; ".join(f.splitlines()[0] for f in fails)[:150] if fails else
+               f"{counts['total']:,} screened, {counts['real_scores']} real scores, "
+               f"0 fabricated")
+
+        # The panel is the population. A stored run that does not cover it has
+        # dropped names silently -- which is exactly what returning only the
+        # pattern tier did until 2026-08-24.
+        import bars
+        n_panel = len(bars.load_panel_stats())
+        gap = n_panel - counts["total"]
+        record("screen", "stored run covers the whole panel",
+               OK if gap == 0 else FAIL,
+               f"{counts['total']:,} of {n_panel:,}" +
+               ("" if gap == 0 else f" -- {gap:,} name(s) left no record"))
+    except Exception as exc:                                     # noqa: BLE001
+        record("screen", "bounce funnel audit", WARN, repr(exc)[:110])
+
+
 def check_config(asof: str, quick: bool) -> None:
     """Settings that read as tunable but are wired to nothing.
 
@@ -965,7 +1001,7 @@ GROUPS = {"key": check_key, "time": check_time, "value": check_value,
           "config": check_config, "claims": check_claims,
           "coverage": check_coverage, "currency": check_currency,
           "cross": check_cross, "combo": check_combo, "feeds": check_feeds,
-          "pages": check_pages}
+          "pages": check_pages, "screen": check_screen}
 
 
 def main() -> int:

@@ -13,3 +13,6 @@ _c.js
 *.pem
 *.key
 credentials*
+
+# local preview config (Claude Code launch.json)
+.claude/
