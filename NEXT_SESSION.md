@@ -3,6 +3,78 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-24 (evening) — A JOB THAT COULD NOT CONVERGE
+
+`sec_gap` ran 08:37-10:37 and reported `FAILED after 7204.3s: companyfacts
+failed for 344 company(ies)`, `ORCH DONE | 0 ran, 0 skipped, 1 failed`.
+
+**The log was wrong about the important part. The data was saved.** 76 quarterly
+partitions under `data/fundamentals_cf/` were rewritten during the run.
+`backfill_companyfacts` flushes every `CF_BATCH` (200) companies and only
+returns at the end, so two hours of fetching landed on disk and the step still
+reported that nothing ran.
+
+### THE 344 WERE TRANSIENT, AND THAT WAS CHECKED, NOT ASSUMED
+
+Five of the named failures were retried individually afterwards:
+
+    STNG                    716 facts, 0 failed
+    SRAD HAFN BBAR BLSH     761 facts, 0 failed
+
+5 of 5 recovered on a plain retry. Transient means transient: network blips
+against SEC over a two-hour run at `CF_WORKERS = 6`.
+
+### THE DEFECT
+
+`backfill_companyfacts` returns `ok = not failed` — **ANY single failure out of
+thousands marks the whole run failed** — and `_step_sec_gap` raised on it. The
+consequences compound:
+
+  * the step is recorded `0 ran`, so the orchestrator does not count it done
+  * the next run redoes ALL of it, not the 344 stragglers
+  * that run has a fresh chance to hit one more blip and fail the same way
+
+A weekly two-hour job that can never record success. Nothing was corrupted;
+it simply could not converge.
+
+### THE FIX: RETRY, THEN JUDGE BY SHARE
+
+`_step_sec_gap` now retries the failed set ONCE and judges the run by the share
+still failing against `config.SEC_GAP_MAX_FAIL` (0.25). **The retry is the part
+that converges; the threshold only decides whether to shout.** Above the ceiling
+it still raises loudly — that is a real fault (SEC down, blocked user agent),
+not a blip.
+
+The detail line now says what happened rather than hiding it:
+`N refreshed of M targeted (G with no facts, S stale), F row(s); R recovered on
+retry, K still failing (x.x%, under the 25% ceiling)`.
+
+Verified against a stubbed fetcher, six cases, including both boundaries:
+
+    clean run                        OK
+    100 fail -> all recovered        OK    100 recovered, 0 still failing
+    100 fail -> 20 remain (5%)       OK     80 recovered, 20 still failing
+    100 fail -> 0 recovered (25%)    OK    at the ceiling, does not raise
+    150 fail -> 0 recovered (37.5%)  RAISED
+    everything fails (100%)          RAISED
+
+The retry pass is confirmed to actually fire (`calls=[400, 100]`), which is the
+half that makes the job converge — a threshold alone would only have silenced
+the error while still leaving 344 names unfetched for another week.
+
+### PROCESS NOTE WORTH KEEPING
+
+The two-hour job was launched WITHOUT first knowing how many targets it had,
+because the probe measuring that was still running and got killed to free CPU.
+`coverage_gap()` and `stale_names()` each scan the whole facts store and take
+minutes. The step's own detail line reports the target count for free — read
+that instead of measuring separately.
+
+Also: an unrelated `python -m experiments.phase15_pattern_tuning` (not this
+repo) was running throughout. Check what else holds CPU before blaming a job
+for being slow — see [[never-test-heavy-while-pipeline-runs]].
+
+
 ## State at 2026-08-24 — THE BOUNCE TAB NOW SHOWS EVERY STOCK IT SCREENED
 
 The page showed 10 flags and a 12-row near-miss list, which made a screen that

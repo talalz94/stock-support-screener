@@ -817,13 +817,50 @@ def _step_sec_gap(asof: str) -> tuple[int, str]:
     targets = fundamentals.refresh_targets(asof)
     gap = len(fundamentals.coverage_gap())
     res = fundamentals.backfill_companyfacts(tickers=targets, verbose=False)
-    if not res.get("ok"):
-        raise RuntimeError(f"companyfacts failed for {len(res.get('failed', []))} "
-                           f"company(ies): {', '.join(res.get('failed', [])[:6])}")
+
+    # A COMPANY THAT FAILED IS NOT A RUN THAT FAILED.
+    #
+    # `backfill_companyfacts` reports ok=False when ANY single company errored,
+    # and this step used to raise on that. MEASURED 2026-08-24: a two-hour fetch
+    # flushed most of the universe to disk, hit 344 transient errors, raised, and
+    # the run was recorded as `0 ran` -- so the next run would redo all two hours
+    # instead of the 344, with a fresh chance to hit one more blip and fail again.
+    # A job that cannot converge. Every one of five failures spot-checked
+    # afterwards succeeded on a plain retry, which is what transient means.
+    #
+    # So: retry the failures ONCE, then judge the run by the share still failing.
+    # The retry is the part that converges; the threshold only decides whether to
+    # shout. Nothing is lost either way -- the fetch flushes as it goes, and
+    # `refresh_targets` recomputes what is still missing or stale next time.
+    def _names(items):
+        return [str(x).split("(", 1)[0] for x in (items or [])]
+
+    failed = _names(res.get("failed"))
     n = int(res.get("companies", 0) or 0)
-    return n, (f"{n} company(ies) refreshed of {len(targets)} targeted "
-               f"({gap} with no facts, {len(targets) - gap} stale), "
-               f"{res.get('facts', 0):,} row(s)")
+    facts = int(res.get("facts", 0) or 0)
+    recovered = 0
+    if failed:
+        r2 = fundamentals.backfill_companyfacts(tickers=failed, verbose=False)
+        still = _names(r2.get("failed"))
+        recovered = len(failed) - len(still)
+        n += int(r2.get("companies", 0) or 0)
+        facts += int(r2.get("facts", 0) or 0)
+        failed = still
+
+    share = len(failed) / max(len(targets), 1)
+    if failed and (share > config.SEC_GAP_MAX_FAIL or n == 0):
+        raise RuntimeError(
+            f"companyfacts failed for {len(failed)} of {len(targets)} "
+            f"({share:.0%}, ceiling {config.SEC_GAP_MAX_FAIL:.0%}) even after a "
+            f"retry pass: {', '.join(failed[:6])}")
+
+    detail = (f"{n} company(ies) refreshed of {len(targets)} targeted "
+              f"({gap} with no facts, {len(targets) - gap} stale), "
+              f"{facts:,} row(s)")
+    if recovered or failed:
+        detail += (f"; {recovered} recovered on retry, {len(failed)} still "
+                   f"failing ({share:.1%}, under the {config.SEC_GAP_MAX_FAIL:.0%} ceiling)")
+    return n, detail
 
 
 def _due_sec_facts(prev) -> tuple[bool, str]:

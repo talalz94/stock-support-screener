@@ -697,6 +697,14 @@ SEC_RATE = 4                          # req/s. Slower start, far less throttling
 SEC_TICKER_MAP_URL = "https://www.sec.gov/files/company_tickers.json"
 SEC_SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 
+# Share of companyfacts targets allowed to fail before `sec_gap` calls the
+# whole run a failure. A company that failed is not a run that failed: on
+# 2026-08-24 a two-hour fetch hit 344 transient errors, raised, and was
+# recorded as `0 ran` -- so the next run would redo all two hours instead of
+# the 344, with a fresh chance to hit one more blip. Above this share it IS
+# a real fault (SEC down, blocked UA) and must stop the step loudly.
+SEC_GAP_MAX_FAIL = 0.25
+
 # Market breadth, computed from the bars already on disk. No rate limit, no new
 # dependency, perfectly historical -- the most reliable macro signal available
 # here, which is why it leads the macro layer rather than GDELT.
