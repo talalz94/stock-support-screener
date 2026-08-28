@@ -90,6 +90,58 @@ A NAN THAT NEARLY SHIPPED: `str(v or "")` renders float("nan") as the literal
 "nan", because nan is TRUTHY. Every one of the 396 no-support rows printed it in
 `last_touch` until the browser check caught it.
 
+### 2026-08-29 (later) — THE "no_support" CAVEAT WAS TESTED. THE GUESS WAS WRONG.
+
+The shipped caveat said no-support might just be "extended stocks fall back".
+Tested against two extension measures over the same 12 non-overlapping dates:
+
+    mean pct_of_250d_high   no-support 0.617   has-support 0.768
+    corr(no_support, pct_of_250d_high) = -0.237
+
+**Backwards.** No-support names are BEATEN DOWN, not extended. Head to head over
+the same dates the most extended quartile OUTPERFORMED (+1.72pp, t=+2.89) --
+momentum, not mean reversion.
+
+Stratified, the effect is entirely CONDITIONAL:
+
+    by % of 250d high      Q1 -5.32pp t=-5.81 | Q2..Q4 gone
+    by ext vs 200d MA      Q1 -3.68pp t=-4.23 | Q2..Q4 gone
+
+It is a falling knife with no floor. Among already-weak names, nothing beneath
+the price means what it sounds like; among extended names the same flag is
+structural and predicts nothing (t=-0.96 with 2,143 of them in the bucket). So
+`pct_hi` now ships as a column AND a filter -- no_support + "<=64% of high"
+gives the 112 names the measured effect actually applies to.
+
+A DISTRIBUTION THAT LOOKED LIKE A BUG AND WAS NOT: today's no-support median
+pct_hi is 0.826 against phase 3's 0.617. Not a contradiction -- one is a median
+and the other a mean, and the no-support distribution is BIMODAL
+(10th pct 0.269, 90th 0.978). Names cluster at both ends: fell through
+everything, or at a high with support far below. Worth remembering that the
+flag means two different things at the two ends.
+
+### AND A REAL DATA BUG THE SAME CHECK EXPOSED
+
+11 names carried a "% of 250d high" under 2%. AIIO read $2.36 against a 250-day
+high of $563 -- not a 99.6% decline, an unadjusted reverse split. CISS and FFAI
+were among them, and the bounce screen ALREADY rejects both as SUSPECT_SPLIT.
+Every one was being labelled NO SUPPORT, the strongest signal on the page, on
+the strength of corrupt prices.
+
+`zones.is_suspect` now applies the screen's own `pattern.suspect_split` PLUS a
+price-range floor, because the return test alone caught CISS and missed FFAI and
+AIIO: it needs one big bar with quiet volume behind it and misses a decay spread
+over many bars or sitting outside the window it sees. Below
+`DATA_SUSPECT_PCT_HI` (5%) the level history is unusable whether the cause is a
+split or a genuine collapse -- levels drawn from prices twenty times higher are
+not information.
+
+48 names are now REPORTED as `SUSPECT` rather than dropped or miscounted, and
+no-support fell 396 -> 376. Validate asserts a suspect row is never also
+no-support, never carries a level, and that nothing below the floor goes
+unflagged. Lowest pct_hi among trusted names is now 0.0623.
+
+
 ## State at 2026-08-28 (later) — FUNDAMENTAL WAS 97% ONE PYTHON LOOP
 
 `fundamental` cost 2h20m for a current session and 3-5h for a backfilled one.
