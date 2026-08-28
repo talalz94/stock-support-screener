@@ -670,11 +670,28 @@ def check_screen(asof: str, quick: bool) -> None:
                             & (z["dist_pct"] > Z.BAND_AT + 1e-9)).sum())
                 if mism:
                     bad.append(f"{mism} band/distance mismatch(es)")
+                # A name whose prices are not trusted must not also be counted
+                # as having no support -- that would put an unadjusted split at
+                # the top of the strongest signal on the page.
+                if "suspect_split" in z.columns:
+                    sus = z["suspect_split"].fillna(False).astype(bool)
+                    both = int((sus & ns).sum())
+                    if both:
+                        bad.append(f"{both} row(s) both suspect and no-support")
+                    lvl = int((sus & z["level"].notna()).sum())
+                    if lvl:
+                        bad.append(f"{lvl} suspect row(s) carrying a level")
+                    # Nothing trusted may sit below the range floor.
+                    thru = int((~sus & z["pct_hi"].notna()
+                                & (z["pct_hi"] < Z.DATA_SUSPECT_PCT_HI)).sum())
+                    if thru:
+                        bad.append(f"{thru} untrusted-range row(s) not flagged")
                 record("screen", "zones internally consistent",
                        FAIL if bad else OK,
                        "; ".join(bad) if bad else
                        f"{len(z):,} zone(s), {int(ns.sum()):,} no-support, "
-                       f"no fabricated statistics")
+                       f"{int(z.get('suspect_split', pd.Series(dtype=bool)).sum()):,} "
+                       f"price-suspect, no fabricated statistics")
         except Exception as exc:                                 # noqa: BLE001
             record("screen", "zones audit", WARN, repr(exc)[:110])
 

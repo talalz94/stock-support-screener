@@ -42,6 +42,10 @@ COLS = [
     ("touches", "touches", "i"), ("bounce_n", "bounces", "i"),
     ("bounce_median", "rally med", "p"), ("bounce_med_atr", "rally/ATR", "f2"),
     ("dd_median", "drawdown", "p"), ("dd_break_rate", "broke >10%", "p"),
+    # Beside no_support on purpose: the no-support effect is -5.32pp in the
+    # bottom pct_hi quartile and nothing in the top, so the flag is unreadable
+    # without it.
+    ("pct_hi", "% of 250d high", "p"),
     ("span_days", "span d", "i"), ("last_touch", "last touch", "s"),
 ]
 
@@ -72,13 +76,19 @@ def _rows(df: pd.DataFrame) -> list[list]:
     out = []
     for r in df.itertuples(index=False):
         d = r._asdict()
-        band = "NO SUPPORT" if bool(d.get("no_support")) else txt(d.get("band"))
+        if bool(d.get("suspect_split")):
+            band = "SUSPECT"        # prices not trusted; see zones.is_suspect
+        elif bool(d.get("no_support")):
+            band = "NO SUPPORT"
+        else:
+            band = txt(d.get("band"))
         out.append([
             txt(d.get("ticker")), band,
             num(d.get("dist_pct")), num(d.get("level")),
             num(d.get("touches")), num(d.get("bounce_n")),
             num(d.get("bounce_median")), num(d.get("bounce_med_atr")),
             num(d.get("dd_median")), num(d.get("dd_break_rate")),
+            num(d.get("pct_hi")),
             num(d.get("span_days")), txt(d.get("last_touch")),
         ])
     # Nearest first, then the strongest-holding level. NOT by bounce size:
@@ -102,7 +112,10 @@ def build(df: pd.DataFrame | None = None, asof: str | None = None) -> "object":
 
     rows = _rows(df)
     n_tick = df["ticker"].nunique()
+    if "suspect_split" not in df.columns:
+        df = df.assign(suspect_split=False)
     n_none = int(df["no_support"].fillna(False).astype(bool).sum())
+    n_sus = int(df["suspect_split"].fillna(False).astype(bool).sum())
     n_at = int((df.get("band") == "AT").sum())
     n_near = int((df.get("band") == "NEAR").sum())
     n_appr = int((df.get("band") == "APPROACHING").sum())
@@ -155,6 +168,7 @@ body{{margin:0;background:var(--bg);color:var(--ink);
 .zb-NEAR{{color:var(--ink)}}
 .zb-APPROACHING{{color:var(--muted)}}
 .zb-NO{{color:var(--neg);border-color:var(--neg)}}
+.zb-SUSPECT{{color:var(--warn);border-color:var(--warn)}}
 .znfoot{{display:flex;gap:10px;align-items:center;margin-top:8px;
   color:var(--muted);font-size:11.5px}}
 .znmore{{background:var(--panel);color:var(--ink);border:1px solid var(--line);
@@ -175,6 +189,10 @@ body{{margin:0;background:var(--bg);color:var(--ink);
 <div><b>rally med</b> &mdash; {ui.esc(Z.EVIDENCE["bounce_median"])}</div>
 <div><b>drawdown / broke &gt;10%</b> &mdash; {ui.esc(Z.EVIDENCE["dd_median"])}</div>
 <div><b>NO SUPPORT</b> &mdash; {ui.esc(Z.EVIDENCE["no_support"])}</div>
+<div><b>SUSPECT</b> &mdash; prices not trusted: an unadjusted split, or a fall of
+more than {1 - Z.DATA_SUSPECT_PCT_HI:.0%} from the 250d high. Levels drawn from
+prices twenty times higher are not information, so these are reported and
+excluded rather than counted as having no support.</div>
 <div><b>band</b> &mdash; {ui.esc(Z.EVIDENCE["band"])}</div>
 </div>
 
@@ -185,6 +203,7 @@ body{{margin:0;background:var(--bg);color:var(--ink);
   <button class="znchip" data-b="NEAR">NEAR<span class="n">{n_near:,}</span></button>
   <button class="znchip" data-b="APPROACHING">APPROACHING<span class="n">{n_appr:,}</span></button>
   <button class="znchip" data-b="NO SUPPORT">no support<span class="n">{n_none:,}</span></button>
+  <button class="znchip" data-b="SUSPECT">prices suspect<span class="n">{n_sus:,}</span></button>
 </div>
 <div class="znbar znbar2">
   <span class="znlab">touches &ge;</span>
@@ -196,6 +215,9 @@ body{{margin:0;background:var(--bg);color:var(--ink);
   <span class="znlab">broke &gt;10% &le;</span>
   <select class="znsel" id="znd"><option value="101">any</option><option>50</option>
     <option>25</option><option>10</option><option value="0.001">never</option></select>
+  <span class="znlab">% of 250d high &le;</span>
+  <select class="znsel" id="znh"><option value="101">any</option><option>90</option>
+    <option>75</option><option>64</option><option>50</option></select>
   <button class="znchip" id="znclear">clear</button>
 </div>
 
@@ -207,7 +229,7 @@ body{{margin:0;background:var(--bg);color:var(--ink);
 <script>
 (function(){{
 const D={blob}, K={kinds};
-const CAP=400; let cap=CAP, bf='all', q='', mt=0, mr=0, md=101;
+const CAP=400; let cap=CAP, bf='all', q='', mt=0, mr=0, md=101, mh=101;
 let sc=2, sd=1;                      // default: nearest level first
 const $=s=>document.getElementById(s);
 const pc=v=>v==null?'&ndash;':(v*100).toFixed(1)+'%';
@@ -220,6 +242,7 @@ function match(r){{
   if(mt>0&&!(r[4]>=mt)) return false;
   if(mr>0&&!(r[7]>=mr)) return false;
   if(md<=100&&!(r[9]!=null&&r[9]*100<=md)) return false;
+  if(mh<=100&&!(r[10]!=null&&r[10]*100<=mh)) return false;
   return true;
 }}
 function tie(a,b){{return a[0]<b[0]?-1:1;}}
@@ -234,7 +257,7 @@ function render(){{
   }});
   const show=s.slice(0,cap);
   $('znbody').innerHTML=show.map(function(r){{
-    var b=r[1], cls=b==='NO SUPPORT'?'zb-NO':'zb-'+b;
+    var b=r[1], cls=b==='NO SUPPORT'?'zb-NO':'zb-'+b.replace(/ /g,'');
     var td='<tr><td><b>'+r[0]+'</b></td><td><span class="zb '+cls+'">'+(b||'&ndash;')+'</span></td>';
     for(var i=2;i<K.length;i++) td+='<td class="'+(K[i]==='s'?'':'n')+'">'+cell(r[i],K[i])+'</td>';
     return td+'</tr>';
@@ -249,9 +272,11 @@ $('znmore').addEventListener('click',function(){{cap=D.length;render();}});
 $('znt').addEventListener('change',function(e){{mt=+e.target.value;cap=CAP;render();}});
 $('znr').addEventListener('change',function(e){{mr=+e.target.value;cap=CAP;render();}});
 $('znd').addEventListener('change',function(e){{md=+e.target.value;cap=CAP;render();}});
+$('znh').addEventListener('change',function(e){{mh=+e.target.value;cap=CAP;render();}});
 $('znclear').addEventListener('click',function(){{
-  bf='all';q='';mt=0;mr=0;md=101;cap=CAP;
+  bf='all';q='';mt=0;mr=0;md=101;mh=101;cap=CAP;
   $('znq').value='';$('znt').value='0';$('znr').value='0';$('znd').value='101';
+  $('znh').value='101';
   document.querySelectorAll('.znchip[data-b]').forEach(function(o){{o.classList.toggle('on',o.dataset.b==='all');}});
   render();}});
 document.querySelectorAll('.znchip[data-b]').forEach(function(b){{b.addEventListener('click',function(){{

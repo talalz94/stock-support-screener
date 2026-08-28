@@ -39,10 +39,19 @@ does not have is worse than no filter.
 
   THE STRONGEST EFFECT IS ABSENCE, NOT PRESENCE. Names with NO zone within 16%
   underperformed the same-day pool by -2.57pp over 40 bars (t=-4.17), roughly
-  six times the size of the positive signal (+0.42pp, t=+4.20). Hence
-  `no_support`. CAVEAT KEPT IN VIEW: "no support within 16%" structurally means
-  the stock has run far above its last consolidation, so this may be
-  re-deriving "extended stocks fall back" by an expensive route. Untested.
+  six times the size of the positive signal (+0.42pp, t=+4.20).
+
+  IT IS NOT "EXTENDED STOCKS FALL BACK" -- that was the obvious suspicion and
+  it was TESTED AND WRONG, in direction. No-support names average 0.617 of
+  their 250d high against 0.768 for the rest: they are BEATEN DOWN, not
+  extended, and corr(no_support, pct_of_250d_high) = -0.237. Head to head over
+  the same dates, the most extended quartile OUTPERFORMED by +1.72pp (t=+2.89).
+
+  WHAT IT ACTUALLY IS: a falling knife with no floor, and it is CONDITIONAL.
+  The whole effect lives in already-weak names -- bottom quartile by % of 250d
+  high, -5.32pp (t=-5.81); below the 200d MA, -3.68pp (t=-4.23). In the top
+  quartile, or among extended names, it predicts nothing (t=+1.62, t=-0.96).
+  That is why `pct_hi` ships beside it: the flag alone is half the story.
 """
 from __future__ import annotations
 
@@ -68,6 +77,14 @@ BAND_AT = 0.025
 BAND_NEAR = 0.06
 BAND_APPROACHING = 0.16
 
+# Below this share of the 250-day high, the level history is not usable. A real
+# 95% collapse and an unadjusted reverse split are indistinguishable from price
+# alone, and it does not matter which it is: levels drawn from prices twenty
+# times higher are not information. MEASURED on 2026-08-27: 15 names, EVERY ONE
+# of them labelled NO SUPPORT -- the strongest signal on the page -- including
+# AIIO at $2.36 against a 250-day high of $563.
+DATA_SUSPECT_PCT_HI = 0.05
+
 HORIZON = 40                  # bars after a touch; 20/40/60 agreed on direction
 MIN_TOUCHES = 2
 MAX_LEVELS = 8                # per ticker, nearest first
@@ -81,7 +98,10 @@ EVIDENCE = {
     "bounce_med_atr": "volatility-adjusted rally. The comparable one.",
     "dd_median": "measured: 8+ touches hold better. -6.0% vs -9.0%.",
     "no_support": ("no zone within 16%: -2.57pp vs the same-day pool over 40 "
-                   "bars, t=-4.17. The strongest effect in the study."),
+                   "bars, t=-4.17 -- but ONLY when the stock is already weak. "
+                   "In the bottom quartile by % of 250d high it is -5.32pp "
+                   "(t=-5.81); in the top quartile it predicts nothing "
+                   "(t=+1.62). Read it with pct_hi, not alone."),
     "band": "AT +0.46pp t=+2.59 | any zone +0.42pp t=+4.20. Real but small.",
 }
 
@@ -125,6 +145,37 @@ def _episodes(close: np.ndarray, vis: np.ndarray, level: float,
     return out
 
 
+def is_suspect(bars: pd.DataFrame, cfg=config) -> bool:
+    """An unadjusted split makes every level on the chart a fiction.
+
+    The same test the screen applies at stage 0 (`pattern.suspect_split`): a big
+    log return with no volume explosion behind it. FOUND THE HARD WAY -- without
+    it, 11 names came through with a "% of 250d high" under 2%, including CISS
+    and FFAI, which the bounce screen already rejects as SUSPECT_SPLIT. AIIO
+    read as $2.36 against a 250-day high of $563: not a 99.6% decline, a reverse
+    split nobody adjusted. Every one of them was being labelled NO SUPPORT --
+    the strongest signal on the page -- on the strength of corrupt prices.
+    """
+    if bars is None or len(bars) < 3:
+        return False
+    try:
+        c = bars["close"].to_numpy(dtype=float)
+        h = bars["high"].to_numpy(dtype=float)
+        if pt.suspect_split(c, bars["volume"].to_numpy(dtype=float), cfg):
+            return True
+        # `suspect_split` needs a single big bar with quiet volume behind it and
+        # misses a decay spread over many bars, or one outside the window it
+        # sees: it caught CISS and missed FFAI and AIIO, which the screen itself
+        # flags. The price-range test catches what the return test cannot.
+        if len(h) >= 250:
+            top = float(np.nanmax(h[-250:]))
+            if top > 0 and float(c[-1]) / top < DATA_SUSPECT_PCT_HI:
+                return True
+        return False
+    except Exception:                                            # noqa: BLE001
+        return False
+
+
 def zones_for(ticker: str, bars: pd.DataFrame, asof: str | None = None,
               cfg=config) -> pd.DataFrame:
     """Every support zone below price for one stock, with its history."""
@@ -133,7 +184,7 @@ def zones_for(ticker: str, bars: pd.DataFrame, asof: str | None = None,
     b = bars.sort_values("date").reset_index(drop=True)
     if asof:
         b = b[b["date"].astype(str) <= str(asof)]
-    if len(b) < MIN_BARS:
+    if len(b) < MIN_BARS or is_suspect(b, cfg):
         return pd.DataFrame()
 
     h = b["high"].to_numpy(dtype=float)
@@ -150,6 +201,8 @@ def zones_for(ticker: str, bars: pd.DataFrame, asof: str | None = None,
     # runs over the whole universe rather than the ~679 the screen reaches.
     atr14 = pt.atr(b, 14).to_numpy(dtype=float)
     atr_pct = lv.atr_pct_of(atr14, c)
+    hi250 = float(np.nanmax(h[-250:])) if len(h) >= 250 else float(np.nanmax(h))
+    pct_hi = (price / hi250) if hi250 > 0 else np.nan
 
     piv = lv.find_pivots(h, l, atr_pct, right_edge=a, cfg=cfg)
     px = np.concatenate([l[piv.min_tr], h[piv.min_pk]])
@@ -197,6 +250,11 @@ def zones_for(ticker: str, bars: pd.DataFrame, asof: str | None = None,
             "dd_median": float(np.median(dd)) if len(dd) else np.nan,
             "dd_break_rate": float((dd <= -0.10).mean()) if len(dd) else np.nan,
             "atr_pct": atr_pct,
+            # Ships beside no_support because the no-support effect is entirely
+            # conditional on it: -5.32pp in the bottom quartile, nothing in the
+            # top. A flag whose meaning flips with another column has to travel
+            # with that column.
+            "pct_hi": pct_hi,
             "span_days": int((pd.Timestamp(dates[last])
                               - pd.Timestamp(dates[first])).days),
             "last_touch": dates[last],
@@ -222,14 +280,24 @@ def scan(tickers: list[str] | None = None, asof: str | None = None,
     asof = asof or calendar_us.last_closed_session()
     if tickers is None:
         ps = B.load_panel_stats()
+        newest = str(ps["last_date"].max()) if len(ps) else "?"
         ps = ps[(ps["n_bars"] >= 400)
                 & (ps["last_close"] >= config.MIN_PRICE)
                 & (ps["dollar_vol_20"] >= config.MIN_DOLLAR_VOL)
                 & (ps["last_date"] >= asof)]
         tickers = ps["ticker"].astype(str).tolist()
+        if not tickers:
+            # Distinguish "no bars for this session yet" from "the zone maths
+            # found nothing". The first is ordinary -- `bars` runs before this
+            # step in the chain, so it only bites when the step is forced alone
+            # -- and calling it "produced no rows" sent me looking at the zone
+            # code for what was a scheduling fact.
+            raise RuntimeError(
+                f"no tradeable names for {asof}: newest bar in the panel is "
+                f"{newest}. Run `bars` first -- in the daily chain it does.")
 
     start = (pd.Timestamp(asof) - pd.DateOffset(years=6)).strftime("%Y-%m-%d")
-    out, empty, t0 = [], [], time.time()
+    out, empty, suspect, t0 = [], [], [], time.time()
     for i in range(0, len(tickers), chunk):
         part = tickers[i:i + chunk]
         try:
@@ -240,9 +308,26 @@ def scan(tickers: list[str] | None = None, asof: str | None = None,
             continue
         for t in part:
             b = d.get(t) if isinstance(d, dict) else None
+            if b is not None and is_suspect(b, cfg=config):
+                # Reported, not dropped. A name whose prices cannot be trusted
+                # is a fact about the data, and calling it "no support" would
+                # put it at the top of the strongest signal on the page.
+                suspect.append(t)
+                continue
             z = zones_for(t, b, asof) if b is not None else pd.DataFrame()
             if z.empty:
-                empty.append(t)
+                # A no-support name still needs `pct_hi`: the whole effect is
+                # conditional on it, and these are the rows the effect is about.
+                ph = np.nan
+                try:
+                    hh = b["high"].to_numpy(dtype=float)
+                    cc = b["close"].to_numpy(dtype=float)
+                    if len(hh) >= 250:
+                        top = float(np.nanmax(hh[-250:]))
+                        ph = float(cc[-1]) / top if top > 0 else np.nan
+                except Exception:                                # noqa: BLE001
+                    pass
+                empty.append((t, ph))
             else:
                 out.append(z)
         if verbose:
@@ -253,13 +338,26 @@ def scan(tickers: list[str] | None = None, asof: str | None = None,
     if not df.empty:
         df["no_support"] = False
     if empty:
-        blank = pd.DataFrame({"ticker": empty})
+        blank = pd.DataFrame({"ticker": [t for t, _ in empty],
+                              "pct_hi": [p for _, p in empty]})
         blank["asof"] = asof
         blank["no_support"] = True
+        blank["suspect_split"] = False
         for c in df.columns if not df.empty else []:
             if c not in blank.columns:
                 blank[c] = np.nan
         df = pd.concat([df, blank], ignore_index=True) if not df.empty else blank
+    if suspect:
+        sus = pd.DataFrame({"ticker": suspect})
+        sus["asof"] = asof
+        sus["no_support"] = False
+        sus["suspect_split"] = True
+        df = pd.concat([df, sus], ignore_index=True) if not df.empty else sus
+    if not df.empty and "suspect_split" not in df.columns:
+        df["suspect_split"] = False
+    if not df.empty:
+        df["suspect_split"] = df["suspect_split"].fillna(False).astype(bool)
+        df["no_support"] = df["no_support"].fillna(False).astype(bool)
     return df
 
 
