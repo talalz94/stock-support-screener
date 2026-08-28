@@ -3,6 +3,84 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-28 — WHY THE BOUNCE SCREEN WAS THE STALEST PAGE ON THE SITE
+
+Reported as "why is the bounce screener not updating every day, I thought the
+job runs every day". The job did run every day. Two separate things were wrong.
+
+### 1. BOUNCE TAKES 37 SECONDS AND WAS NINTH IN LINE
+
+`bounce` declares `depends_on=("bars",)` and measures 33-40s. It sat behind
+`hype`, which takes three hours or more.
+
+    session 08-21  ->  built 08-24 07:57
+    session 08-24  ->  built 08-25 08:07
+    session 08-25  ->  built 08-26 21:14   (16h after that run started)
+    session 08-26  ->  never built
+    session 08-27  ->  never built
+
+It is now SEVENTH, immediately after `sentiment` -- about 90 seconds into the
+run. It needs `bars` (29s) and reads `sentiment` (31s) for the card
+decoration; nothing else between them was ever required. Verified no dependency
+is declared later than the step that needs it.
+
+**Anything that blows up in hype, provider or fundamental now costs a stale
+hype score, never a stale bounce screen.** The screen the project is named
+after should not be the last thing built.
+
+### 2. ONE OVERRUNNING RUN SILENTLY DELETES THE NEXT DAY
+
+The scheduled task is **`MultipleInstances = IgnoreNew`** with
+`ExecutionTimeLimit = PT12H`. When a run is still alive at the next 05:00
+trigger, Windows does not queue it and does not warn: it **drops the day
+entirely**. No process, no log line, and `NumberOfMissedRuns` stays **0**,
+because by the scheduler's accounting nothing was missed.
+
+    08-25  killed at the 12h limit mid-backfill, taking dip, combo and every
+           page rebuild down with it
+    08-26  still running past 22:30
+    08-27  NOT RUN AT ALL -- trigger ignored, nothing logged anywhere
+
+Do not go looking for a lock message for 08-27. `acquire_lock` does log when it
+gives up, and that code never executed, because no process was ever started.
+
+### THE ROOT CAUSE IS RUN DURATION, AND THE HOLE WAS ALREADY HALF-KNOWN
+
+`_with_backfill`'s docstring already records this failing on 2026-08-14. The
+fix then was "today first" and "the budget is TIME, not a session count". The
+residual hole: `BACKFILL_BUDGET_S` is checked BEFORE each session with `spent`
+starting at **zero**, so exactly one session always runs however long it takes
+-- and one fundamental backfill measured **5.5 hours** on 08-25.
+
+`BACKFILL_RUN_CUTOFF_S` (5h) closes it. No module may START a new backfill
+session more than five hours into the run. Five hours leaves the expensive
+current-session work intact (hype ~3h, provider ~1.2h, fundamental ~2.3h) and
+blocks the fundamental backfill, which begins around eight hours in.
+
+**Backfill is history. A run that eats the next day's run is not a trade worth
+making.**
+
+Verified at both sides of the boundary, with a stubbed compute:
+
+    0.5h into run   today scored, 3 sessions backfilled
+    4.9h into run   today scored, 3 sessions backfilled
+    5.1h into run   today scored, 0 backfilled, reason logged
+    8.0h into run   today scored, 0 backfilled, reason logged
+    RUN_T0 unset    today scored, 3 backfilled  (no regression)
+
+`today_scored` is True in every case -- the guard must never starve the current
+session, which is the mistake the 08-14 fix was itself correcting.
+
+### WHAT IS STILL TRUE AND UNFIXED
+
+`fundamental` costs ~2h20m for a current session and 3-5h for a backfilled one,
+roughly double what it should, because `prior_q`/`prior_3y` took `facts_asof`
+from 2 calls per session to 4. The cutoff stops that cost from destroying a run;
+it does not reduce it. **Cut the cost before paying for any historical
+backfill** -- at present a gap closes at one session per day at best, and there
+are 11 fundamental and 4 hype sessions outstanding.
+
+
 ## State at 2026-08-24 (evening) — A JOB THAT COULD NOT CONVERGE
 
 `sec_gap` ran 08:37-10:37 and reported `FAILED after 7204.3s: companyfacts
@@ -1773,58 +1851,58 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-24 05:00 — do not edit by hand._
+_Generated 2026-08-25 21:41 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 7s | 7s | 2.0 min | 14 |
-| `bars` | daily | 31s | 39s | 87s | 10.0 min | 14 |
-| `macro` | daily | 1.8 min | 2.0 min | 3.4 min | 15.0 min | 14 |
-| `news` | daily | 5s | 5s | 6s | 10.0 min | 14 |
-| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 14 |
-| `sentiment` | daily | 14s | 11s | 3.7 min | 15.0 min | 15 |
-| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 12 |
-| `hype` | daily | 154.0 min | 93.1 min | 846.8 min ⚠ | 120.0 min | 14 |
-| `bounce` | daily | 33s | 39s | 53s | 15.0 min | 15 |
-| `provider` | daily | 63.3 min | 63.8 min | 72.7 min | 120.0 min | 8 |
+| `universe` | daily | 6s | 7s | 7s | 2.0 min | 15 |
+| `bars` | daily | 31s | 38s | 87s | 10.0 min | 15 |
+| `macro` | daily | 2.7 min | 2.2 min | 3.4 min | 15.0 min | 15 |
+| `news` | daily | 5s | 5s | 6s | 10.0 min | 15 |
+| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 15 |
+| `sentiment` | daily | 14s | 11s | 3.7 min | 15.0 min | 16 |
+| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 13 |
+| `hype` | daily | 183.5 min | 101.2 min | 846.8 min ⚠ | 120.0 min | 16 |
+| `bounce` | daily | 37s | 39s | 53s | 15.0 min | 16 |
+| `provider` | daily | 64.4 min | 64.3 min | 72.7 min | 120.0 min | 9 |
 | `fundamental` | daily | 633.7 min | 99.7 min | 654.8 min ⚠ | 180.0 min | 16 |
 | `sec_facts` | quarterly | 31s | 4s | 31s | 60.0 min | 5 |
-| `sec_gap` | weekly | 176.9 min | 176.9 min | 187.1 min ⚠ | 20.0 min | 3 |
+| `sec_gap` | weekly | 212.9 min | 182.0 min | 212.9 min ⚠ | 20.0 min | 4 |
 | `events` | weekly | 7.0 min | 8.3 min | 13.1 min | 30.0 min | 5 |
 | `leaderboard` | weekly | 28.2 min | 26.0 min | 617.6 min ⚠ | 90.0 min | 6 |
-| `dip` | daily | 68s | 16s | 68s | 15.0 min | 15 |
-| `combo` | daily | 90s | 12s | 90s | 15.0 min | 11 |
+| `dip` | daily | 18s | 16s | 68s | 15.0 min | 16 |
+| `combo` | daily | 21s | 12s | 90s | 15.0 min | 12 |
 | `validate` | daily | 3.9 min | 3.9 min | 3.9 min | 60.0 min | 1 |
-| `explore` | daily | 9s | 6s | 13s | 5.0 min | 17 |
-| `snapshots` | daily | 0s | 0s | 16s | 5.0 min | 21 |
+| `explore` | daily | 13s | 7s | 13s | 5.0 min | 18 |
+| `snapshots` | daily | 10s | 1s | 16s | 5.0 min | 22 |
 | `profiles` | daily | 21.1 min | 17.3 min | 25.2 min ⚠ | 15.0 min | 17 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 15 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 20 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 19 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 21 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 20 |
 
-**Daily total ≈ 282.2 min.** Weekly adds 211.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 290.9 min.** Weekly adds 216.3 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-24 05:00 — do not edit by hand._
+_Generated 2026-08-25 21:41 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 245.1 | 2016-07 → 2026-08 |
+| bars 1d | 122 | 245.2 | 2016-07 → 2026-08 |
 | bars 1h | 4 | 0.5 | 2026-05 → 2026-08 |
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
-| news | 121 | 168.5 | 2016-08 → 2026-08 |
+| news | 121 | 168.6 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 260.8 | 2016-08 → 2026-08 |
+| scores | 121 | 262.4 | 2016-08 → 2026-08 |
 | fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
-| short volume | 73 | 54.7 | 2020-08 → 2026-08 |
-| flags | 16 | 1.4 | 2026-07-31 → 2026-08-21 |
-| rejects | 16 | 3.3 | 2026-07-31 → 2026-08-21 |
+| short volume | 73 | 54.8 | 2020-08 → 2026-08 |
+| flags | 17 | 1.5 | 2026-07-31 → 2026-08-24 |
+| rejects | 17 | 3.8 | 2026-07-31 → 2026-08-24 |
 | loose (macro, universe, jobs, study) | 29 | 3.6 | — |
 
-**`data/` total ≈ 1,088 MB.** `reports/` is a further 27 MB across 131 pages.
+**`data/` total ≈ 1,090 MB.** `reports/` is a further 29 MB across 134 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -1832,21 +1910,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-24 05:00 — do not edit by hand._
+_Generated 2026-08-25 21:41 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 342 | 2016-09-27 → 2026-08-21 |
-| `fundamental` | 61 | 193 | 2016-08-25 → 2026-08-21 |
-| `hype` | 20 | 314 | 2016-10-25 → 2026-08-21 |
-| `dip` | 10 | 244 | 2016-09-27 → 2026-08-21 |
-| `combo` | 15 | 199 | 2016-11-04 → 2026-08-21 |
+| `sentiment` | 26 | 343 | 2016-09-27 → 2026-08-24 |
+| `fundamental` | 61 | 194 | 2016-08-25 → 2026-08-24 |
+| `hype` | 20 | 317 | 2016-10-25 → 2026-08-24 |
+| `dip` | 10 | 245 | 2016-09-27 → 2026-08-24 |
+| `combo` | 15 | 200 | 2016-11-04 → 2026-08-24 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-24 05:00 — do not edit by hand._
+_Generated 2026-08-25 21:41 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
