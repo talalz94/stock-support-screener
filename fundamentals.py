@@ -2026,21 +2026,54 @@ def _q4_rows(q: pd.DataFrame, ann: pd.DataFrame) -> pd.DataFrame:
         return q
     a = _latest(ann, ["ticker", "concept"])[["ticker", "concept", "value",
                                              "ddate"]]
-    qd = pd.to_datetime(q["ddate"], errors="coerce")
-    rows = []
-    for r in a.itertuples(index=False):
-        end = pd.Timestamp(r.ddate)
-        if pd.isna(end):
-            continue
-        m = ((q["ticker"] == r.ticker) & (q["concept"] == r.concept)
-             & (qd > end - pd.DateOffset(months=12)) & (qd <= end))
-        inside = q[m]
-        if len(inside) == 3 and not (inside["ddate"] == r.ddate).any():
-            rows.append({"ticker": r.ticker, "concept": r.concept,
-                         "ddate": r.ddate, "qtrs": 1,
-                         "value": float(r.value) - float(inside["value"].sum()),
-                         "rank": 0, "filed": q["filed"].max()})
-    return pd.concat([q, pd.DataFrame(rows)], ignore_index=True) if rows else q
+    # ONE MERGE, NOT A SCAN PER ANNUAL ROW.
+    #
+    # This was a Python loop over `a` that rebuilt a full-frame boolean mask of
+    # `q` on every iteration -- `q["ticker"] == r.ticker` and
+    # `q["concept"] == r.concept` are OBJECT-dtype comparisons, which pandas
+    # evaluates element by element. PROFILED 2026-08-28 on 300 tickers:
+    # facts_asof 38.9s, of which _ttm 35.1s, of which THIS 33.8s -- 9,481
+    # object-array comparisons costing 15.6s, plus 3,808 calls to
+    # `q["filed"].max()` recomputed inside the loop for a value that never
+    # changes. And `facts_asof` is 97% of the whole fundamental step, which is
+    # why a session cost 2h20m.
+    #
+    # `_latest` leaves exactly one annual row per (ticker, concept), so the
+    # merge is 1-to-few and the groupby reproduces the loop's two conditions
+    # exactly: three quarters inside the annual's trailing twelve months, and
+    # none of them sharing its period end.
+    if a.empty:
+        return q
+    filed_max = q["filed"].max()                     # loop-invariant; hoisted
+    a = a.assign(_end=pd.to_datetime(a["ddate"], errors="coerce"))
+    a = a[a["_end"].notna()]
+    if a.empty:
+        return q
+
+    j = q.assign(_qd=pd.to_datetime(q["ddate"], errors="coerce")).merge(
+        a.rename(columns={"value": "_ann", "ddate": "_addate"}),
+        on=["ticker", "concept"], how="inner")
+    j = j[(j["_qd"] > j["_end"] - pd.DateOffset(months=12))
+          & (j["_qd"] <= j["_end"])]
+    if j.empty:
+        return q
+    j["_same"] = j["ddate"].to_numpy() == j["_addate"].to_numpy()
+
+    g = j.groupby(["ticker", "concept"], observed=True).agg(
+        _n=("value", "size"), _sum=("value", "sum"),
+        _same=("_same", "any"), _ann=("_ann", "first"),
+        _addate=("_addate", "first"))
+    g = g[(g["_n"] == 3) & (~g["_same"])]
+    if g.empty:
+        return q
+
+    rows = g.reset_index()
+    rows = pd.DataFrame({
+        "ticker": rows["ticker"], "concept": rows["concept"],
+        "ddate": rows["_addate"], "qtrs": 1,
+        "value": rows["_ann"].astype(float) - rows["_sum"].astype(float),
+        "rank": 0, "filed": filed_max})
+    return pd.concat([q, rows], ignore_index=True)
 
 
 def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:

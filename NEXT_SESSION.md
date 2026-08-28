@@ -3,6 +3,82 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-28 (later) — FUNDAMENTAL WAS 97% ONE PYTHON LOOP
+
+`fundamental` cost 2h20m for a current session and 3-5h for a backfilled one.
+PROFILED rather than guessed, 400 tickers:
+
+    facts_asof prior_3y   53.84s  24.8%
+    facts_asof prior_q    53.02s  24.4%
+    facts_asof cur        51.91s  23.9%
+    facts_asof prior_1y   51.68s  23.8%
+    _price_inputs          6.69s   3.1%
+    FM.compute             0.36s   0.2%
+
+**The four point-in-time queries are 97% of the step**, each ~52s regardless of
+date -- so adding `prior_q` and `prior_3y` on 08-23 really did double it. Worth
+noting what the profile SAVED me from: `_price_inputs` reads five years of daily
+bars for every ticker and `_beta` computes covariance with a per-column
+`.apply`, which looks exactly like the bottleneck and is 3%.
+
+### THE HOTSPOT WAS A MERGE WRITTEN AS A NESTED SCAN
+
+    facts_asof                     38.87s
+      _ttm                         35.07s  (90%)
+        _q4_rows                   33.82s  (87%)
+          comp_method_OBJECT_ARRAY 15.65s  x 9,481 calls
+
+`_q4_rows` looped over every annual row (~3,800) and rebuilt a full-frame
+boolean mask of `q` on each iteration. `q["ticker"] == r.ticker` on an
+object-dtype column is evaluated element by element by pandas -- 9,481 such
+comparisons. It also called `q["filed"].max()` INSIDE the loop, 3,808 times,
+for a value that never changes.
+
+Rewritten as one merge on (ticker, concept) plus one groupby. `_latest` leaves
+exactly one annual row per (ticker, concept), so the merge is 1-to-few and the
+groupby reproduces both original conditions exactly: three quarters inside the
+annual's trailing twelve months, and none sharing its period end.
+
+### MEASURED, AND PROVED IDENTICAL
+
+Captured the real (q, ann) inputs from a live `facts_asof` and ran the ORIGINAL
+implementation and the new one side by side:
+
+    old   25.29s -> 27,611 rows
+    new    0.11s -> 27,611 rows      228x
+    IDENTICAL: True
+
+End to end on the same 400 tickers, four queries: **210.45s -> 25.31s, 8.3x**.
+The step is ~97% those queries, so a session should fall from ~2h20m to roughly
+20 minutes, and a backfilled session from 3-5h to well under an hour. That
+changes what the 5h `BACKFILL_RUN_CUTOFF_S` permits: several gap sessions per
+run instead of one, so the 11 fundamental and 4 hype gaps close in days rather
+than weeks.
+
+Verified: regression pins 28/28, with `_ttm` reporting the identical
+"dropped 45 / rolled 275" diagnostics as before the change; fundamentals
+selftest OK; fund_metrics selftest OK.
+
+### AND ttm_invariants HAD BEEN DEAD
+
+Running it surfaced `KeyError: 'ends_latest'`. `check()` was rewritten to read
+production windows and renamed that column to `complete`; the print loop in
+`main()` still asked for the old name, so the report died before printing a
+single line and had been dead since that rewrite. NOT caused by today's change
+-- `ends_latest` appears nowhere in `fundamentals.py`. One-word fix, and the
+store is healthy:
+
+    44,557 four-quarter windows across 6,562 tickers
+      spans_year  44,536 pass   21 FAIL (0.05%)
+      no_overlap  44,557 pass    0 FAIL
+      no_gap      44,519 pass   38 FAIL (0.09%)
+      complete    44,557 pass    0 FAIL
+      OVERALL     44,508 pass   49 FAIL (0.11%)
+
+The 49 failures are odd fiscal calendars -- GFLT/BNC 182-day gaps, AIV and BRID
+123-day gaps from fiscal-year changes -- not a systematic fault.
+
+
 ## State at 2026-08-28 — WHY THE BOUNCE SCREEN WAS THE STALEST PAGE ON THE SITE
 
 Reported as "why is the bounce screener not updating every day, I thought the
