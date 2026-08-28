@@ -642,6 +642,42 @@ def check_screen(asof: str, quick: bool) -> None:
                f"{counts['total']:,} screened, {counts['real_scores']} real scores, "
                f"0 fabricated")
 
+        # ---- zones: the same not-reported-is-not-zero rule, one table over.
+        try:
+            import zones as Z
+            zp = config.ZONES / f"{asof}.parquet"
+            if not zp.exists():
+                record("screen", "zones stored", WARN, f"none for {asof}")
+            else:
+                z = pd.read_parquet(zp)
+                ns = z["no_support"].fillna(False).astype(bool)
+                bad = []
+                # A row with no episodes cannot carry a bounce statistic.
+                fab = int((z["bounce_n"].fillna(0).eq(0)
+                           & z["bounce_median"].notna()).sum())
+                if fab:
+                    bad.append(f"{fab} bounce stat(s) with 0 episodes")
+                # A no-support row must be empty, not zeroed.
+                leak = int((ns & z["level"].notna()).sum())
+                if leak:
+                    bad.append(f"{leak} no-support row(s) carrying a level")
+                # Support is at or below price, by definition.
+                above = int((z["level"] > z["price"] * 1.0001).sum())
+                if above:
+                    bad.append(f"{above} level(s) above price")
+                # The band must agree with the distance that produced it.
+                mism = int((z["band"].eq("AT")
+                            & (z["dist_pct"] > Z.BAND_AT + 1e-9)).sum())
+                if mism:
+                    bad.append(f"{mism} band/distance mismatch(es)")
+                record("screen", "zones internally consistent",
+                       FAIL if bad else OK,
+                       "; ".join(bad) if bad else
+                       f"{len(z):,} zone(s), {int(ns.sum()):,} no-support, "
+                       f"no fabricated statistics")
+        except Exception as exc:                                 # noqa: BLE001
+            record("screen", "zones audit", WARN, repr(exc)[:110])
+
         # The panel is the population. A stored run that does not cover it has
         # dropped names silently -- which is exactly what returning only the
         # pattern tier did until 2026-08-24.

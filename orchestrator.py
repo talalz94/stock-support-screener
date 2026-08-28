@@ -314,6 +314,34 @@ def _step_shortvol(asof: str) -> tuple[int, str]:
     return n, f"{n:,} row(s) over {res.get('days', 0)} session(s)"
 
 
+def _step_zones(asof: str) -> tuple[int, str]:
+    """Support zones for the whole universe, plus the page.
+
+    Cheap and early on purpose: 69s measured for 3,270 names, and it sits
+    beside `bounce` where nothing expensive downstream can starve it. The
+    bounce screen spent weeks as the stalest page on the site precisely because
+    it was ninth in line behind a three-hour step.
+    """
+    import zones
+    import zones_page
+    df = zones.scan(asof=asof, verbose=False)
+    if df.empty:
+        raise RuntimeError("zones produced no rows")
+    config.dirs()
+    p = config.ZONES / f"{asof}.parquet"
+    tmp = p.with_suffix(".parquet.tmp")
+    df.to_parquet(tmp, compression=config.COMPRESSION, index=False)
+    tmp.replace(p)
+    zones_page.build(df, asof)
+    store.prune_dated(config.ZONES, config.ZONES_KEEP_DAYS)
+
+    n_none = int(df["no_support"].fillna(False).astype(bool).sum())
+    at = int((df.get("band") == "AT").sum())
+    return len(df), (f"{len(df):,} zone(s) over {df['ticker'].nunique():,} name(s); "
+                     f"{at:,} AT a level, {n_none:,} with no support within "
+                     f"{zones.BAND_APPROACHING:.0%}")
+
+
 def _step_provider(asof: str) -> tuple[int, str]:
     """Refresh the provider metric cache for the whole tradeable universe.
 
@@ -1285,6 +1313,9 @@ REGISTRY: tuple[Step, ...] = (
     # never a stale bounce screen.
     Step("bounce", _step_bounce, config.CADENCE_DAILY, depends_on=("bars",),
          timeout=900, desc="support-bounce screen, confirm, report, outcomes"),
+    Step("zones", _step_zones, config.CADENCE_DAILY, depends_on=("bars",),
+         timeout=1800,
+         desc="support zones for every name + what price did there before"),
     Step("shortvol", _step_shortvol, config.CADENCE_DAILY, timeout=600,
          desc="FINRA Reg SHO daily short volume (feeds hype)"),
     Step("hype", _with_backfill("hype", _step_hype), config.CADENCE_DAILY,

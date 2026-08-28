@@ -293,6 +293,7 @@ NAV = [
     ("hub", "Status", "index.html"),
     ("explore", "Explore", "explore/latest.html"),
     ("bounce", "Bounce", "bounce/latest.html"),
+    ("zones", "Zones", "zones/latest.html"),
     ("sentiment", "Sentiment", "sentiment/latest.html"),
     ("fundamental", "Fundamental", "fundamental/latest.html"),
     ("profiles", "Profiles", "stock/index.html"),

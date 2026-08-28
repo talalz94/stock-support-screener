@@ -54,11 +54,14 @@ REPORTS_FUNDAMENTAL = REPORTS / "fundamental"
 REPORTS_STOCK = REPORTS / "stock"
 
 # Every subdirectory a report writer may create. `dirs()` makes them all.
+REPORTS_ZONES = REPORTS / "zones"
 REPORT_DIRS = (REPORTS_EXPLORE, REPORTS_BOUNCE, REPORTS_SENTIMENT,
-               REPORTS_FUNDAMENTAL, REPORTS_STOCK)
+               REPORTS_FUNDAMENTAL, REPORTS_STOCK, REPORTS_ZONES)
 
 BARS = DATA / "bars"                        # bars/1d/YYYY-MM.parquet, bars/1h/...
 FLAGS = DATA / "flags"                      # flags/YYYY-MM-DD.parquet  (kept forever)
+ZONES = DATA / "zones"                      # zones/YYYY-MM-DD.parquet  (support levels)
+ZONES_KEEP_DAYS = 90                        # ~526 KB/session; 90d is ~47 MB
 REJECTS = DATA / "rejects"                  # rejects/YYYY-MM-DD.parquet (30d)
 
 # --- score modules (see scores/__init__.py) --------------------------------
@@ -891,7 +894,7 @@ def safe_console() -> None:
 
 def dirs() -> None:
     """Create every directory the pipeline writes to. Idempotent."""
-    for d in (DATA, REPORTS, BARS / "1d", BARS / "1h", FLAGS, REJECTS,
+    for d in (DATA, REPORTS, BARS / "1d", BARS / "1h", FLAGS, REJECTS, ZONES,
               NEWS, SENTI, SCORES, BARS_ETF, SHORTVOL, FUNDAMENTALS,
               FUNDAMENTALS_CF, *REPORT_DIRS):
         d.mkdir(parents=True, exist_ok=True)

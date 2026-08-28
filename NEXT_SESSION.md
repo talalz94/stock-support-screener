@@ -3,6 +3,93 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+## State at 2026-08-29 — A ZONES PAGE, AND THE STUDY THAT CHANGED ITS DESIGN
+
+Reported with three charts (AAON, AMSC, DXYZ) sitting on obvious multi-year
+shelves the bounce screen never mentions, and a request: catch the early ones
+reaching a major zone, count how many times price bounced there, and rank by how
+hard it bounced.
+
+**The ranking that was asked for is the one thing the data refused.** Building it
+as specified would have ranked backwards.
+
+### WHAT THE SCREEN WAS ALREADY DOING, AND BINNING
+
+From the stored 2026-08-27 run: AMSC had a NINE-TOUCH level with Q=0.836
+discarded at stage 4 for LEVEL_OFF_BASE. DXYZ's machine-found level was 20.93
+against a hand-drawn 20.64 -- 1.4% apart. AAON had nothing, having stopped at
+stage 2 on RUN_TOO_SMALL before the level code ran. The level work was being
+done and thrown away, so `zones.py` reuses `levels.py` untouched rather than
+reimplementing anything.
+
+### PHASE 1 -- 325,061 EPISODES, 3,277 TICKERS
+
+    prior touches      n      med r40   hit >=15%
+    0             77,071       17.2%      54.8%
+    8+             6,129       12.8%      43.7%     Spearman -0.0855
+
+**More touches predicts a SMALLER bounce, monotonically.** It survives inside
+every volatility quartile, so it is not an artifact -- but volatility is what
+actually drives bounce size (10.8/15.0/18.7/24.7% by quartile, a ~14pp spread
+against touch count's ~3pp). **Ranking on raw bounce size is an ATR ranking in
+disguise**, which is why `bounce_med_atr` exists and is the sortable one.
+
+The same data says touch count IS predictive -- of drawdown:
+
+    prior touches   med dd40   share breaking >10%
+    0                 -9.0%          46.6%
+    8+                -6.0%          35.6%
+
+**A well-tested level is a better STOP, not a bigger target.**
+
+### PHASE 2 -- 37,854 POINT-IN-TIME OBSERVATIONS, 12 NON-OVERLAPPING DATES
+
+Point-in-time, eligibility recomputed per date from the bars (not today's panel,
+which would be survivorship bias pointing the flattering way), paired per-date
+against every eligible name so the market move cancels.
+
+    any zone within 16%    2,712/date   +0.42pp   t=+4.20
+    AT (<=2.5%)            1,229/date   +0.46pp   t=+2.59
+    AT + 8+ touches          887/date   +0.50pp   t=+1.61   <- the filter HURTS
+    NO zone within 16%       442/date   -2.57pp   t=-4.17   <- strongest effect
+
+**The strongest effect is absence, not presence**, six times the size of the
+positive signal. Hence `no_support`.
+
+A DESIGN ERROR CAUGHT IN MY OWN STUDY: the first run sampled dates 21 sessions
+apart against a 40-bar horizon, so adjacent observations shared ~19 bars of
+forward return and every t-stat was inflated by autocorrelation. Re-run on
+non-overlapping dates the results held (they strengthened), but the first
+version was not entitled to its confidence.
+
+CAVEAT KEPT IN VIEW: "no support within 16%" structurally means the stock has
+run far above its last consolidation, so this may be re-deriving "extended
+stocks fall back" by an expensive route. Untested, and the first thing to test.
+
+### WHAT SHIPPED
+
+`zones.py` -- levels for every name, no run required, 69s for 3,270 tickers.
+`zones_page.py` -- one table, search + 4 band chips + 3 numeric filters, ~8,000
+rows client-side. **Every column prints what it measured, under the header
+rather than in a tooltip**, because offering a touches filter without saying it
+measured negative for upside invites ranking backwards.
+`orchestrator` -- `zones` step at position 8, right after `bounce` and before
+anything expensive, for the reason the bounce screen taught us.
+
+VERIFIED
+  zones selftest      merge, separation, right-edge, magnitude, drawdown, empty/short
+  validate            4 new zone checks, each PROVED to fail on an injected defect
+  page audit          zones pages 0 literal-null cells
+  contrast            light min 4.78, dark min 5.32 (AA 4.5)
+  interactions        chips, 3 numeric filters composing, clear, sort blanks-last,
+                      show-all 7,983, search
+  step                107s via the orchestrator, 1 ran 0 failed
+  pins 28/28, report/ui/classify/strategies/watchlist selftests OK
+
+A NAN THAT NEARLY SHIPPED: `str(v or "")` renders float("nan") as the literal
+"nan", because nan is TRUTHY. Every one of the 396 no-support rows printed it in
+`last_touch` until the browser check caught it.
+
 ## State at 2026-08-28 (later) — FUNDAMENTAL WAS 97% ONE PYTHON LOOP
 
 `fundamental` cost 2h20m for a current session and 3-5h for a backfilled one.
@@ -1927,58 +2014,58 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-25 21:41 — do not edit by hand._
+_Generated 2026-08-28 10:03 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 7s | 7s | 2.0 min | 15 |
-| `bars` | daily | 31s | 38s | 87s | 10.0 min | 15 |
-| `macro` | daily | 2.7 min | 2.2 min | 3.4 min | 15.0 min | 15 |
-| `news` | daily | 5s | 5s | 6s | 10.0 min | 15 |
-| `senti_cache` | daily | 3s | 3s | 3s | 10.0 min | 15 |
-| `sentiment` | daily | 14s | 11s | 3.7 min | 15.0 min | 16 |
-| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 13 |
-| `hype` | daily | 183.5 min | 101.2 min | 846.8 min ⚠ | 120.0 min | 16 |
-| `bounce` | daily | 37s | 39s | 53s | 15.0 min | 16 |
-| `provider` | daily | 64.4 min | 64.3 min | 72.7 min | 120.0 min | 9 |
-| `fundamental` | daily | 633.7 min | 99.7 min | 654.8 min ⚠ | 180.0 min | 16 |
+| `universe` | daily | 6s | 7s | 18.2 min ⚠ | 2.0 min | 17 |
+| `bars` | daily | 29s | 38s | 87s | 10.0 min | 17 |
+| `macro` | daily | 1.9 min | 1.9 min | 2.7 min | 15.0 min | 17 |
+| `news` | daily | 9s | 5s | 9s | 10.0 min | 17 |
+| `senti_cache` | daily | 3s | 3s | 5s | 10.0 min | 17 |
+| `sentiment` | daily | 31s | 12s | 3.7 min | 15.0 min | 18 |
+| `bounce` | daily | 62s | 39s | 62s | 15.0 min | 18 |
+| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 15 |
+| `hype` | daily | 3.0 min | 101.2 min | 950.5 min ⚠ | 120.0 min | 18 |
+| `provider` | daily | 64.9 min | 64.4 min | 75.5 min | 120.0 min | 11 |
+| `fundamental` | daily | 12.3 min | 90.5 min | 633.7 min ⚠ | 180.0 min | 17 |
 | `sec_facts` | quarterly | 31s | 4s | 31s | 60.0 min | 5 |
 | `sec_gap` | weekly | 212.9 min | 182.0 min | 212.9 min ⚠ | 20.0 min | 4 |
 | `events` | weekly | 7.0 min | 8.3 min | 13.1 min | 30.0 min | 5 |
 | `leaderboard` | weekly | 28.2 min | 26.0 min | 617.6 min ⚠ | 90.0 min | 6 |
-| `dip` | daily | 18s | 16s | 68s | 15.0 min | 16 |
-| `combo` | daily | 21s | 12s | 90s | 15.0 min | 12 |
-| `validate` | daily | 3.9 min | 3.9 min | 3.9 min | 60.0 min | 1 |
-| `explore` | daily | 13s | 7s | 13s | 5.0 min | 18 |
-| `snapshots` | daily | 10s | 1s | 16s | 5.0 min | 22 |
-| `profiles` | daily | 21.1 min | 17.3 min | 25.2 min ⚠ | 15.0 min | 17 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 15 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 21 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 20 |
+| `dip` | daily | 51s | 16s | 68s | 15.0 min | 17 |
+| `combo` | daily | 56s | 12s | 90s | 15.0 min | 13 |
+| `validate` | daily | 5.0 min | 4.4 min | 5.0 min | 60.0 min | 2 |
+| `explore` | daily | 9s | 7s | 13s | 5.0 min | 19 |
+| `snapshots` | daily | 27s | 2s | 27s | 5.0 min | 23 |
+| `profiles` | daily | 20.9 min | 17.3 min | 21.6 min ⚠ | 15.0 min | 18 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 16 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 22 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 21 |
 
-**Daily total ≈ 290.9 min.** Weekly adds 216.3 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 282.2 min.** Weekly adds 216.3 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-25 21:41 — do not edit by hand._
+_Generated 2026-08-28 10:03 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 245.2 | 2016-07 → 2026-08 |
+| bars 1d | 122 | 245.6 | 2016-07 → 2026-08 |
 | bars 1h | 4 | 0.5 | 2026-05 → 2026-08 |
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
-| news | 121 | 168.6 | 2016-08 → 2026-08 |
+| news | 121 | 168.8 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 262.4 | 2016-08 → 2026-08 |
+| scores | 121 | 271.5 | 2016-08 → 2026-08 |
 | fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
-| short volume | 73 | 54.8 | 2020-08 → 2026-08 |
-| flags | 17 | 1.5 | 2026-07-31 → 2026-08-24 |
-| rejects | 17 | 3.8 | 2026-07-31 → 2026-08-24 |
-| loose (macro, universe, jobs, study) | 29 | 3.6 | — |
+| short volume | 73 | 54.9 | 2020-08 → 2026-08 |
+| flags | 20 | 1.8 | 2026-07-31 → 2026-08-27 |
+| rejects | 20 | 4.9 | 2026-07-31 → 2026-08-27 |
+| loose (macro, universe, jobs, study) | 29 | 3.7 | — |
 
-**`data/` total ≈ 1,090 MB.** `reports/` is a further 29 MB across 134 pages.
+**`data/` total ≈ 1,101 MB.** `reports/` is a further 33 MB across 152 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -1986,21 +2073,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-25 21:41 — do not edit by hand._
+_Generated 2026-08-28 10:03 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 343 | 2016-09-27 → 2026-08-24 |
-| `fundamental` | 61 | 194 | 2016-08-25 → 2026-08-24 |
-| `hype` | 20 | 317 | 2016-10-25 → 2026-08-24 |
-| `dip` | 10 | 245 | 2016-09-27 → 2026-08-24 |
-| `combo` | 15 | 200 | 2016-11-04 → 2026-08-24 |
+| `sentiment` | 26 | 346 | 2016-09-27 → 2026-08-27 |
+| `fundamental` | 61 | 204 | 2016-08-25 → 2026-08-27 |
+| `hype` | 20 | 321 | 2016-10-25 → 2026-08-27 |
+| `dip` | 10 | 248 | 2016-09-27 → 2026-08-27 |
+| `combo` | 15 | 203 | 2016-11-04 → 2026-08-27 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-25 21:41 — do not edit by hand._
+_Generated 2026-08-28 10:03 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
