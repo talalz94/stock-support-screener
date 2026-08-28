@@ -445,6 +445,27 @@ BACKFILL_MODULES = ("hype", "dip", "combo", "sentiment", "fundamental")
 # a week, without ever putting the daily pass at risk.
 BACKFILL_BUDGET_S = 25 * 60
 
+# Wall-clock time into the RUN after which no module may START a new backfill
+# session. The per-module budget above cannot prevent this on its own: it is
+# checked BEFORE each session with `spent` starting at zero, so exactly one
+# session always runs however long it takes -- and a fundamental backfill
+# measured 5.5 HOURS on 2026-08-25.
+#
+# That is what actually broke the daily job, and the damage was not one run:
+#   * 08-25  killed by Task Scheduler at its 12h limit, mid-backfill, taking
+#            dip, combo and every page rebuild down with it
+#   * 08-26  ran past 22:30, still alive at the next trigger
+#   * 08-27  NOT RUN AT ALL -- the task is MultipleInstances=IgnoreNew, so a
+#            still-running instance makes Windows drop the next day silently.
+#            No process, no log, and NumberOfMissedRuns stays 0.
+#
+# 5h leaves the expensive current-session work (hype ~3h, provider ~1.2h,
+# fundamental ~2.3h) intact while blocking the fundamental backfill that starts
+# ~8h in. Backfill is history; a run that eats the next day's run is not a
+# trade worth making.
+BACKFILL_RUN_CUTOFF_S = 5 * 3600
+RUN_T0 = None
+
 
 def _missing_sessions(module: str, asof: str, limit: int) -> list[str]:
     """Trading sessions at or before `asof` with no stored rows for `module`."""
@@ -548,6 +569,17 @@ def _with_backfill(module: str, compute_one) -> Callable[[str], tuple[int, str]]
 
         started, filled = time.time(), 0
         for d in gaps:
+            # The RUN-level guard comes first. A session is never interrupted
+            # once begun, so the only place to prevent an overrun is here,
+            # before it starts.
+            if RUN_T0 is not None:
+                run_h = (time.time() - RUN_T0) / 3600
+                if run_h > BACKFILL_RUN_CUTOFF_S / 3600:
+                    log(f"    [{module}] {run_h:.1f}h into the run -- not "
+                        f"starting another backfill session (cutoff "
+                        f"{BACKFILL_RUN_CUTOFF_S / 3600:.0f}h); "
+                        f"{len(gaps) - filled} left for the next run")
+                    break
             spent = time.time() - started
             if spent > BACKFILL_BUDGET_S:
                 log(f"    [{module}] backfill budget spent "
@@ -1238,6 +1270,21 @@ REGISTRY: tuple[Step, ...] = (
          config.CADENCE_DAILY,
          depends_on=("senti_cache", "bars"), timeout=900,
          desc="sentiment score module + dashboard"),
+    # DELIBERATELY THIRD-FROM-TOP, not ninth.
+    #
+    # bounce depends on `bars` alone and takes 37 SECONDS, but it sat behind
+    # hype, which takes three hours or more. MEASURED: the 08-25 session was not
+    # built until 08-26 21:14, sixteen hours after that run started, and the
+    # 08-26 and 08-27 sessions were never built at all because the runs died
+    # further down the chain. The screen the whole project is named after was
+    # the most stale page on the site, for no reason but declaration order.
+    #
+    # It reads `sentiment` for the card decoration, so it goes after that -- 90
+    # seconds into the run -- and before everything expensive. Anything that
+    # blows up in hype, provider or fundamental now costs a stale hype score,
+    # never a stale bounce screen.
+    Step("bounce", _step_bounce, config.CADENCE_DAILY, depends_on=("bars",),
+         timeout=900, desc="support-bounce screen, confirm, report, outcomes"),
     Step("shortvol", _step_shortvol, config.CADENCE_DAILY, timeout=600,
          desc="FINRA Reg SHO daily short volume (feeds hype)"),
     Step("hype", _with_backfill("hype", _step_hype), config.CADENCE_DAILY,
@@ -1249,8 +1296,6 @@ REGISTRY: tuple[Step, ...] = (
          timeout=7200,
          desc="attention + narrative-premium score module (daily: attention "
               "is a short-horizon flow measure)"),
-    Step("bounce", _step_bounce, config.CADENCE_DAILY, depends_on=("bars",),
-         timeout=900, desc="support-bounce screen, confirm, report, outcomes"),
     Step("provider", _step_provider, config.CADENCE_DAILY,
          depends_on=("universe",), timeout=7200,
          desc="finnhub metric cache for the universe (the source for displayed "
@@ -1509,6 +1554,8 @@ def _explode_daily_run_timings(run_id: str, asof: str) -> None:
 
 def run(only: list[str] | None = None, force: bool = False) -> int:
     t0 = time.time()
+    global RUN_T0
+    RUN_T0 = t0
     run_id = datetime.now().isoformat(timespec="seconds")
     asof = calendar_us.last_closed_session()
 
