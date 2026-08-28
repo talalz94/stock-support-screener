@@ -312,7 +312,11 @@ def main() -> int:
     n = len(df)
     print(f"\n{n:,} four-quarter window(s) across "
           f"{df.ticker.nunique():,} ticker(s)\n")
-    for inv in ("spans_year", "no_overlap", "no_gap", "ends_latest"):
+    # "complete", not "ends_latest": `check` was rewritten to read production
+    # windows and renamed this column, but the print loop still asked for the
+    # old name -- so the whole invariant report died with KeyError before
+    # printing a single line, and had been dead since that rewrite.
+    for inv in ("spans_year", "no_overlap", "no_gap", "complete"):
         bad = int((~df[inv]).sum())
         print(f"  {inv:12s} {n - bad:6,} pass  {bad:5,} FAIL "
               f"({bad / n * 100:5.2f}%)")
