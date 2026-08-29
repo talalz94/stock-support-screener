@@ -3,6 +3,47 @@
 `SCORE_MODULES.md` for architecture, `PROJECT_LOG.md` for dated findings.
 Blocks marked GENERATED are rewritten by `docs.py` — **do not hand-edit those**.
 
+### 2026-08-29 — THE FIRST FULL RUN WITH ZONES, AND A 10.5-HOUR VALIDATE
+
+Saturday 05:00: **25 ran, 0 skipped, 0 failed**, 47,868s wall (13h18m).
+
+WHAT WORKED. `zones` ran in the chain for the first time -- 81.6s at position 8,
+straight after `bounce` -- 7,978 zones over 3,262 names. `fundamental` came in
+at **877s (14.6 min)** against 2h20m before the `_q4_rows` rewrite, holding the
+11x at full scale. Every backfill gap stayed closed.
+
+WHAT DID NOT. `validate` logged **37,658s -- 10.5 HOURS** against 298s the day
+before, and it is what made the run 13h18m.
+
+THE HONEST STATE OF THAT: I do not know where the time went. Measured on the
+same data afterwards, every check inside it totals **245s**: audit 213s, ttm
+7s, roll 24s, and the network checks were skipped by budget. Windows power
+events show **1.1 hours** of modern standby inside validate's window -- real,
+but a tenth of the gap. The machine was awake for the other 9.4 hours and the
+code cannot account for them.
+
+Rather than invent an explanation, the step now TIMES ITSELF per check and logs
+a line like `timing: audit 180s, ttm 5s, roll 20s, screen 3s`, plus a warning
+for any single check over 300s. A step that reports only its total cannot say
+what it spent. Re-run afterwards: **373.9s**, network checks completed
+(sec:see-csv, prov:82%), so nothing is structurally slow.
+
+STILL UNRUN: `powercfg /change standby-timeout-ac 0`. Modern standby is
+throttling background work, and 1.1 hours of it landed inside one step.
+
+### AND A GAP WORTH MORE THAN THE MYSTERY
+
+`_step_validate` never ran `validate.py`'s GROUPS. Every group check --
+including the zone invariants written the day before specifically to stop
+fabricated statistics -- ran ONLY when someone typed `python validate.py` by
+hand. They were protecting nothing on a normal night.
+
+The `screen` group (bounce funnel + zone invariants) is now part of the nightly
+step and reports `screen:pass`. It measures **3s**, which is why it is the one
+group pulled in rather than all twelve -- `--quick` across every group is ~11
+minutes and belongs on demand, not in the chain.
+
+
 ## State at 2026-08-29 — A ZONES PAGE, AND THE STUDY THAT CHANGED ITS DESIGN
 
 Reported with three charts (AAON, AMSC, DXYZ) sitting on obvious multi-year
@@ -2066,58 +2107,59 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-28 10:03 — do not edit by hand._
+_Generated 2026-08-29 18:17 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 7s | 18.2 min ⚠ | 2.0 min | 17 |
-| `bars` | daily | 29s | 38s | 87s | 10.0 min | 17 |
-| `macro` | daily | 1.9 min | 1.9 min | 2.7 min | 15.0 min | 17 |
-| `news` | daily | 9s | 5s | 9s | 10.0 min | 17 |
-| `senti_cache` | daily | 3s | 3s | 5s | 10.0 min | 17 |
-| `sentiment` | daily | 31s | 12s | 3.7 min | 15.0 min | 18 |
-| `bounce` | daily | 62s | 39s | 62s | 15.0 min | 18 |
-| `shortvol` | daily | 3s | 3s | 4s | 10.0 min | 15 |
-| `hype` | daily | 3.0 min | 101.2 min | 950.5 min ⚠ | 120.0 min | 18 |
-| `provider` | daily | 64.9 min | 64.4 min | 75.5 min | 120.0 min | 11 |
-| `fundamental` | daily | 12.3 min | 90.5 min | 633.7 min ⚠ | 180.0 min | 17 |
-| `sec_facts` | quarterly | 31s | 4s | 31s | 60.0 min | 5 |
-| `sec_gap` | weekly | 212.9 min | 182.0 min | 212.9 min ⚠ | 20.0 min | 4 |
-| `events` | weekly | 7.0 min | 8.3 min | 13.1 min | 30.0 min | 5 |
-| `leaderboard` | weekly | 28.2 min | 26.0 min | 617.6 min ⚠ | 90.0 min | 6 |
-| `dip` | daily | 51s | 16s | 68s | 15.0 min | 17 |
-| `combo` | daily | 56s | 12s | 90s | 15.0 min | 13 |
-| `validate` | daily | 5.0 min | 4.4 min | 5.0 min | 60.0 min | 2 |
-| `explore` | daily | 9s | 7s | 13s | 5.0 min | 19 |
-| `snapshots` | daily | 27s | 2s | 27s | 5.0 min | 23 |
-| `profiles` | daily | 20.9 min | 17.3 min | 21.6 min ⚠ | 15.0 min | 18 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 16 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 22 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 21 |
+| `universe` | daily | 6s | 7s | 18.2 min ⚠ | 2.0 min | 18 |
+| `bars` | daily | 46s | 39s | 54s | 10.0 min | 18 |
+| `macro` | daily | 1.5 min | 1.8 min | 2.7 min | 15.0 min | 18 |
+| `news` | daily | 4s | 5s | 9s | 10.0 min | 18 |
+| `senti_cache` | daily | 5s | 3s | 5s | 10.0 min | 18 |
+| `sentiment` | daily | 25s | 13s | 31s | 15.0 min | 19 |
+| `bounce` | daily | 39s | 39s | 62s | 15.0 min | 19 |
+| `zones` | daily | 82s | 1.6 min | 1.8 min | 30.0 min | 2 |
+| `shortvol` | daily | 4s | 3s | 4s | 10.0 min | 16 |
+| `hype` | daily | 2.3 min | 97.4 min | 950.5 min ⚠ | 120.0 min | 19 |
+| `provider` | daily | 51.3 min | 64.4 min | 75.5 min | 120.0 min | 12 |
+| `fundamental` | daily | 14.6 min | 89.2 min | 633.7 min ⚠ | 180.0 min | 18 |
+| `sec_facts` | quarterly | 4s | 4s | 31s | 60.0 min | 6 |
+| `sec_gap` | weekly | 2.6 min | 176.9 min | 212.9 min ⚠ | 20.0 min | 5 |
+| `events` | weekly | 7.8 min | 8.0 min | 13.1 min | 30.0 min | 6 |
+| `leaderboard` | weekly | 50.4 min | 28.2 min | 617.6 min ⚠ | 90.0 min | 7 |
+| `dip` | daily | 37s | 17s | 68s | 15.0 min | 18 |
+| `combo` | daily | 29s | 14s | 90s | 15.0 min | 14 |
+| `validate` | daily | 627.6 min | 5.0 min | 627.6 min ⚠ | 60.0 min | 3 |
+| `explore` | daily | 15s | 7s | 15s | 5.0 min | 20 |
+| `snapshots` | daily | 13s | 3s | 27s | 5.0 min | 24 |
+| `profiles` | daily | 34.5 min | 17.3 min | 34.5 min ⚠ | 15.0 min | 19 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 17 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 23 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 22 |
 
-**Daily total ≈ 282.2 min.** Weekly adds 216.3 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 279.1 min.** Weekly adds 213.1 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-28 10:03 — do not edit by hand._
+_Generated 2026-08-29 18:17 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 245.6 | 2016-07 → 2026-08 |
-| bars 1h | 4 | 0.5 | 2026-05 → 2026-08 |
+| bars 1d | 122 | 245.7 | 2016-07 → 2026-08 |
+| bars 1h | 4 | 0.6 | 2026-05 → 2026-08 |
 | bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
-| news | 121 | 168.8 | 2016-08 → 2026-08 |
+| news | 121 | 168.9 | 2016-08 → 2026-08 |
 | sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 271.5 | 2016-08 → 2026-08 |
+| scores | 121 | 273.0 | 2016-08 → 2026-08 |
 | fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
-| short volume | 73 | 54.9 | 2020-08 → 2026-08 |
-| flags | 20 | 1.8 | 2026-07-31 → 2026-08-27 |
-| rejects | 20 | 4.9 | 2026-07-31 → 2026-08-27 |
+| short volume | 73 | 55.0 | 2020-08 → 2026-08 |
+| flags | 21 | 1.8 | 2026-07-31 → 2026-08-28 |
+| rejects | 21 | 5.2 | 2026-07-31 → 2026-08-28 |
 | loose (macro, universe, jobs, study) | 29 | 3.7 | — |
 
-**`data/` total ≈ 1,101 MB.** `reports/` is a further 33 MB across 152 pages.
+**`data/` total ≈ 1,104 MB.** `reports/` is a further 36 MB across 159 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -2125,21 +2167,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-28 10:03 — do not edit by hand._
+_Generated 2026-08-29 18:17 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 346 | 2016-09-27 → 2026-08-27 |
-| `fundamental` | 61 | 204 | 2016-08-25 → 2026-08-27 |
-| `hype` | 20 | 321 | 2016-10-25 → 2026-08-27 |
-| `dip` | 10 | 248 | 2016-09-27 → 2026-08-27 |
-| `combo` | 15 | 203 | 2016-11-04 → 2026-08-27 |
+| `sentiment` | 26 | 347 | 2016-09-27 → 2026-08-28 |
+| `fundamental` | 61 | 205 | 2016-08-25 → 2026-08-28 |
+| `hype` | 20 | 322 | 2016-10-25 → 2026-08-28 |
+| `dip` | 10 | 249 | 2016-09-27 → 2026-08-28 |
+| `combo` | 15 | 204 | 2016-11-04 → 2026-08-28 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-28 10:03 — do not edit by hand._
+_Generated 2026-08-29 18:17 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
