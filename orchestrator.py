@@ -1073,9 +1073,24 @@ def _step_validate(asof: str) -> tuple[int, str]:
                      "detail": detail})
 
     # 1. score-store invariants, whole store
+    # PER-CHECK TIMING, because a step that reports only its total cannot say
+    # what it spent. MEASURED 2026-08-29: this step logged 37,658s -- 10.5 hours
+    # -- while every check inside it re-measured at 245s on the same data
+    # (audit 213s, ttm 7s, roll 24s), and the network checks were skipped by
+    # budget. 1.1h of that was modern standby; the other 9.4h is unexplained.
+    # Guessing was the wrong response, so the next run says where the time goes.
+    _laps: list[str] = []
+
+    def _lap(name: str, t: float) -> None:
+        _laps.append(f"{name} {t:.0f}s")
+        if t > 300:
+            log(f"    [validate] {name} took {t / 60:.1f} min")
+
     try:
         import audit_metrics
+        _t = time.time()
         issues, _summary = audit_metrics.audit()
+        _lap("audit", time.time() - _t)
         n_high = int((issues["severity"] == "HIGH").sum()) if len(issues) else 0
         problems += n_high
         parts.append(f"audit:{n_high}high/{len(issues)}")
@@ -1150,7 +1165,9 @@ def _step_validate(asof: str) -> tuple[int, str]:
             # fails an HD-style 644-day window, an incomplete window and a
             # skipped quarter. A violation here is unambiguously OUR bug, so it
             # COUNTS.
+            _t = time.time()
             w = TI.check(sample, asof=asof)
+            _lap("ttm", time.time() - _t)
             wbad = int((~w["ok"]).sum()) if len(w) else 0
             problems += wbad
             parts.append(f"ttm:{len(w) - wbad}/{len(w)}")
@@ -1160,7 +1177,9 @@ def _step_validate(asof: str) -> tuple[int, str]:
             note("ttm_windows", 0, 0, repr(exc)[:120])
 
         try:
+            _t = time.time()
             r = TI.check_rollforward(sample)
+            _lap("roll", time.time() - _t)
             rbad = int((~r["ok"]).sum()) if len(r) else 0
             problems += rbad
             parts.append(f"roll:{len(r) - rbad}/{len(r)}")
@@ -1226,6 +1245,28 @@ def _step_validate(asof: str) -> tuple[int, str]:
         log(f"    [validate] could not write _validate.csv: {repr(exc)[:80]}")
 
     head = "CLEAN" if problems == 0 else f"{problems} PROBLEM(S)"
+    # The `screen` group holds the bounce funnel and zone invariants, and until
+    # now it ran ONLY when someone typed `python validate.py` by hand -- so the
+    # checks written to stop fabricated statistics were protecting nothing on a
+    # normal night. It measures ~4s, which is why this is the one group pulled
+    # into the nightly step rather than all twelve.
+    try:
+        _t = time.time()
+        import validate as _V
+        _V._results.clear()
+        _V.check_screen(asof, False)
+        _sbad = [r for r in _V._results if r[2] == _V.FAIL]
+        problems += len(_sbad)
+        parts.append("screen:" + ("pass" if not _sbad else
+                                  f"{len(_sbad)}FAIL"))
+        for _g, _n, _st, _d in _V._results:
+            note(f"screen.{_n}"[:48], int(_st == _V.OK), int(_st == _V.FAIL), _d)
+        _lap("screen", time.time() - _t)
+    except Exception as exc:                                     # noqa: BLE001
+        parts.append(f"screen:ERR({type(exc).__name__})")
+        note("screen_group", 0, 0, repr(exc)[:120])
+
+    log(f"    [validate] timing: {', '.join(_laps)}")
     parts.append(f"[{time.time() - _t_started:.0f}s]")
     return problems, f"{head} -- " + "  ".join(parts)
 
