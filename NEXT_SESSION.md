@@ -44,6 +44,89 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-08-30 — THE COUPLING TEST, DONE PROPERLY, AND WHAT IT OVERTURNS
+
+The first coupling test reported "no edge" for good-fundamentals-at-a-good-level
+(-0.04pp, t=-0.19). **That test was badly specified and the pushback was right
+on two of three counts.** Rebuilt with four horizons, sector treatment and the
+hype/sentiment modules: `couple_panel.py` (131,837 obs, 4,286 tickers, 50
+sessions 2016-2026, 22 sectors, integrity OK) and `couple_study.py`.
+
+### THE CONTRADICTION THAT RUNS THROUGH EVERYTHING
+
+Fundamental IC rises with horizon, exactly as "fundamentals pay over time"
+predicts -- and the top-minus-bottom quintile spread goes MORE NEGATIVE at the
+same time:
+
+    roic   h=20  IC +0.032   spread  -0.54pp
+           h=250 IC +0.051   spread  -9.66pp
+
+**The rank correlation is positive while the top quintile underperforms the
+bottom.** The signal lives in the middle of the distribution, not at the top
+where you would buy. This is the same shape as the Quality strategy (IC t=+2.99,
+spread -1.54pp t=-3.37) and it is why every IC in this project now prints its
+quantile spread beside it. A "PASSES" alone would have sent someone to buy the
+highest-ROIC names, which is the losing end.
+
+### SECTOR: NOT THE HIDDEN VARIABLE
+
+Ranking WITHIN sector (so a quantum name competes only with quantum names)
+changes almost nothing -- roic h=20 goes +0.032 raw to +0.025 neutral, slightly
+weaker. Sector strength as its own factor does NOT predict (t=+0.77 to +1.22
+across horizons). But a stock's forward return correlates **+0.31 to +0.36**
+with its sector ETF's: sector is a large part of what happens to you, and its
+trailing momentum still does not tell you which sector to be in.
+
+### WHAT ACTUALLY SEPARATES A BOUNCE FROM A BREAK
+
+83,884 zone arrivals, top forward-return decile vs bottom (8,407 vs 8,410):
+
+    pct_hi           0.709 vs 0.662   t=+14.84   <- dominant
+    premium_score   47.77  vs 51.84   t= -7.21
+    touches          9.15  vs  8.74   t= +5.40
+    fund_score      49.74  vs 48.64   t= +5.24
+    bmed_atr         3.94  vs  4.23   t= -5.13
+    hype_score      50.24  vs 51.37   t= -4.90
+    interest_cover   7.54  vs  3.74   t= +4.11
+    f_score          4.61  vs  4.50   t= +3.82
+    roic            -0.090 vs -0.161  t= +3.69
+    brk              0.482 vs 0.499   t= -3.58
+
+**Fundamentals DO separate bouncers from breaks** -- fund_score, interest_cover,
+f_score and roic all positive and significant. That is a direct win for the
+thesis, and the first test missed it by asking only whether fundamentals predict
+returns cross-sectionally rather than whether they predict WHICH ZONE HOLDS.
+
+**Hype and sentiment run the OTHER WAY.** premium_score (t=-7.21),
+hype_score (t=-4.90) and attention_score (t=-3.44) are all HIGHER in the names
+that broke. At a support test, attention is a warning, not a tailwind. AMSC on
+2026-05-06 is the illustration: hype 80, and it fell -33.2%.
+
+**The dominant separator is `pct_hi` (t=+14.84)** -- proximity to the 250-day
+high. A zone holds when the stock is near its highs and fails when it is deeply
+beaten down. "Buy the biggest dip at support" is backwards.
+
+Two zone attributes invert earlier findings and the difference is the QUESTION,
+not a contradiction: `touches` predicts a smaller median rally (phase 1) but a
+HIGHER PROBABILITY of landing in the top decile here; `bmed_atr` -- a level with
+a big historical bounce -- is LESS likely to bounce now.
+
+### DISCIPLINE
+
+174 tests at |t| >= 2.0; **~9 expected to cross by chance**. Printed at the
+bottom of the study output. Single cells at t~2.0 are unproven; what counts is
+the same sign at several horizons.
+
+### FILES
+
+`couple_panel.py` (build, ~30 min, `--rebuild`), `couple_study.py` (analysis,
+~4 min), `data/_couple_panel.parquet` (14 MB),
+`data/_zone_cases_20260830.csv` (16,817 cases, 8,407 bounced / 8,410 broke,
+every fundamental, hype, sentiment and zone attribute attached).
+
+Verified after: pins 28/28, validate screen 3/3, zones selftest OK.
+
+
 ## State at 2026-08-29 — A ZONES PAGE, AND THE STUDY THAT CHANGED ITS DESIGN
 
 Reported with three charts (AAON, AMSC, DXYZ) sitting on obvious multi-year
@@ -2107,7 +2190,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-29 18:17 — do not edit by hand._
+_Generated 2026-08-30 05:11 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -2129,21 +2212,21 @@ _Generated 2026-08-29 18:17 — do not edit by hand._
 | `leaderboard` | weekly | 50.4 min | 28.2 min | 617.6 min ⚠ | 90.0 min | 7 |
 | `dip` | daily | 37s | 17s | 68s | 15.0 min | 18 |
 | `combo` | daily | 29s | 14s | 90s | 15.0 min | 14 |
-| `validate` | daily | 627.6 min | 5.0 min | 627.6 min ⚠ | 60.0 min | 3 |
+| `validate` | daily | 6.2 min | 5.6 min | 627.6 min ⚠ | 60.0 min | 4 |
 | `explore` | daily | 15s | 7s | 15s | 5.0 min | 20 |
-| `snapshots` | daily | 13s | 3s | 27s | 5.0 min | 24 |
+| `snapshots` | daily | 0s | 2s | 27s | 5.0 min | 25 |
 | `profiles` | daily | 34.5 min | 17.3 min | 34.5 min ⚠ | 15.0 min | 19 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 17 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 18 |
 | `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 23 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 22 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 23 |
 
-**Daily total ≈ 279.1 min.** Weekly adds 213.1 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 279.7 min.** Weekly adds 213.1 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-29 18:17 — do not edit by hand._
+_Generated 2026-08-30 05:11 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -2167,7 +2250,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-29 18:17 — do not edit by hand._
+_Generated 2026-08-30 05:11 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -2181,7 +2264,7 @@ _Generated 2026-08-29 18:17 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-29 18:17 — do not edit by hand._
+_Generated 2026-08-30 05:11 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
