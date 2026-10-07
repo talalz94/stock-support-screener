@@ -1475,18 +1475,36 @@ def _lock_info() -> dict | None:
         return {"pid": None, "started": None}
 
 
-def _pid_alive(pid: int | None) -> bool | None:
+def _pid_alive(pid: int | None, started: str | None = None) -> bool | None:
     """True/False, or None when we cannot tell.
 
     Deliberately NOT os.kill(pid, 0): on Windows that maps to TerminateProcess
     for any signal other than CTRL_C/CTRL_BREAK, so the "liveness probe" would
     kill the process it is asking about.
+
+    `started` is the lock's own start time, and it matters after a RESTART.
+    Windows reuses process IDs, so a run killed by a reboot leaves a lock naming
+    a PID that some unrelated program may now hold -- `pid_exists` says yes, the
+    lock looks held, and the next 05:00 run waits out its budget and gives up.
+    Restarts stopped being rare on 2026-10-07 (Windows Update restarted the
+    machine twice at 05:38 and 05:41, mid-run). A process that began AFTER the
+    lock was written cannot be the process that wrote it.
     """
     if not pid:
         return None
     try:
         import psutil
-        return psutil.pid_exists(int(pid))
+        if not psutil.pid_exists(int(pid)):
+            return False
+        if started:
+            try:
+                t_lock = datetime.fromisoformat(started).timestamp()
+                t_proc = psutil.Process(int(pid)).create_time()
+                if t_proc > t_lock + 60:          # created after the lock: reused id
+                    return False
+            except (ValueError, psutil.Error):
+                pass                              # cannot tell -> trust pid_exists
+        return True
     except ImportError:
         return None
     except Exception:                                            # noqa: BLE001
@@ -1525,7 +1543,7 @@ def acquire_lock(force: bool = False, wait_min: float = 0.0,
                          - datetime.fromisoformat(started)).total_seconds() / 3600
             except ValueError:
                 pass
-        alive = _pid_alive(info.get("pid"))
+        alive = _pid_alive(info.get("pid"), started)
         stale = (age_h is not None and age_h > config.ORCH_LOCK_STALE_HOURS)
         if alive is False:
             log(f"  breaking lock: pid {info.get('pid')} is gone")
@@ -1822,7 +1840,14 @@ def main() -> int:
         # when a wait was requested, so the plain daily task keeps exiting 0.
         return 75 if a.wait_for_lock else 0
     try:
-        return run(only=a.step, force=a.force)
+        # Held ONLY while this process owns the lock, so a run that skipped
+        # because another holds it never asks Windows to stay awake. The sleep
+        # timer on this laptop is not ours to set (5h on 2026-08-24, 1h on
+        # 2026-10-07, changed by something else), so the run protects itself.
+        import keepawake
+        with keepawake.Hold(log=log, label="orchestrator",
+                            path=config.DATA / "_sleep_gaps.csv"):
+            return run(only=a.step, force=a.force)
     finally:
         release_lock()
 

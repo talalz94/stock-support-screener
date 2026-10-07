@@ -44,6 +44,111 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-07 — THE PIPELINE'S REAL ENEMY IS THE LAPTOP, AND THE SLEEP TIMER IS NOT OURS
+
+Month review, 2026-09-04 .. 2026-10-06 (33 runs). **The data is complete**: 25
+sessions, zero missing modules, and both days that failed were filled in
+afterwards. Two failed steps in the month, each recovered:
+
+  09-04  provider guard dropped payout_ratio / dividend_yield on 2 large caps and
+         raised -> fundamental, dip, combo, validate, explore, snapshots BLOCKED
+  09-12  "finnhub returned nothing for AAPL" (0.0s) -> the same downstream block
+
+The 09-04 guard is still all-or-nothing (2 names out of ~3,500 cost a day of
+scoring) -- the same shape as the `sec_gap` bug. NOT FIXED; waiting on a decision.
+
+### THE MACHINE, MEASURED
+
+The AC sleep timer was 5h on 08-24 and **1h on 10-07**. Neither of us set it, and
+the user cannot hold it either (managed laptop). Since 09-04: **26 full sleeps,
+3 shutdowns, 4 unclean reboots.** Six runs took 7-12h of wall clock for ~2h of
+work (09-12 8.0h, 09-15 11.1h, 09-17 11.8h -- twelve minutes from the 12h kill --
+09-19 11.6h, 09-26 7.2h, 10-06 9.7h), and on 10-06 the `universe` step logged
+28,495s for a step that takes 6s. That is consistent with sleep. It was not
+proven per run, because nothing recorded the machine being asleep.
+
+The scheduled task has WakeToRun=False, so a run asleep at 05:00 simply starts
+when the machine next wakes (10-05 06:26, 10-06 06:38).
+
+**10-07: Windows restarted the machine twice, at 05:38 (SystemSettingsAdminFlows)
+and 05:41 (TrustedInstaller), mid-run.** Task Scheduler recorded 0x40010004,
+process terminated. Everything scored and all five main pages were already
+current; only profiles, retention, dashboard and docs were cut off. The last two
+were re-run by hand. The lock was left naming dead PID 27548.
+
+### THE DECISION: STOP ASKING FOR A SETTING, PROTECT THE JOB
+
+`powercfg /change standby-timeout-ac 0` was asked for repeatedly and cannot be
+made to hold. So `keepawake.py` now wraps the run in `orchestrator.main`, AFTER
+the lock is taken (a run that skipped never asks Windows to stay awake):
+
+  * a Windows power REQUEST -- system-required (no idle sleep) and
+    execution-required (no background throttling if Modern Standby happens
+    anyway; this machine does, events 506/507). It is the mechanism a video
+    player uses, and it is released when the run ends or the process dies. No
+    system setting is touched.
+  * a SLEEP-GAP DETECTOR: a 15s heartbeat. Two ticks more than 90s apart mean
+    the whole process was frozen. The gap is logged and appended to
+    **data/_sleep_gaps.csv** with a `request_held` column.
+
+That file is how to judge it. Absent or empty after a few nights means the
+request works. Rows with request_held=True mean Windows slept the machine despite
+it (a policy override), and the rows give the exact windows.
+
+VERIFIED: the gap arithmetic, including a 1h clock jump through the real
+heartbeat thread; acquire and release; and an end-to-end run through the real
+entry point (broke the stale lock, held system+execution, ran, released, 0 gaps).
+NOT VERIFIED: that Windows honours the request under this machine's policy --
+`powercfg /requests` needs administrator rights. The first nights of
+_sleep_gaps.csv are the proof.
+
+WHAT IT CANNOT STOP: a forced restart (Windows Update), a lid close with a sleep
+action, or the user choosing Sleep. Those rely on resumability, which exists --
+every step skips if it already ran for the session -- but NOTHING RE-TRIGGERS
+after a mid-run kill until the next 05:00. Proposed, and needing the user's yes
+because it edits the scheduled task: a repetition trigger every 2-3h. It is
+cheap, because a finished day exits in ~3s ("3 ran, 22 skipped").
+
+### THE LOCK AND REUSED PROCESS IDS
+
+`_pid_alive` asked only "does a process with this ID exist?". After a restart
+Windows reuses IDs, so a killed run's lock can name a PID that some unrelated
+program now holds: the lock looks held, and the next run waits out its budget and
+gives up. `_pid_alive` now also compares the process's creation time with the
+lock's start time -- a process created AFTER the lock was written cannot be the
+one that wrote it.
+
+Tested on six cases: a genuine holder True; the same PID with a lock 2h older
+False; a nonexistent PID False; the real stale lock False; no PID None; an
+old-format lock with no start time True (cannot compare, so trust pid_exists).
+And end to end on a temp lock: a reused-PID lock is broken and the run proceeds,
+while a genuinely held lock still blocks a second run.
+
+### AZO: 8 VALIDATION "PROBLEMS" ON TWO NIGHTS, AND THEY ARE A FALSE ALARM
+
+`validate` reported 8 problems on 10-02 (ttm 403/411) and 10-07 (390/398) after a
+month of clean runs. Reproduced from the date-seeded sample: **all 8 are
+AutoZone**, one per line item (revenue, cogs, gross_profit, net_income, opinc,
+pretax, sga, tax). Its four period ends are 2025-08-30, 2025-11-22, 2026-02-14
+and **2026-04-30**, so the last gap is 75 days against a `QUARTER_MIN` of 80.
+
+The data is right: Q1+Q2+Q3 = 4,628,630 + 4,274,098 + 4,840,950 = 13,743,678
+against the filed nine-month 13,743,677 (thousands). The checker is too strict
+for this filer. It only shows when AZO is drawn into the 60-name sample (plus the
+3 watchlist names), which is why it looks intermittent. The 10-02 sample could not
+be reproduced (the tradeable pool has changed), so that night being AZO is likely
+-- 8 is exactly its line-item count -- but not confirmed. NOT FIXED.
+
+### STILL OPEN
+
+  * the provider guard: make it proportionate (see above)
+  * the `profiles` step runs 1,100-2,700s against a 900s budget and has grown from
+    75 to 92 pages -- chronic, and sleep makes it worse
+  * the last backup is from 2026-08-30
+  * the screen the coupling study pointed at -- near the 1-year high, good
+    fundamentals, low hype -- is still unbuilt, and unmeasured as a combination
+
+
 ## State at 2026-08-30 — THE COUPLING TEST, DONE PROPERLY, AND WHAT IT OVERTURNS
 
 The first coupling test reported "no edge" for good-fundamentals-at-a-good-level
@@ -2190,59 +2295,59 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-08-30 05:11 — do not edit by hand._
+_Generated 2026-10-07 22:18 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 7s | 18.2 min ⚠ | 2.0 min | 18 |
-| `bars` | daily | 46s | 39s | 54s | 10.0 min | 18 |
-| `macro` | daily | 1.5 min | 1.8 min | 2.7 min | 15.0 min | 18 |
-| `news` | daily | 4s | 5s | 9s | 10.0 min | 18 |
-| `senti_cache` | daily | 5s | 3s | 5s | 10.0 min | 18 |
-| `sentiment` | daily | 25s | 13s | 31s | 15.0 min | 19 |
-| `bounce` | daily | 39s | 39s | 62s | 15.0 min | 19 |
-| `zones` | daily | 82s | 1.6 min | 1.8 min | 30.0 min | 2 |
-| `shortvol` | daily | 4s | 3s | 4s | 10.0 min | 16 |
-| `hype` | daily | 2.3 min | 97.4 min | 950.5 min ⚠ | 120.0 min | 19 |
-| `provider` | daily | 51.3 min | 64.4 min | 75.5 min | 120.0 min | 12 |
-| `fundamental` | daily | 14.6 min | 89.2 min | 633.7 min ⚠ | 180.0 min | 18 |
-| `sec_facts` | quarterly | 4s | 4s | 31s | 60.0 min | 6 |
-| `sec_gap` | weekly | 2.6 min | 176.9 min | 212.9 min ⚠ | 20.0 min | 5 |
-| `events` | weekly | 7.8 min | 8.0 min | 13.1 min | 30.0 min | 6 |
-| `leaderboard` | weekly | 50.4 min | 28.2 min | 617.6 min ⚠ | 90.0 min | 7 |
-| `dip` | daily | 37s | 17s | 68s | 15.0 min | 18 |
-| `combo` | daily | 29s | 14s | 90s | 15.0 min | 14 |
-| `validate` | daily | 6.2 min | 5.6 min | 627.6 min ⚠ | 60.0 min | 4 |
-| `explore` | daily | 15s | 7s | 15s | 5.0 min | 20 |
-| `snapshots` | daily | 0s | 2s | 27s | 5.0 min | 25 |
-| `profiles` | daily | 34.5 min | 17.3 min | 34.5 min ⚠ | 15.0 min | 19 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 18 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 23 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 23 |
+| `universe` | daily | 8s | 7s | 474.9 min ⚠ | 2.0 min | 44 |
+| `bars` | daily | 31s | 46s | 2.1 min | 10.0 min | 44 |
+| `macro` | daily | 1.6 min | 1.8 min | 1.8 min | 15.0 min | 44 |
+| `news` | daily | 6s | 5s | 8s | 10.0 min | 44 |
+| `senti_cache` | daily | 1s | 2s | 2s | 10.0 min | 44 |
+| `sentiment` | daily | 6s | 14s | 20s | 15.0 min | 45 |
+| `bounce` | daily | 27s | 39s | 89s | 15.0 min | 45 |
+| `zones` | daily | 54s | 86s | 6.9 min | 30.0 min | 28 |
+| `shortvol` | daily | 4s | 4s | 13s | 10.0 min | 42 |
+| `hype` | daily | 52s | 2.3 min | 2.5 min | 120.0 min | 45 |
+| `provider` | daily | 2.3 min | 65.5 min | 72.4 min | 120.0 min | 37 |
+| `fundamental` | daily | 1.8 min | 2.5 min | 2.8 min | 180.0 min | 43 |
+| `sec_facts` | quarterly | 8s | 4s | 8s | 60.0 min | 11 |
+| `sec_gap` | weekly | 4.0 min | 5.4 min | 7.8 min | 20.0 min | 10 |
+| `events` | weekly | 9.9 min | 10.6 min | 16.3 min | 30.0 min | 11 |
+| `leaderboard` | weekly | 36.4 min | 38.2 min | 90.2 min ⚠ | 90.0 min | 12 |
+| `dip` | daily | 6s | 15s | 25s | 15.0 min | 43 |
+| `combo` | daily | 5s | 12s | 30s | 15.0 min | 39 |
+| `validate` | daily | 5.8 min | 6.0 min | 7.0 min | 60.0 min | 29 |
+| `explore` | daily | 6s | 7s | 12s | 5.0 min | 45 |
+| `snapshots` | daily | 6s | 4s | 6s | 5.0 min | 61 |
+| `profiles` | daily | 26.6 min | 22.5 min | 42.9 min ⚠ | 15.0 min | 44 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 55 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 49 |
+| `docs` | daily | 0s | 0s | 1s | 5.0 min | 61 |
 
-**Daily total ≈ 279.7 min.** Weekly adds 213.1 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 104.5 min.** Weekly adds 54.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-08-30 05:11 — do not edit by hand._
+_Generated 2026-10-07 22:18 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 245.7 | 2016-07 → 2026-08 |
-| bars 1h | 4 | 0.6 | 2026-05 → 2026-08 |
-| bars ETF | 122 | 2.9 | 2016-07 → 2026-08 |
-| news | 121 | 168.9 | 2016-08 → 2026-08 |
-| sentiment cache | 121 | 11.7 | 2016-08 → 2026-08 |
-| scores | 121 | 273.0 | 2016-08 → 2026-08 |
+| bars 1d | 123 | 249.1 | 2016-08 → 2026-10 |
+| bars 1h | 5 | 0.7 | 2026-06 → 2026-10 |
+| bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
+| news | 123 | 170.7 | 2016-08 → 2026-10 |
+| sentiment cache | 123 | 11.8 | 2016-08 → 2026-10 |
+| scores | 123 | 306.6 | 2016-08 → 2026-10 |
 | fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
-| short volume | 73 | 55.0 | 2020-08 → 2026-08 |
-| flags | 21 | 1.8 | 2026-07-31 → 2026-08-28 |
-| rejects | 21 | 5.2 | 2026-07-31 → 2026-08-28 |
-| loose (macro, universe, jobs, study) | 29 | 3.7 | — |
+| short volume | 75 | 56.2 | 2020-08 → 2026-10 |
+| flags | 47 | 4.0 | 2026-07-31 → 2026-10-06 |
+| rejects | 21 | 7.6 | 2026-09-08 → 2026-10-06 |
+| loose (macro, universe, jobs, study) | 30 | 18.3 | — |
 
-**`data/` total ≈ 1,104 MB.** `reports/` is a further 36 MB across 159 pages.
+**`data/` total ≈ 1,163 MB.** `reports/` is a further 82 MB across 284 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -2250,21 +2355,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-08-30 05:11 — do not edit by hand._
+_Generated 2026-10-07 22:18 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 347 | 2016-09-27 → 2026-08-28 |
-| `fundamental` | 61 | 205 | 2016-08-25 → 2026-08-28 |
-| `hype` | 20 | 322 | 2016-10-25 → 2026-08-28 |
-| `dip` | 10 | 249 | 2016-09-27 → 2026-08-28 |
-| `combo` | 15 | 204 | 2016-11-04 → 2026-08-28 |
+| `sentiment` | 26 | 373 | 2016-09-27 → 2026-10-06 |
+| `fundamental` | 61 | 231 | 2016-08-25 → 2026-10-06 |
+| `hype` | 20 | 348 | 2016-10-25 → 2026-10-06 |
+| `dip` | 10 | 275 | 2016-09-27 → 2026-10-06 |
+| `combo` | 15 | 230 | 2016-11-04 → 2026-10-06 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-08-30 05:11 — do not edit by hand._
+_Generated 2026-10-07 22:18 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
