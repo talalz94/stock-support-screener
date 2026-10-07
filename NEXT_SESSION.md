@@ -2460,7 +2460,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-07 22:18 — do not edit by hand._
+_Generated 2026-10-08 00:31 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -2487,8 +2487,8 @@ _Generated 2026-10-07 22:18 — do not edit by hand._
 | `snapshots` | daily | 6s | 4s | 6s | 5.0 min | 61 |
 | `profiles` | daily | 26.6 min | 22.5 min | 42.9 min ⚠ | 15.0 min | 44 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 55 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 49 |
-| `docs` | daily | 0s | 0s | 1s | 5.0 min | 61 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 50 |
+| `docs` | daily | 0s | 0s | 1s | 5.0 min | 62 |
 
 **Daily total ≈ 104.5 min.** Weekly adds 54.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
@@ -2496,7 +2496,7 @@ _Generated 2026-10-07 22:18 — do not edit by hand._
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-07 22:18 — do not edit by hand._
+_Generated 2026-10-08 00:31 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -2510,9 +2510,11 @@ _Generated 2026-10-07 22:18 — do not edit by hand._
 | short volume | 75 | 56.2 | 2020-08 → 2026-10 |
 | flags | 47 | 4.0 | 2026-07-31 → 2026-10-06 |
 | rejects | 21 | 7.6 | 2026-09-08 → 2026-10-06 |
+| zones | 28 | 15.8 | 2026-08-27 → 2026-10-06 |
+| fundamentals (companyfacts) | 130 | 74.4 | 1980q3 → 2028q2 |
 | loose (macro, universe, jobs, study) | 30 | 18.3 | — |
 
-**`data/` total ≈ 1,163 MB.** `reports/` is a further 82 MB across 284 pages.
+**`data/` total ≈ 1,253 MB.** `reports/` is a further 82 MB across 284 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -2520,7 +2522,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-07 22:18 — do not edit by hand._
+_Generated 2026-10-08 00:31 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -2534,7 +2536,7 @@ _Generated 2026-10-07 22:18 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-07 22:18 — do not edit by hand._
+_Generated 2026-10-08 00:31 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

@@ -1,5 +1,8 @@
 # Project log
 
+> **Entries below end at 2026-08-08.** The dated record from 2026-08-13 onward is
+> `NEXT_SESSION.md` -- its "State at <date>" sections, newest first.
+
 ## 2026-08-08 (16:20) — a job that lied, and the foreign-filer fix that works
 
 ### My own refetch reported success after failing 51 times

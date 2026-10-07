@@ -200,36 +200,54 @@ independently of touch count: four touches in one week is one event, not four.
 
 ## Daily operation
 
-- **Runs itself** at 03:00, plus at logon if the laptop was closed. `pythonw.exe`,
-  so no console window.
-- **One shot** — no daemon, no polling loop, no resident process. Zero footprint
-  between runs.
-- **~70 seconds** measured end to end (`--no-confirm` drops it to ~45s):
-
-  | step | time |
-  |---|---|
-  | universe refresh | 8s |
-  | bars delta (already current) | 2s |
-  | screen 5,374 → 717 → 24 | 30s |
-  | hourly + market cap for 24 names | 23s |
-  | report + state + outcomes | 4s |
-
-  On a session with new bars to fetch, add ~45s for the delta and split recheck.
-- **Skipped days are handled.** Gap detection is calendar-driven, so a week off
-  fills in on the next run. Missed sessions are then reconciled from the
-  already-local bars purely so `days_on_list` stays honest — otherwise a setup you
-  were away for reads "NEW" when it has been holding for three sessions.
-- **Enable / disable:**
+- **The scheduled entry point is the `Screener-Orchestrator` task** (this section
+  used to describe an older 03:00 task; see the last bullet).
+  `pythonw.exe orchestrator.py --wait-for-lock 300`, so no console window. It
+  fires at **05:00 local** (Pakistan time; the US close lands around 01:00-02:00)
+  and **repeats every 2 hours until 17:00**. A pass with nothing left to do costs
+  about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
+  restart resumes within two hours instead of waiting a day. Below-normal
+  priority, one instance at a time, 12-hour limit.
+- **25 steps**, in this order: `universe, bars, macro, news, senti_cache,
+  sentiment, bounce, zones, shortvol, hype, provider, fundamental, sec_facts,
+  sec_gap, events, leaderboard, dip, combo, validate, explore, snapshots,
+  profiles, retention, dashboard, docs`. `bounce` and `zones` are deliberately
+  early: they need only `bars` and take about 30 and 60 seconds, and they used to
+  sit behind a three-hour step.
+- **A normal day takes about 2 hours** (1.9-2.4h over recent weeks); a pass with
+  nothing due takes 2-10 seconds. `python orchestrator.py --dry-run` prints what is
+  due and its estimated wall clock.
+- **Resumable by construction.** Each step compares its own watermark with the
+  last closed session and skips if it is done, so re-running is always safe and a
+  laptop closed for a week catches up. A step that fails is retried on the next
+  pass **at most twice a day** (`ORCH_MAX_ERRORS_PER_DAY`), and a step that hits
+  the cap *blocks* its dependents instead of letting them run on stale inputs.
+  `--step NAME` bypasses the cap.
+- **Built for a laptop that sleeps and restarts.** While a run is working it asks
+  Windows not to sleep (`keepawake.py`; the machine's sleep timer is not ours to
+  set) and records any sleep that happens anyway in `data/_sleep_gaps.csv` -- no
+  file means none was recorded. A run killed by a restart leaves a lock, which the
+  next pass breaks, including when Windows has reused the dead run's process ID.
+  **Not covered:** the task runs only while you are logged on, so a restart that
+  waits at the login screen resumes nothing until you sign in.
+- **Control:**
 
 ```bash
-python daily_run.py --pause      # task still fires, exits in <1s
-python daily_run.py --resume
-python daily_run.py --once       # run now, ignore the pause
+python orchestrator.py --status      # read the job table, run nothing
+python orchestrator.py --dry-run     # what is due, and the estimated wall clock
+python orchestrator.py --pause       # scheduled passes still fire, log PAUSED, exit 0
+python orchestrator.py --resume
+python orchestrator.py --once        # run now even if paused
+python orchestrator.py --step NAME   # one step, repeatable; bypasses the retry cap
 ```
 
-`status.py` prints `AUTO: enabled` or `AUTO: PAUSED` at the top so the state is
-never ambiguous. For a longer break:
-`setup_schedule.ps1 -Remove`.
+- **The old 03:00 task is a leftover.** `PatternScan-DailyRun` (registered by
+  `setup_schedule.ps1`) is still registered and still fires, but `daily_run.py`
+  launched alone now exits with "The orchestrator owns this run", so it does
+  nothing. `setup_schedule.ps1 -Remove` unregisters it. **That script does not
+  register the orchestrator task.** How the live task is configured, with a
+  rollback XML saved under `data/`, is recorded in `NEXT_SESSION.md`, which is
+  also the dated log from 2026-08-13 onward.
 
 ---
 
@@ -370,7 +388,14 @@ as bankruptcy text and asserts no metric moves.
 | `replay.py` | **`--leaktest`** and historical replay |
 | `status.py` | health report |
 | `daily_run.py` | the bounce pipeline; standalone, and the `bounce` step of the orchestrator |
-| **`orchestrator.py`** | **THE scheduled entry point** — 13-step registry, watermark catch-up, `data/_jobs.parquet` |
+| `zones.py` | every support level below a stock and what price did there before -- no parabolic run required. `--ticker SYM`, `--scan`, `--selftest` |
+| `zones_page.py` | the Zones page, `reports/zones/latest.html`: one filterable table |
+| `keepawake.py` | asks Windows not to sleep while a run works and records any sleep that happens anyway. `--selftest` |
+| `couple_panel.py` | one point-in-time panel (zones + fundamentals + hype + sentiment + sector) for the coupling studies |
+| `couple_study.py` | reads that panel: IC and top-minus-bottom spread at four horizons, raw and sector-neutral, with the test count printed |
+| `good_level.py` | the "good level" rule applied to the latest session -> `data/_good_level_<date>.csv`. A screen, **not a buy list** |
+| `rule_accuracy.py` | measures that rule: history, luck, and live days after the study |
+| **`orchestrator.py`** | **THE scheduled entry point** — 25-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |
 
 ---
