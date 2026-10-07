@@ -841,6 +841,16 @@ ORCH_MAX_CATCHUP_SESSIONS = MAX_CATCHUP_SESSIONS
 # mid-run, or a hard kill). Longer than the slowest single step by a wide margin.
 ORCH_LOCK_STALE_HOURS = 6
 
+# A step that fails stays due, because `is_due` only looks at the last SUCCESS.
+# With the 05:00 task repeating every 2 hours that means a persistent failure
+# would be retried up to six times a day, and a step that fails only after a long
+# run would grind a laptop all day. Two failed attempts per step per calendar day:
+# the first retry rescues a transient fault (2026-09-12: "finnhub returned nothing
+# for AAPL" at 0.0s, a network blip); two failures mean it is not transient.
+# `--force` / `--step` bypass it. A capped step is BLOCKED, never skipped, because
+# dependents treat "skipped" as satisfied and would run on stale inputs.
+ORCH_MAX_ERRORS_PER_DAY = 2
+
 # Per-step wall-clock ceiling. A hung step must not hold the whole run.
 ORCH_DEFAULT_TIMEOUT_S = 1800
 

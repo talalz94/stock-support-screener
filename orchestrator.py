@@ -173,6 +173,20 @@ def last_ok(step: str, jobs=None):
     return None if not len(m) else m.iloc[-1]
 
 
+def errors_today(step: str, jobs=None) -> int:
+    """How many times `step` has FAILED on today's calendar date.
+
+    Calendar date, not session: a persistent failure over a weekend, when `asof`
+    does not move, still earns a fresh pair of attempts each new day.
+    """
+    jobs = read_jobs() if jobs is None else jobs
+    if not len(jobs):
+        return 0
+    m = jobs[(jobs["step"] == step) & (jobs["status"] == STATUS_ERROR)]
+    today = date.today().isoformat()
+    return int(sum(str(s)[:10] == today for s in m["started"]))
+
+
 # ================================================================== cadences
 def _dow_boundary(today: date, dow: int) -> date:
     """Most recent date <= today whose weekday() == dow."""
@@ -1687,6 +1701,27 @@ def run(only: list[str] | None = None, force: bool = False) -> int:
                         else str(date.today()),
                         "started": run_id, "ended": run_id, "duration_s": 0.0,
                         "status": STATUS_SKIPPED, "rows": None, "detail": why,
+                        "error": None, "traceback": None})
+                continue
+
+            n_err = errors_today(step.name, jobs)
+            if n_err >= config.ORCH_MAX_ERRORS_PER_DAY:
+                # BLOCKED, not skipped: dependents accept "skipped" as satisfied
+                # and would score on inputs this step never refreshed. Counted
+                # as failed so the exit code stays non-zero -- the pipeline is
+                # not healthy, and an idle-looking 0 would hide that.
+                results[step.name] = STATUS_BLOCKED
+                failed += 1
+                msg = (f"failed {n_err}x today (cap "
+                       f"{config.ORCH_MAX_ERRORS_PER_DAY}); not retrying until "
+                       f"tomorrow")
+                log(f"  [{step.name}] BLOCKED -- {msg}")
+                record({"run_id": run_id, "step": step.name,
+                        "cadence": step.cadence,
+                        "watermark": asof if step.session_indexed
+                        else str(date.today()),
+                        "started": run_id, "ended": run_id, "duration_s": 0.0,
+                        "status": STATUS_BLOCKED, "rows": None, "detail": msg,
                         "error": None, "traceback": None})
                 continue
 
