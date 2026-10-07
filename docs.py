@@ -107,7 +107,9 @@ def store_table() -> str:
             ("fundamentals", config.FUNDAMENTALS, "*.parquet"),
             ("short volume", config.SHORTVOL, "*.parquet"),
             ("flags", config.FLAGS, "*.parquet"),
-            ("rejects", config.REJECTS, "*.parquet")):
+            ("rejects", config.REJECTS, "*.parquet"),
+            ("zones", config.ZONES, "*.parquet"),
+            ("fundamentals (companyfacts)", config.FUNDAMENTALS_CF, "*.parquet")):
         files = sorted(path.glob(pat)) if path.exists() else []
         mb = sum(f.stat().st_size for f in files) / 1e6
         total += mb

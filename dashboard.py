@@ -81,6 +81,8 @@ STORES = [
     ("fundamentals", config.FUNDAMENTALS, "*.parquet"),
     ("flags", config.FLAGS, "*.parquet"),
     ("rejects", config.REJECTS, "*.parquet"),
+    ("zones", config.ZONES, "*.parquet"),
+    ("fundamentals (companyfacts)", config.FUNDAMENTALS_CF, "*.parquet"),
 ]
 
 STATUS_HELP = {

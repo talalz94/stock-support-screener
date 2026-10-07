@@ -61,8 +61,8 @@ backtest just quietly improves.
 
 ### orchestrator owns the schedule
 
-Twelve registry steps in fixed execution order, replacing three independent
-schedules. Each writes a row to `data/_jobs.parquet`
+Twenty-five registry steps in fixed execution order (`python orchestrator.py
+--dry-run` prints it), replacing three independent schedules. Each writes a row to `data/_jobs.parquet`
 (`run_id | step | cadence | watermark | started | ended | duration_s | status |
 rows | detail | error | traceback`), which is the only thing the master
 dashboard reads — the dashboard never triggers work.
@@ -73,10 +73,35 @@ failed — not the same thing as failing), `skipped` (cadence says not due), and
 a wall clock**, so a laptop closed for a week catches up on resume and one
 closed for a quarter falls back to `ORCH_MAX_CATCHUP_SESSIONS`.
 
-Cadences: `universe, bars, macro, news, senti_cache, sentiment, bounce,
-retention, dashboard` daily; `fundamental, events, leaderboard` weekly;
-`sec_facts` quarterly, and its dueness is derived from which quarters are
-missing on disk rather than from a calendar.
+Cadences: 21 daily (`universe, bars, macro, news, senti_cache, sentiment,
+bounce, zones, shortvol, hype, provider, fundamental, dip, combo, validate,
+explore, snapshots, profiles, retention, dashboard, docs`); `sec_gap, events,
+leaderboard` weekly; `sec_facts` quarterly, and its dueness is derived from
+which quarters are missing on disk rather than from a calendar.
+
+### protections for a laptop that sleeps and restarts (2026-08-28 .. 2026-10-07)
+
+Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
+
+- **`bounce` is seventh and `zones` eighth.** `bounce` needs only `bars` and takes
+  ~30 seconds, but sat behind a three-hour step, so it was the stalest page on
+  the site and two days were never built at all.
+- **No backfill may START more than 5 hours into a run** (`BACKFILL_RUN_CUTOFF_S`).
+  One fundamental backfill ran 5.5 hours, the run hit the task's 12-hour limit, and
+  because the task is `MultipleInstances=IgnoreNew` the next day's trigger was
+  dropped silently -- no process, no log line, `NumberOfMissedRuns` still 0.
+- **`keepawake.py` wraps the run**, after the lock is taken: a Windows power
+  request (system + execution required, released when the process dies) plus a
+  15-second heartbeat that records any frozen window to `data/_sleep_gaps.csv`.
+  It cannot stop a forced restart or a lid close.
+- **The lock checks process start time**, not just that the PID exists, because
+  Windows reuses PIDs after a restart.
+- **A step that failed twice today is BLOCKED, not skipped**
+  (`ORCH_MAX_ERRORS_PER_DAY`), because dependents accept `skipped` as satisfied.
+- **The 05:00 trigger repeats every 2h for 12h**, so a killed run resumes.
+- **`_pid_alive`, the cap and the repeat exist because the machine's power settings
+  are not ours to control.** Asking for `powercfg ... standby-timeout-ac 0` was
+  tried and does not hold: it read 5 hours on 08-24 and 1 hour on 10-07.
 
 ### the report pages, and who writes which
 
@@ -429,6 +454,38 @@ every per-size number as directional only.
 Note this does *not* involve the pre-2012 XBRL phase-in (19 filers in 2009q2
 rising to 6,747 by 2012q1) — the study samples 2016-08 onward, so that cliff
 affects only the deep financial-history tables on profile pages.
+
+## Module 6: zones (added 2026-08-29)
+
+Not a score module: nothing goes in the scores store. `zones.py` finds, for every
+tradeable name, every horizontal support level within 16% below price and records
+what price did at each one before -- using `levels.py` unchanged, but **without
+requiring the parabolic run** the bounce screen needs. AAON and ACM were being
+rejected at `RUN_TOO_SMALL` while sitting on multi-year shelves.
+
+Per level: `band` (AT <= 2.5%, NEAR <= 6%, APPROACHING <= 16%), `touches`,
+`bounce_n` (distinct rally EPISODES, not touches: touches 8+ bars apart have
+overlapping windows and used to count one rally twice), `bounce_med_atr`
+(volatility-adjusted), `dd_median`, `dd_break_rate`, `pct_hi`. A name with no level
+carries `no_support`; a name whose prices cannot be trusted (an unadjusted split,
+or a fall of more than 95% from the 250-day high) carries `suspect_split` and no
+level. Page: `reports/zones/latest.html`, nav "Zones". Step: `zones`, 8th, ~55-110s,
+stored per session in `data/zones/` (90 days kept). `validate`'s `screen` group
+asserts the invariants every night.
+
+**What the columns are worth is measured and printed on the page itself.** More
+touches predicts a SMALLER bounce but a SMALLER drawdown; raw bounce size is mostly
+volatility; being AT a level is worth about +0.46pp; no support below a stock that
+is already beaten down is the strongest effect found (-5.3pp, t = -5.8) and is best
+read as an AVOID flag. Numbers, tests and the multiple-comparisons count are in
+`NEXT_SESSION.md`.
+
+**What it is not: a buy list.** `good_level.py` applies a rule built from the
+measured separators (near the 1-year high, sound fundamentals, low hype, at a
+level) and `rule_accuracy.py` measures it: hit rate 54-55% against 50-52% for any
+stock, **no demonstrated excess return** (+0.14pp at 20 bars, t = +0.3), fewer big
+losers and fewer big winners. Every historical number is flattered by survivorship
+(only 0.9% of history belongs to names that later vanished).
 
 ## Viewing and exploring
 
