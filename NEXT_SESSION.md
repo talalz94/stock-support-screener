@@ -44,6 +44,91 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-08 — THE "GOOD LEVEL" RULE, MEASURED: FEWER DISASTERS, NO EXTRA RETURN
+
+Asked: show every stock at a good level to buy, and how accurate that is.
+`good_level.py` builds the list; `rule_accuracy.py` measures it (~3 min, idle
+machine). Neither is wired into the pipeline.
+
+### THE RULE (round numbers fixed before scoring; no tuning)
+
+  nearest support within 6% above price (AT or NEAR)
+  within 20% of the 1-year high        pct_hi     >= 0.80   (strongest separator, t=+14.8)
+  sound fundamentals                   fund_score >= 55     (t=+5.2)
+  little attention                     hype_score <= 45     (hype ran the wrong way, t=-4.9)
+
+A name missing any input is EXCLUDED, never filled in. On the 2026-10-06 close:
+
+    3,222 trusted-price names -> 2,766 with a level -> 2,239 AT/NEAR
+          -> 1,068 near the high -> 370 with fund_score >= 55 -> **96**
+
+54 AT a level, 42 NEAR. NONE are flagged by the bounce screen (a different
+pattern). 29 Financials, 12 Utilities, 12 Industrials -- the rule selects quiet,
+high-quality, near-high names, so it leans defensive. Median market cap $5.4B,
+median $31M/day; 30 are under $2B and 27 trade under $10M/day. List:
+`data/_good_level_20261006.csv`. FMX shows a $665B market cap, which is wrong (an
+ADR share-count error); foreign filers (FMX, ASND, NVS, DLO) are scored on fewer
+metrics and deserve extra suspicion.
+
+### ACCURACY, THREE WAYS
+
+**A. History** -- 49 dates, 2018-04-27..2026-07-08, 5,084 picks (3.9% of eligible):
+
+    horizon  dates  pick up  pool up  excess vs pool   t      luck p
+    20 bars    49    55.2%    52.3%     +0.14pp      +0.30    0.26
+    40 bars    49    54.2%    50.8%     +0.21pp      +0.35    0.27
+    120 bars   16    54.5%    51.7%     -1.62pp      -0.80    0.91
+    250 bars    8    54.1%    50.1%     -5.46pp      -0.89    0.96
+
+40 bars, first half -0.13pp (t=-0.16), second half +0.56pp (t=+0.70): no
+consistent edge. The one measurable difference is the TAILS: lost more than 20%
+in 40 bars 3.9% of picks vs 9.9% of the pool, gained more than 20% 6.6% vs 11.7%.
+Fewer disasters AND fewer jackpots.
+
+**B. Luck** -- random same-size draws from each date's own pool did as well as the
+rule 26-27% of the time at 20/40 bars (an edge needs p < 0.05). At 120/250 bars
+the picks did WORSE than 91-96% of random draws, on only 16 and 8 independent
+dates, so not significant either way.
+
+**C. Live, on days after the study was finished (2026-08-30)**, scored with the
+rule exactly as it stands. Start days 08-31..09-22, windows overlap heavily so
+this is closer to one observation than sixteen:
+
+    10 bars (16 starts): pick -2.7%  pool -2.3%  excess -0.42pp (+/-0.4)  up 25% vs 30%
+    20 bars  (6 starts): pick -5.0%  pool -4.6%  excess -0.39pp (+/-0.6)  up 20% vs 26%
+
+The window was a real small-cap selloff, not a data fault: IWM -4.7%, pool mean
+-4.7% (median -5.2%), SPY -0.2%, QQQ +2.8%. 0 of 112 picks fell more than 40%
+against 14 pool names.
+
+**VERDICT: no demonstrated return edge. It is a lower-variance basket.**
+
+### CORRECTIONS TO EARLIER STATEMENTS
+
+1. **The "63% bounced vs 45%" figure (658 vs 565 cases) must not be quoted as the
+   rule's accuracy.** It described the profile among the top and bottom OUTCOME
+   deciles -- over-represented among extreme winners relative to extreme losers --
+   and says nothing about the 80% of names in between. The rule's actual hit rate
+   is 54-55% against 51-52% for any stock.
+2. **The coupling panel is 49 usable dates, 2018-04-27..2026-07-08, not "50
+   sessions 2016-2026".** The first dates lack the 400 bars of price history the
+   eligibility test requires.
+3. **SURVIVORSHIP -- every historical number in this project is flattered.** Only
+   **0.9%** of panel rows belong to names that later disappeared, flat at 0.8-1.0%
+   in every year. Real markets lose several percent of listed companies a year, so
+   delisted names are badly under-represented (the universe knows only 128
+   removed/dead names). It biases returns UP, which makes "no edge" a generous
+   reading. The earlier survivorship guard recomputed eligibility from bars and
+   could not fix this: the bars of delisted names are largely not in the store.
+
+### DATA ACCURACY, SAME DATE
+
+Regression pins 28/28 (hand-checked against SEC filings). Validate 10-07: audit 0
+high, TTM windows 390/398 (the 8 are AZO, a false alarm), roll-forward 263/263,
+screen invariants pass, provider agreement 77% (553/719) -- a definitional spread
+between vendors, not an error rate.
+
+
 ## State at 2026-10-07 (later) — THE 05:00 TASK NOW RESUMES ITSELF, AND A RETRY CAP KEEPS THAT SAFE
 
 Done at the user's request, after `keepawake.py` (above) could not stop a forced
@@ -234,7 +319,8 @@ The first coupling test reported "no edge" for good-fundamentals-at-a-good-level
 (-0.04pp, t=-0.19). **That test was badly specified and the pushback was right
 on two of three counts.** Rebuilt with four horizons, sector treatment and the
 hype/sentiment modules: `couple_panel.py` (131,837 obs, 4,286 tickers, 50
-sessions 2016-2026, 22 sectors, integrity OK) and `couple_study.py`.
+49 usable sessions 2018-04-27..2026-07-08 [corrected 2026-10-08; this line
+said "2016-2026"], 22 sectors, integrity OK) and `couple_study.py`.
 
 ### THE CONTRADICTION THAT RUNS THROUGH EVERYTHING
 
