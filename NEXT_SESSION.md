@@ -44,6 +44,85 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-07 (later) — THE 05:00 TASK NOW RESUMES ITSELF, AND A RETRY CAP KEEPS THAT SAFE
+
+Done at the user's request, after `keepawake.py` (above) could not stop a forced
+restart: the task now repeats, so an interrupted run resumes within two hours
+instead of waiting a full day.
+
+### WHAT CHANGED IN WINDOWS
+
+Task `Screener-Orchestrator`, daily 05:00 trigger: **repeat every 2h for 12h**
+(05:00, 07:00 ... 15:00). Verified in the definition Windows holds, not just the
+absence of an error. `StopAtDurationEnd` is false -- a run still working when the
+window closes is never killed.
+
+UNCHANGED, and checked afterwards: priority 7 (below normal, so the user's own
+programs win), MultipleInstances=IgnoreNew (a repeat that fires while a run is
+working is ignored), 12h execution limit, StartWhenAvailable, WakeToRun=False,
+action `pythonw.exe orchestrator.py --wait-for-lock 300` (no console window). The
+second trigger is a stale ONE-OFF from 2026-08-13 23:30; left alone, harmless.
+
+Why 05:00-17:00: the machine is on Pakistan time (UTC+5), so the US close lands
+around 01:00-02:00 local. `asof` therefore cannot change inside the window, and no
+repeat can start a new session's pipeline mid-afternoon.
+
+BACKUP of the previous definition: `data/_task_backup_Screener-Orchestrator_20261007.xml`
+(gitignored: it names the user). ROLLBACK:
+`Register-ScheduledTask -TaskName 'Screener-Orchestrator' -Force -Xml (Get-Content <that file> -Raw)`.
+
+NOTE: this task is NOT reproducible from the repo. `setup_schedule.ps1` registers
+the older `PatternScan-DailyRun`, not this one. This section and the XML backup
+are the only record of how the live task is configured.
+
+### THE COST, MEASURED
+
+An idle pass (everything already done for the session) was timed three times as
+`orchestrator.py --dry-run`, which does the same imports and due-checks:
+
+    wall 3.1-3.2s   CPU 2.9-3.0s   peak RAM 106 MB   (one core, briefly)
+
+Real idle days in the log took 2-10s start to finish. Five extra passes a day is
+therefore ~15s of one core. The job table is 37 KB / 1,876 rows and gains ~25 rows
+a pass; it is read and rewritten on every record, so that stays negligible for
+years. The NIGHTLY RUN is not new cost: ~2h at about one core, below-normal
+priority. NOT measured: the run's peak memory (free RAM read 3-5 GB of 15.8 when
+sampled mid-run).
+
+Two honest costs: while a run is WORKING the machine will not sleep (~2h a night),
+which costs battery if unplugged; and a step killed mid-way restarts from its
+beginning, so an interruption loses that one step's partial progress.
+
+### THE TRAP THE REPEAT WOULD HAVE SPRUNG, AND THE CAP
+
+`is_due` looks only at the last SUCCESS, so a step that fails stays due on EVERY
+pass. With six passes a day a persistent failure would be retried six times, and
+a step that fails only after a long run would grind a laptop all day. There was
+no cap anywhere.
+
+`config.ORCH_MAX_ERRORS_PER_DAY = 2`. The first retry rescues a transient fault
+(09-12: "finnhub returned nothing for AAPL" at 0.0s was a network blip); two
+failures mean it is not transient. Counted by calendar date, so a weekend failure
+gets fresh attempts each day. `--force` / `--step` bypass it.
+
+THE DETAIL THAT MATTERS: a capped step is marked BLOCKED, not skipped. Dependents
+treat "skipped" as satisfied (`STATUS_SKIPPED` is in the accepted set), so a
+skipped provider would have let `fundamental` run on provider data that was never
+refreshed -- the exact thing the block exists to prevent. It also counts as
+failed, so the exit code stays non-zero rather than looking healthy.
+
+Proved with fake steps on a temp job table: a step that always fails got exactly
+two automatic attempts then `BLOCKED -- failed 2x today (cap 2)`; its dependent
+NEVER ran on its stale output; an independent step was undisturbed; the pass still
+exited 1; a manual `--step` run bypassed the cap; and five failures dated
+yesterday counted as zero today.
+
+### LIMITS
+
+Logon type is Interactive, so the task only runs while the user is logged on. A
+Windows Update restart that waits at the login screen resumes nothing until login.
+
+
 ## State at 2026-10-07 — THE PIPELINE'S REAL ENEMY IS THE LAPTOP, AND THE SLEEP TIMER IS NOT OURS
 
 Month review, 2026-09-04 .. 2026-10-06 (33 runs). **The data is complete**: 25
