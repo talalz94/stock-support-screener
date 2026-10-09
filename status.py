@@ -63,6 +63,9 @@ def audit_pages(verbose: bool = True) -> list[tuple[str, str]]:
         # <script> holds legitimate `null`/`NaN` in JSON payloads and JS source;
         # only what a reader SEES is a bug, so strip scripts before checking.
         vis = re.sub(r"<script\b.*?</script>", "", t, flags=re.S | re.I)
+        # The explore page's "no strategy" button is literally titled None (explore.py);
+        # it is a label, not a value that failed to format.
+        vis = vis.replace('<b>None</b><span>ticker order</span>', "")
         for token in ("nan", "None", "undefined", "NaT"):
             n = len(re.findall(rf">\s*{token}\s*<", vis))
             if n:

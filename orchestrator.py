@@ -710,6 +710,26 @@ def _step_combo(asof: str) -> tuple[int, str]:
     return n, f"{n:,} name(s) scored across three horizons"
 
 
+def _step_candidates(asof: str) -> tuple[int, str]:
+    """The good-level candidates page (zones/candidates.html).
+
+    A VIEWER for the rule in `good_level.py`, not a score. It needs this
+    session's zones AND this session's fundamental and hype scores, which is why
+    it cannot live in the `zones` step: that one runs seventh-ish, before
+    fundamentals are scored, and a page built there would have shown last
+    night's scores against tonight's levels. `payload()` refuses to build when
+    the scores are not there, and cross-checks price against the distance the
+    zones file recorded, so a wrong-day price fails loudly instead of drawing a
+    level on the wrong chart.
+    """
+    import candidates_page
+    try:
+        p, n = candidates_page.build(asof)
+    except candidates_page.NoCandidates as exc:
+        return 0, f"{exc}; page left as it was"
+    return n, f"{n} name(s) drawn on {p.name}"
+
+
 def _step_explore(asof: str) -> tuple[int, str]:
     import explore
     p = explore.build(verbose=False)
@@ -1429,6 +1449,12 @@ REGISTRY: tuple[Step, ...] = (
     Step("combo", _with_backfill("combo", _step_combo), config.CADENCE_DAILY,
          depends_on=("fundamental", "sentiment", "hype", "dip"), timeout=900,
          desc="the three combined scores (DECAYING out of sample -- see docs)"),
+    # Reads zones + the fundamental and hype scores of the same session; it does
+    # not need combo, so a failed combo must not blank this page.
+    Step("candidates", _step_candidates, config.CADENCE_DAILY,
+         depends_on=("zones", "fundamental", "hype", "sentiment"), timeout=300,
+         desc="the good-level candidates page: price + support level charts "
+              "(a viewer for an unmeasured-edge screen, not a score)"),
     # SESSION-INDEXED, because it RENDERS A SESSION.
     #
     # It was date-indexed, and on 2026-08-14 that meant: the night run built

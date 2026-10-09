@@ -113,11 +113,19 @@ def build_payload(asof: str, rows: pd.DataFrame, top: int = 150) -> dict:
         except (TypeError, ValueError):
             return None
 
+    def lab(v, default=""):
+        # `str(v or default)` is NOT enough: float('nan') is truthy, so a ticker with no
+        # sector (LEN.B) rendered the word "nan" in the sector column and in data-sector.
+        if v is None or (isinstance(v, float) and not np.isfinite(v)):
+            return default
+        s = str(v)
+        return default if s.lower() in ("nan", "nat", "none", "") else s
+
     cards = []
     for _, r in scored.head(top).iterrows():
         cards.append({
             "ticker": r["ticker"],
-            "sector": str(r.get("sector_label") or "?"),
+            "sector": lab(r.get("sector_label"), "?"),
             "score": g(r, "fund_score", 1),
             "quality": g(r, "quality_score", 0), "value": g(r, "value_score", 0),
             "safety": g(r, "safety_score", 0), "growth": g(r, "growth_score", 0),
@@ -126,7 +134,7 @@ def build_payload(asof: str, rows: pd.DataFrame, top: int = 150) -> dict:
             "ev_ebitda": g(r, "ev_ebitda", 1), "fcfy": g(r, "fcf_yield", 3),
             "accr": g(r, "accruals", 3), "rev_g": g(r, "rev_growth", 3),
             "mktcap": g(r, "mktcap", 0), "stale": g(r, "days_since_filing", 0),
-            "filed": str(r.get("last_filed_label") or ""),
+            "filed": lab(r.get("last_filed_label")),
         })
 
     sect = []

@@ -38,8 +38,12 @@ def current(asof):
                         columns=["session", "module", "metric", "ticker", "value"])
     s = s[s.session == asof]
     want = {("fundamental", m): m for m in ("fund_score", "roic", "f_score", "interest_cover",
-                                            "pe", "fcf_yield", "rev_growth", "mktcap")}
+                                            "pe", "fcf_yield", "rev_growth", "mktcap",
+                                            "reports_usd")}
     want.update({("hype", m): m for m in ("hype_score", "premium_score", "attention_score")})
+    # Sentiment is shown, never used by the rule: it measured no reliable signal, and
+    # 49 of 93 candidates on 2026-10-07 had no recent news at all (blank, not zero).
+    want.update({("sentiment", m): m for m in ("sent_rank", "news_count_30d")})
     s = s[[(a, b) in want for a, b in zip(s.module, s.metric)]]
     w = s.pivot_table(index="ticker", columns="metric", values="value", aggfunc="first").reset_index()
 
