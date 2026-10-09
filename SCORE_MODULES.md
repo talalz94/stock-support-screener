@@ -61,7 +61,7 @@ backtest just quietly improves.
 
 ### orchestrator owns the schedule
 
-Twenty-five registry steps in fixed execution order (`python orchestrator.py
+Twenty-six registry steps in fixed execution order (`python orchestrator.py
 --dry-run` prints it), replacing three independent schedules. Each writes a row to `data/_jobs.parquet`
 (`run_id | step | cadence | watermark | started | ended | duration_s | status |
 rows | detail | error | traceback`), which is the only thing the master
@@ -73,9 +73,9 @@ failed — not the same thing as failing), `skipped` (cadence says not due), and
 a wall clock**, so a laptop closed for a week catches up on resume and one
 closed for a quarter falls back to `ORCH_MAX_CATCHUP_SESSIONS`.
 
-Cadences: 21 daily (`universe, bars, macro, news, senti_cache, sentiment,
-bounce, zones, shortvol, hype, provider, fundamental, dip, combo, validate,
-explore, snapshots, profiles, retention, dashboard, docs`); `sec_gap, events,
+Cadences: 22 daily (`universe, bars, macro, news, senti_cache, sentiment,
+bounce, zones, shortvol, hype, provider, fundamental, dip, combo, candidates,
+validate, explore, snapshots, profiles, retention, dashboard, docs`); `sec_gap, events,
 leaderboard` weekly; `sec_facts` quarterly, and its dueness is derived from
 which quarters are missing on disk rather than from a calendar.
 
@@ -479,6 +479,15 @@ volatility; being AT a level is worth about +0.46pp; no support below a stock th
 is already beaten down is the strongest effect found (-5.3pp, t = -5.8) and is best
 read as an AVOID flag. Numbers, tests and the multiple-comparisons count are in
 `NEXT_SESSION.md`.
+
+**Seeing it.** `reports/zones/candidates.html` (nav "Candidates", step `candidates`, built
+after `combo` because it needs the same session's fundamental and hype scores) draws
+each name on the good-level list: a price chart with the support level as a dashed
+line and the "at the level" band shaded, fundamentals, hype and sentiment beside it,
+a sector dropdown, and a larger chart on click. Rows are ordered by distance to the
+level, never by a score. The Zones page has the same sector dropdown.
+Sector comes from the SEC SIC map and 37% of mapped names are "Other", so a sector
+filter is coarse.
 
 **What it is not: a buy list.** `good_level.py` applies a rule built from the
 measured separators (near the 1-year high, sound fundamentals, low hype, at a

@@ -37,7 +37,7 @@ _ESC = str.maketrans({"<": _BS + "u003c", ">": _BS + "u003e",
                       chr(0x2029): _BS + "u2029"})
 
 COLS = [
-    ("ticker", "ticker", "s"), ("band", "band", "s"),
+    ("ticker", "ticker", "s"), ("sector", "sector", "s"), ("band", "band", "s"),
     ("dist_pct", "dist", "p"), ("level", "level", "f2"),
     ("touches", "touches", "i"), ("bounce_n", "bounces", "i"),
     ("bounce_median", "rally med", "p"), ("bounce_med_atr", "rally/ATR", "f2"),
@@ -48,9 +48,28 @@ COLS = [
     ("pct_hi", "% of 250d high", "p"),
     ("span_days", "span d", "i"), ("last_touch", "last touch", "s"),
 ]
+# The script below addresses row fields by NAME through this map. It used to use
+# literal positions (r[1], r[4], r[7]...), and putting a column in the middle then
+# meant hand-editing every one of them -- a silent wrong-column bug waiting to happen.
+IX = {c: i for i, (c, _l, _k) in enumerate(COLS)}
 
 
-def _rows(df: pd.DataFrame) -> list[list]:
+def _sector_map() -> dict[str, str]:
+    """ticker -> sector from the SEC SIC map. A failure must not cost the page
+    that is already the stalest on the site, so it degrades to "Other" and says so."""
+    try:
+        import macro
+        m = macro.load_sector_map()[["ticker", "sector"]].drop_duplicates("ticker")
+        return {str(t): (str(s) if isinstance(s, str) and s else "Other")
+                for t, s in zip(m["ticker"], m["sector"])}
+    except Exception as exc:                                  # noqa: BLE001
+        print(f"  zones page: sector map unavailable ({exc!r}); every sector shown as Other",
+              file=sys.stderr)
+        return {}
+
+
+def _rows(df: pd.DataFrame, sectors: dict[str, str] | None = None) -> list[list]:
+    sectors = sectors or {}
     def num(v):
         try:
             f = float(v)
@@ -83,7 +102,7 @@ def _rows(df: pd.DataFrame) -> list[list]:
         else:
             band = txt(d.get("band"))
         out.append([
-            txt(d.get("ticker")), band,
+            txt(d.get("ticker")), sectors.get(txt(d.get("ticker")), "Other"), band,
             num(d.get("dist_pct")), num(d.get("level")),
             num(d.get("touches")), num(d.get("bounce_n")),
             num(d.get("bounce_median")), num(d.get("bounce_med_atr")),
@@ -93,9 +112,10 @@ def _rows(df: pd.DataFrame) -> list[list]:
         ])
     # Nearest first, then the strongest-holding level. NOT by bounce size:
     # that ordering is ~5x explained by volatility (see zones.EVIDENCE).
-    out.sort(key=lambda x: (x[1] == "NO SUPPORT",
-                            x[2] if x[2] is not None else 9,
+    out.sort(key=lambda x: (x[IX["band"]] == "NO SUPPORT",
+                            x[IX["dist_pct"]] if x[IX["dist_pct"]] is not None else 9,
                             x[0]))
+    assert all(len(r) == len(COLS) for r in out), "row width disagrees with COLS"
     return out
 
 
@@ -110,8 +130,14 @@ def build(df: pd.DataFrame | None = None, asof: str | None = None) -> "object":
     if "no_support" not in df.columns:
         df = df.assign(no_support=False)
 
-    rows = _rows(df)
+    rows = _rows(df, _sector_map())
     n_tick = df["ticker"].nunique()
+    sec_n: dict[str, int] = {}
+    for r in rows:
+        sec_n[r[IX["sector"]]] = sec_n.get(r[IX["sector"]], 0) + 1
+    sec_opts = "".join(
+        f'<option value="{ui.esc(s)}">{ui.esc(s)} ({n:,})</option>'
+        for s, n in sorted(sec_n.items(), key=lambda kv: (kv[0] == "Other", -kv[1], kv[0])))
     if "suspect_split" not in df.columns:
         df = df.assign(suspect_split=False)
     n_none = int(df["no_support"].fillna(False).astype(bool).sum())
@@ -125,6 +151,7 @@ def build(df: pd.DataFrame | None = None, asof: str | None = None) -> "object":
         f'<th data-c="{i}" class="s{" n" if k != "s" else ""}">{lbl}</th>'
         for i, (_c, lbl, k) in enumerate(COLS))
     kinds = json.dumps([k for _c, _l, k in COLS])
+    ix_json = json.dumps(IX)
 
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -180,7 +207,9 @@ body{{margin:0;background:var(--bg);color:var(--ink);
 <div class="znhead"><h1>Support zones</h1>
 <div class="znsub">session <b>{ui.esc(asof)}</b> &middot; {n_tick:,} stocks &middot;
 {len(rows):,} levels &middot; every horizontal level within
-{Z.BAND_APPROACHING:.0%} below price, and what price did there before.</div></div>
+{Z.BAND_APPROACHING:.0%} below price, and what price did there before.
+To see the levels drawn on a chart, for the names that pass the good-level rule, open
+<a href="candidates.html">Candidates</a>.</div></div>
 
 <div class="znev">
 <div><b>What these columns are worth, measured.</b> 325,061 historical episodes and
@@ -198,6 +227,9 @@ excluded rather than counted as having no support.</div>
 
 <div class="znbar">
   <input id="znq" type="search" placeholder="filter tickers..." autocomplete="off">
+  <span class="znlab">sector</span>
+  <select class="znsel" id="zns" title="counts are levels; one stock can have several">
+    <option value="">all sectors ({len(rows):,})</option>{sec_opts}</select>
   <button class="znchip on" data-b="all">all<span class="n">{len(rows):,}</span></button>
   <button class="znchip" data-b="AT">AT<span class="n">{n_at:,}</span></button>
   <button class="znchip" data-b="NEAR">NEAR<span class="n">{n_near:,}</span></button>
@@ -229,20 +261,23 @@ excluded rather than counted as having no support.</div>
 <script>
 (function(){{
 const D={blob}, K={kinds};
-const CAP=400; let cap=CAP, bf='all', q='', mt=0, mr=0, md=101, mh=101;
-let sc=2, sd=1;                      // default: nearest level first
+const IX={ix_json};
+const CAP=400; let cap=CAP, bf='all', q='', sf='', mt=0, mr=0, md=101, mh=101;
+let sc=IX.dist_pct, sd=1;            // default: nearest level first
 const $=s=>document.getElementById(s);
 const pc=v=>v==null?'&ndash;':(v*100).toFixed(1)+'%';
 const f2=v=>v==null?'&ndash;':v.toFixed(2);
 const iv=v=>v==null?'&ndash;':String(Math.round(v));
-function cell(v,k){{return k==='p'?pc(v):k==='f2'?f2(v):k==='i'?iv(v):(v||'&ndash;');}}
+const eh=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+function cell(v,k){{return k==='p'?pc(v):k==='f2'?f2(v):k==='i'?iv(v):(v?eh(v):'&ndash;');}}
 function match(r){{
-  if(bf!=='all'&&r[1]!==bf) return false;
+  if(bf!=='all'&&r[IX.band]!==bf) return false;
+  if(sf!==''&&r[IX.sector]!==sf) return false;
   if(q&&r[0].toLowerCase().indexOf(q)<0) return false;
-  if(mt>0&&!(r[4]>=mt)) return false;
-  if(mr>0&&!(r[7]>=mr)) return false;
-  if(md<=100&&!(r[9]!=null&&r[9]*100<=md)) return false;
-  if(mh<=100&&!(r[10]!=null&&r[10]*100<=mh)) return false;
+  if(mt>0&&!(r[IX.touches]>=mt)) return false;
+  if(mr>0&&!(r[IX.bounce_med_atr]>=mr)) return false;
+  if(md<=100&&!(r[IX.dd_break_rate]!=null&&r[IX.dd_break_rate]*100<=md)) return false;
+  if(mh<=100&&!(r[IX.pct_hi]!=null&&r[IX.pct_hi]*100<=mh)) return false;
   return true;
 }}
 function tie(a,b){{return a[0]<b[0]?-1:1;}}
@@ -257,9 +292,12 @@ function render(){{
   }});
   const show=s.slice(0,cap);
   $('znbody').innerHTML=show.map(function(r){{
-    var b=r[1], cls=b==='NO SUPPORT'?'zb-NO':'zb-'+b.replace(/ /g,'');
-    var td='<tr><td><b>'+r[0]+'</b></td><td><span class="zb '+cls+'">'+(b||'&ndash;')+'</span></td>';
-    for(var i=2;i<K.length;i++) td+='<td class="'+(K[i]==='s'?'':'n')+'">'+cell(r[i],K[i])+'</td>';
+    var b=r[IX.band], cls=b==='NO SUPPORT'?'zb-NO':'zb-'+b.replace(/ /g,'');
+    var td='<tr><td><b>'+eh(r[0])+'</b></td>';
+    for(var i=1;i<K.length;i++){{
+      if(i===IX.band) td+='<td><span class="zb '+cls+'">'+(b?eh(b):'&ndash;')+'</span></td>';
+      else td+='<td class="'+(K[i]==='s'?'':'n')+'">'+cell(r[i],K[i])+'</td>';
+    }}
     return td+'</tr>';
   }}).join('');
   $('zncount').innerHTML=show.length<m.length
@@ -269,13 +307,14 @@ function render(){{
 }}
 $('znq').addEventListener('input',function(e){{q=e.target.value.trim().toLowerCase();cap=CAP;render();}});
 $('znmore').addEventListener('click',function(){{cap=D.length;render();}});
+$('zns').addEventListener('change',function(e){{sf=e.target.value;cap=CAP;render();}});
 $('znt').addEventListener('change',function(e){{mt=+e.target.value;cap=CAP;render();}});
 $('znr').addEventListener('change',function(e){{mr=+e.target.value;cap=CAP;render();}});
 $('znd').addEventListener('change',function(e){{md=+e.target.value;cap=CAP;render();}});
 $('znh').addEventListener('change',function(e){{mh=+e.target.value;cap=CAP;render();}});
 $('znclear').addEventListener('click',function(){{
-  bf='all';q='';mt=0;mr=0;md=101;mh=101;cap=CAP;
-  $('znq').value='';$('znt').value='0';$('znr').value='0';$('znd').value='101';
+  bf='all';q='';sf='';mt=0;mr=0;md=101;mh=101;cap=CAP;
+  $('znq').value='';$('zns').value='';$('znt').value='0';$('znr').value='0';$('znd').value='101';
   $('znh').value='101';
   document.querySelectorAll('.znchip[data-b]').forEach(function(o){{o.classList.toggle('on',o.dataset.b==='all');}});
   render();}});

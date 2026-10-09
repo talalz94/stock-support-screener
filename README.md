@@ -98,14 +98,22 @@ python daily_run.py
 ```
 
 Then open **`reports\index.html`** — the status hub. Bookmark that one: it shows
-whether each job step ran, what it produced, and what broke, and it links the
-three analysis dashboards. It reads the job table and file sizes only, so
-opening it never costs anything and never triggers work.
+whether each job step ran, what it produced, and what broke, and it links every
+page below. It reads the job table and file sizes only, so opening it never
+costs anything and never triggers work. Every page has the same top nav; each
+report type has a folder with `latest.html` in it (dated copies beside it).
 
 - **`reports\index.html`** — status hub (job steps, stores, run history)
-- `reports\latest.html` — newest bounce report; `bounce_index.html` for all sessions
-- `reports\sentiment_latest.html` — sentiment dashboard
-- `reports\fundamental_latest.html` — fundamental dashboard
+- `reports\explore\latest.html` — every stock x every metric, sortable and filterable
+- `reports\bounce\latest.html` — the support-bounce screen and every stock it analysed
+- `reports\zones\latest.html` — **Zones**: every support level below every stock, with a
+  sector dropdown, band chips and touch / rally / drawdown filters
+- `reports\zones\candidates.html` — **Candidates**: the "good level" list drawn as charts.
+  Each row has a small price chart with its support level as a dashed line (the shaded
+  strip above it is the "at the level" zone), the fundamental, hype and sentiment
+  numbers beside it, and a sector dropdown. Click a row for a larger chart. **A screen
+  with no measured edge, not a buy list**; the page says so at the top
+- `reports\sentiment\latest.html`, `reports\fundamental\latest.html` — the two dashboards
 - `reports\stock\<TICKER>.html` — per-stock sheet: score radar, annual
   financials with sparklines and YoY shading, sector and TradingView link
 
@@ -208,10 +216,10 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **25 steps**, in this order: `universe, bars, macro, news, senti_cache,
+- **26 steps**, in this order: `universe, bars, macro, news, senti_cache,
   sentiment, bounce, zones, shortvol, hype, provider, fundamental, sec_facts,
-  sec_gap, events, leaderboard, dip, combo, validate, explore, snapshots,
-  profiles, retention, dashboard, docs`. `bounce` and `zones` are deliberately
+  sec_gap, events, leaderboard, dip, combo, candidates, validate, explore,
+  snapshots, profiles, retention, dashboard, docs`. `bounce` and `zones` are deliberately
   early: they need only `bars` and take about 30 and 60 seconds, and they used to
   sit behind a three-hour step.
 - **A normal day takes about 2 hours** (1.9-2.4h over recent weeks); a pass with
@@ -389,13 +397,14 @@ as bankruptcy text and asserts no metric moves.
 | `status.py` | health report |
 | `daily_run.py` | the bounce pipeline; standalone, and the `bounce` step of the orchestrator |
 | `zones.py` | every support level below a stock and what price did there before -- no parabolic run required. `--ticker SYM`, `--scan`, `--selftest` |
-| `zones_page.py` | the Zones page, `reports/zones/latest.html`: one filterable table |
+| `zones_page.py` | the Zones page, `reports/zones/latest.html`: one filterable table, with a sector dropdown |
+| `candidates_page.py` | the Candidates page, `reports/zones/candidates.html`: the good-level list with a price chart per stock, the support level as a dashed line, fundamentals/hype/sentiment beside it, sector filter, click a row for a larger chart. Built nightly by the `candidates` step. `--selftest`, `--asof D` |
 | `keepawake.py` | asks Windows not to sleep while a run works and records any sleep that happens anyway. `--selftest` |
 | `couple_panel.py` | one point-in-time panel (zones + fundamentals + hype + sentiment + sector) for the coupling studies |
 | `couple_study.py` | reads that panel: IC and top-minus-bottom spread at four horizons, raw and sector-neutral, with the test count printed |
 | `good_level.py` | the "good level" rule applied to the latest session -> `data/_good_level_<date>.csv`. A screen, **not a buy list** |
 | `rule_accuracy.py` | measures that rule: history, luck, and live days after the study |
-| **`orchestrator.py`** | **THE scheduled entry point** — 25-step registry, watermark catch-up, `data/_jobs.parquet` |
+| **`orchestrator.py`** | **THE scheduled entry point** — 26-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |
 
 ---

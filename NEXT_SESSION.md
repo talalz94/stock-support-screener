@@ -44,6 +44,96 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-09 — THE GOOD-LEVEL LIST CAN NOW BE SEEN, AND FILTERED BY SECTOR
+
+Asked: "how can I visually see the line of level where these stocks are and the
+strong fundamental/sentiment you are talking about, and how can I filter by sector?"
+
+### WHAT WAS BUILT
+
+**`candidates_page.py` -> `reports/zones/candidates.html`, nav "Candidates".** One row
+per name on the good-level list (the rule in `good_level.py`, unchanged). Each row has
+a 150x40 price chart (180 sessions) with the support level as a DASHED line and the
+"at the level" strip (level to level x 1.025) shaded; beside it price, % above level,
+band, touches, share of past tests after which the stock later fell >10%, % of 1-year
+high, fundamental composite, interest cover, Piotroski, ROIC, P/E, hype, news
+sentiment percentile, news count, market cap and $/day. Click a row for an 820x240
+chart with price labels and the same facts as a sentence, plus a link to the profile
+page. Filters: sector dropdown (with counts), AT / NEAR chips, "liquid only (>= $10M/day)",
+ticker search, clear. Rows are ordered by distance to the level, never by a score.
+The top of the page says the list has no measured edge (+0.14pp at 20 bars, t=+0.3).
+
+**Sector filter on the Zones page too** (`zones_page.py`): a sector column and
+dropdown. Counts there are LEVELS, not stocks. The page script now addresses row
+fields through an `IX` name map instead of literal positions (r[1], r[4]...), because
+inserting the sector column would otherwise have meant hand-editing ten indexes.
+`candidates_page` still uses literal positions, so its `--selftest` asserts they match
+the column list.
+
+**New step `candidates`** (26 steps now), after `combo`, depends on
+`zones, fundamental, hype, sentiment` (not on combo: a failed combo must not blank it).
+It cannot live in the `zones` step, which runs before fundamentals are scored. If the
+session has no stored fund_score/hype_score it REFUSES to build; if the rule selects
+nobody it logs that and leaves the old page (`NoCandidates`), rather than counting an
+error. ~6s.
+
+2026-10-08 list: **85 names** (47 AT a level, 38 NEAR), recomputed independently from
+the raw zones and scores stores -- same 85. Against 10-07's 93: 78 kept, 7 entered,
+15 left.
+
+### BUGS FOUND WHILE BUILDING IT
+
+1. **Price from the wrong day.** `good_level.current(asof)` takes `last_close` and
+   `dollar_vol_20` from the panel-stats cache, which holds the LATEST bar. Asked for
+   10-07 on 10-09 it returned the 10-08 close, and a stock that had since dipped below
+   its level looked as if the level sat above it. The page now takes price and 20-day
+   dollar volume from the bars as of `asof`, and refuses to publish unless
+   `price/level - 1` equals the distance the zones file recorded (a check that cannot
+   hold with a price from another day). `good_level.current()` itself is unchanged: it
+   is right for the newest session, which is all its `__main__` uses. Running
+   `good_level.py` while the newest session is not yet scored writes an empty CSV.
+2. **`nan` in the Fundamental page's sector column** (LEN.B, a name with no sector),
+   since at least 07-24: `str(v or "?")` -- NaN is truthy, so it printed "nan" in the
+   cell and in `data-sector`. Fixed in `fund_screen.py` with a `lab()` helper (the same
+   bug as the zones page's `txt()`; this pattern keeps recurring). The 19
+   archived copies were repaired by exact-string replacement of the one bad fragment.
+   `status.audit_pages()` now reports **0 problems over 293 pages**. It had also been
+   flagging the Explore page's "None" strategy button every night: that is a label
+   (the no-strategy option), now exempted by exact match.
+3. **AT badge contrast 4.48:1** on a hovered row (needs 4.5): text mixed 20% toward the
+   ink colour. Both themes checked after: text >= 5.2:1, level line 5.1:1 light / 6.2:1
+   dark. No page-level horizontal scroll at 375px on Candidates or Zones.
+
+### CORRECTIONS
+
+- The 10-08 section below said foreign filers "(FMX, ASND, NVS, DLO)" are scored on
+  fewer metrics. **Only FMX and ASND report in a non-USD currency**; NVS, DLO and TIGO
+  report USD and are scored normally. Across the universe 160 of 3,368 names are
+  non-USD reporters (`reports_usd` = 0). The Candidates page marks them with a dagger.
+- The 18-name list `data/_shortlist_20261007.csv`, made for the plain-language "best
+  stocks right now" answer, was a hand cut of the 93 whose criteria were not recorded.
+  The reproducible version is the page's "liquid only" chip (66 of 93 on 10-07). It is
+  no better evidenced than the full list.
+
+### LIMITS THAT MATTER FOR THE SECTOR FILTER
+
+Sector is the SEC SIC map (`macro.load_sector_map`): 21 labels, and **"Other" is the
+largest, 3,888 of 10,398 mapped names (37%)**. 13 of the 93 on 10-07 were "Other", so a
+sector filter is coarse. The list leans Financials and Utilities because the rule picks
+quiet, near-high names, not because the filter does anything.
+
+### OPEN
+
+- The page is a viewer for a list with no demonstrated return edge. A "near high +
+  fundamentals + low hype" combination beyond this rule is still unbuilt and unmeasured.
+- Still open from before: provider guard is all-or-nothing on two names; AZO checker
+  too strict (QUARTER_MIN=80 vs a 75-day gap); `profiles` chronically over its 900s
+  budget (last measured ~1,215s); backup last taken 2026-08-30; survivorship in all
+  history (0.9% of rows from names that later vanished).
+- Candidates for a later session: a "since last night" marker (entered / left), and a
+  sector-relative fundamental rank in place of the raw composite.
+
+
 ## State at 2026-10-08 — THE "GOOD LEVEL" RULE, MEASURED: FEWER DISASTERS, NO EXTRA RETURN
 
 Asked: show every stock at a good level to buy, and how accurate that is.
@@ -67,8 +157,9 @@ pattern). 29 Financials, 12 Utilities, 12 Industrials -- the rule selects quiet,
 high-quality, near-high names, so it leans defensive. Median market cap $5.4B,
 median $31M/day; 30 are under $2B and 27 trade under $10M/day. List:
 `data/_good_level_20261006.csv`. FMX shows a $665B market cap, which is wrong (an
-ADR share-count error); foreign filers (FMX, ASND, NVS, DLO) are scored on fewer
-metrics and deserve extra suspicion.
+ADR share-count error); FMX and ASND (non-USD reporters) are scored on fewer
+metrics and deserve extra suspicion. (NVS and DLO were listed here too, wrongly:
+they report USD. Corrected 2026-10-09.)
 
 ### ACCURACY, THREE WAYS
 
@@ -2460,61 +2551,62 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-08 00:31 — do not edit by hand._
+_Generated 2026-10-09 06:52 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 8s | 7s | 474.9 min ⚠ | 2.0 min | 44 |
-| `bars` | daily | 31s | 46s | 2.1 min | 10.0 min | 44 |
-| `macro` | daily | 1.6 min | 1.8 min | 1.8 min | 15.0 min | 44 |
-| `news` | daily | 6s | 5s | 8s | 10.0 min | 44 |
-| `senti_cache` | daily | 1s | 2s | 2s | 10.0 min | 44 |
-| `sentiment` | daily | 6s | 14s | 20s | 15.0 min | 45 |
-| `bounce` | daily | 27s | 39s | 89s | 15.0 min | 45 |
-| `zones` | daily | 54s | 86s | 6.9 min | 30.0 min | 28 |
-| `shortvol` | daily | 4s | 4s | 13s | 10.0 min | 42 |
-| `hype` | daily | 52s | 2.3 min | 2.5 min | 120.0 min | 45 |
-| `provider` | daily | 2.3 min | 65.5 min | 72.4 min | 120.0 min | 37 |
-| `fundamental` | daily | 1.8 min | 2.5 min | 2.8 min | 180.0 min | 43 |
+| `universe` | daily | 7s | 7s | 474.9 min ⚠ | 2.0 min | 46 |
+| `bars` | daily | 56s | 47s | 2.1 min | 10.0 min | 46 |
+| `macro` | daily | 82s | 1.7 min | 1.8 min | 15.0 min | 46 |
+| `news` | daily | 5s | 5s | 8s | 10.0 min | 46 |
+| `senti_cache` | daily | 1s | 2s | 2s | 10.0 min | 46 |
+| `sentiment` | daily | 12s | 14s | 20s | 15.0 min | 47 |
+| `bounce` | daily | 37s | 39s | 77s | 15.0 min | 47 |
+| `zones` | daily | 79s | 86s | 2.2 min | 30.0 min | 30 |
+| `shortvol` | daily | 5s | 4s | 6s | 10.0 min | 44 |
+| `hype` | daily | 79s | 2.1 min | 2.3 min | 120.0 min | 47 |
+| `provider` | daily | 64.6 min | 65.1 min | 72.4 min | 120.0 min | 39 |
+| `fundamental` | daily | 2.3 min | 2.4 min | 2.8 min | 180.0 min | 45 |
 | `sec_facts` | quarterly | 8s | 4s | 8s | 60.0 min | 11 |
 | `sec_gap` | weekly | 4.0 min | 5.4 min | 7.8 min | 20.0 min | 10 |
 | `events` | weekly | 9.9 min | 10.6 min | 16.3 min | 30.0 min | 11 |
 | `leaderboard` | weekly | 36.4 min | 38.2 min | 90.2 min ⚠ | 90.0 min | 12 |
-| `dip` | daily | 6s | 15s | 25s | 15.0 min | 43 |
-| `combo` | daily | 5s | 12s | 30s | 15.0 min | 39 |
-| `validate` | daily | 5.8 min | 6.0 min | 7.0 min | 60.0 min | 29 |
-| `explore` | daily | 6s | 7s | 12s | 5.0 min | 45 |
-| `snapshots` | daily | 6s | 4s | 6s | 5.0 min | 61 |
-| `profiles` | daily | 26.6 min | 22.5 min | 42.9 min ⚠ | 15.0 min | 44 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 55 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 50 |
-| `docs` | daily | 0s | 0s | 1s | 5.0 min | 62 |
+| `dip` | daily | 12s | 14s | 12s | 15.0 min | 45 |
+| `combo` | daily | 10s | 12s | 10s | 15.0 min | 41 |
+| `candidates` | daily | 2s | 2s | 2s | 5.0 min | 1 |
+| `validate` | daily | 7.1 min | 6.0 min | 7.1 min | 60.0 min | 31 |
+| `explore` | daily | 8s | 7s | 8s | 5.0 min | 47 |
+| `snapshots` | daily | 7s | 4s | 7s | 5.0 min | 63 |
+| `profiles` | daily | 31.6 min | 22.5 min | 31.6 min ⚠ | 15.0 min | 46 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 57 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 53 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 64 |
 
-**Daily total ≈ 104.5 min.** Weekly adds 54.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 103.9 min.** Weekly adds 54.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-08 00:31 — do not edit by hand._
+_Generated 2026-10-09 06:52 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 123 | 249.1 | 2016-08 → 2026-10 |
+| bars 1d | 123 | 249.4 | 2016-08 → 2026-10 |
 | bars 1h | 5 | 0.7 | 2026-06 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
-| news | 123 | 170.7 | 2016-08 → 2026-10 |
+| news | 123 | 170.8 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 11.8 | 2016-08 → 2026-10 |
-| scores | 123 | 306.6 | 2016-08 → 2026-10 |
+| scores | 123 | 308.8 | 2016-08 → 2026-10 |
 | fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
-| short volume | 75 | 56.2 | 2020-08 → 2026-10 |
-| flags | 47 | 4.0 | 2026-07-31 → 2026-10-06 |
-| rejects | 21 | 7.6 | 2026-09-08 → 2026-10-06 |
-| zones | 28 | 15.8 | 2026-08-27 → 2026-10-06 |
+| short volume | 75 | 56.3 | 2020-08 → 2026-10 |
+| flags | 49 | 4.2 | 2026-07-31 → 2026-10-08 |
+| rejects | 22 | 8.0 | 2026-09-09 → 2026-10-08 |
+| zones | 30 | 17.0 | 2026-08-27 → 2026-10-08 |
 | fundamentals (companyfacts) | 130 | 74.4 | 1980q3 → 2028q2 |
 | loose (macro, universe, jobs, study) | 30 | 18.3 | — |
 
-**`data/` total ≈ 1,253 MB.** `reports/` is a further 82 MB across 284 pages.
+**`data/` total ≈ 1,258 MB.** `reports/` is a further 85 MB across 293 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -2522,21 +2614,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-08 00:31 — do not edit by hand._
+_Generated 2026-10-09 06:52 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 373 | 2016-09-27 → 2026-10-06 |
-| `fundamental` | 61 | 231 | 2016-08-25 → 2026-10-06 |
-| `hype` | 20 | 348 | 2016-10-25 → 2026-10-06 |
-| `dip` | 10 | 275 | 2016-09-27 → 2026-10-06 |
-| `combo` | 15 | 230 | 2016-11-04 → 2026-10-06 |
+| `sentiment` | 26 | 375 | 2016-09-27 → 2026-10-08 |
+| `fundamental` | 61 | 233 | 2016-08-25 → 2026-10-08 |
+| `hype` | 20 | 350 | 2016-10-25 → 2026-10-08 |
+| `dip` | 10 | 277 | 2016-09-27 → 2026-10-08 |
+| `combo` | 15 | 232 | 2016-11-04 → 2026-10-08 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-08 00:31 — do not edit by hand._
+_Generated 2026-10-09 06:52 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
