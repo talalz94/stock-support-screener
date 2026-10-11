@@ -258,12 +258,15 @@ def check_rollforward(tickers: list[str] | None = None) -> pd.DataFrame:
         # Production was right -- 69,213,000 + 32,580,000 - 36,339,000 uses the
         # qtrs=2 YTD legs the filer actually published.
         #
-        # A YTD stub of n quarters ends about 3n months after the fiscal year
+        # A YTD stub of n quarters ends about n quarters after the fiscal year
         # end; anything else is a bare quarter wearing a cumulative's label.
+        # PRODUCTION'S OWN TEST, imported rather than copied: this checker
+        # carried its own "within 20 days" until 2026-10-12, and a copy is
+        # how a checker and production drift apart (see FD.is_ytd_stub).
         if not stub.empty:
             _d = (pd.to_datetime(stub["ddate"], errors="coerce")
                   - pd.Timestamp(ar["ddate"])).dt.days
-            stub = stub[(_d - stub["qtrs"].astype(int) * 91.31).abs() <= 20]
+            stub = stub[FD.is_ytd_stub(_d, stub["qtrs"].astype(int))]
         if stub.empty:
             continue
         c = stub.iloc[-1]
@@ -271,7 +274,7 @@ def check_rollforward(tickers: list[str] | None = None) -> pd.DataFrame:
         if prior.empty:
             continue
         gap = (pd.Timestamp(c["ddate"]) - pd.Timestamp(prior.iloc[-1]["ddate"])).days
-        if not (350 <= gap <= 380):
+        if not FD.is_one_year(gap):         # production's test, not a copy
             continue
         expect = float(ar["value"]) + float(c["value"]) - float(prior.iloc[-1]["value"])
         err = abs(expect - published) / max(1.0, abs(expect))

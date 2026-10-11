@@ -44,6 +44,75 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-12 — TWO TTM BUGS FIXED: 52/53-WEEK ROLLS, AND STUBS POSING AS YEARS
+
+Both were found while verifying the EDGAR ingest (section below) and fixed the same
+night. Read-path changes only, in `fundamentals.py`; no ingest changed, nothing
+scored here. The next scoring run (05:00 Tue, session 10-12) is the first to use them.
+
+### 1. THE ROLL-FORWARD REJECTED 52/53-WEEK CALENDARS
+
+`_ttm`'s roll (FY + YTD_now - YTD_prior) had two fixed tolerances: the YTD stub must
+end "within 20 days of qtrs x 91.31" after the fiscal year end, and last year's stub
+"350-380 days" earlier. Both fail on real calendars:
+
+- PEP (12/12/12/16 weeks): Q3 YTD is 36 weeks = 252 days vs 274 -- 22 off.
+  eps_diluted_ttm stayed at the Q1 roll, **6.37**, while revenue had moved to Q3.
+- KR (16/12/12/12): Q1 is 112 days vs 91 -- 21 off. And H1 ended 2026-08-15 vs
+  2025-08-16, which month-end rounding turns into 07-31 vs 08-31: a 334-day gap.
+
+Now `is_ytd_stub` / `is_one_year`: "rounds to the same number of quarters" -- the
+rule `qtrs` itself is assigned by. Half a quarter still separates the cases the
+guards exist for (HZO's and NVR's bare fiscal Q3/Q2 labelled qtrs=1 round to 3 and
+2). `ttm_invariants.py` now imports these instead of carrying its own copy.
+
+### 2. A SUB-QUARTER STUB COULD STAND IN FOR A YEAR
+
+The bulk sets (and edgar.py, which matches them) store a duration under half a
+quarter as qtrs=0. `facts_asof` put every qtrs=0 row in the instant frame, so a flow
+concept got a LEVEL column, and `fund_metrics.derive` falls back to the level when
+no `_ttm` exists: BRR's 28-day inception income 24,618,000 as its net income, BSX's
+two one-day $2.0B accelerated buybacks as its buybacks, a single $131.5M SUI
+dividend as a year's. Now only STOCK_CONCEPTS enter the instant frame, the rule
+`history()` already used. The stub still counts toward `last_ddate`.
+
+### MEASURED, as of 2026-10-09, whole universe (3,369 names with facts), same store
+
+- **Rolls:** 100 TTM windows in 10 tickers moved LATER (median 209 days fresher,
+  max 242), 0 earlier, 0 changed in place: AAP, ACI, AZO, DPZ, FLO, GEF, GEF.B, KR,
+  LFCR, PEP. PEP eps_diluted_ttm 6.37 -> **7.95** (= FY25 6.00 + 6.10 - 4.15; by
+  quarter 1.85 + 1.70 + 2.18 + 2.23 = 7.96); KR 1.54 -> **1.85**. `ttm_invariants
+  --rollforward` re-derives every one from its reported legs: 112 of 112 hold.
+- **Stubs:** 23 names took at least one flow figure from a stub (dividends 7, net
+  income 5, buybacks 4, operating income 3, ...); all 24 flow level columns are
+  gone. Every source row checked was a short period or a one-day event, none a year.
+- **Inputs to `fund_metrics.derive`** change for 35 names. Side effect worth knowing:
+  `derive` takes `shares_diluted` (a LEVEL) first, and that column only ever came
+  from stubs -- so 10 names now use shares outstanding (BNC 1,410 -> 41.2M, PURR
+  0 -> 200.6M, WOLF 189M pre-emergence -> 52.2M) and USDE has no share count.
+- **Scores** (`mod.compute`, both rule sets on the same store, provider overlay
+  off, nothing written): fund_score moved for 1,584 names but by more than 5 points
+  for 2 (AAP +9.9, WOLF +5.3), none by more than 10. Outside the directly affected
+  names it is percentile ripple: largest 0.63 points, median 0.02.
+- **Checks:** `regression_pins.py` 33/33 -- five new pins (KR at 08-19, PEP and KR at
+  10-09 via the new DATED_PINS list, BRR and BSX stubs must stay null), and all five
+  FAIL on the old rules. `fundamentals.py --selftest` (new `_selftest_ytd_rules`,
+  `_selftest_stub_not_level`; the latter fails on the old rule); `edgar.py
+  --selftest`; validate `time` 4 ok + the known 221-row warning, `key` 3/3, `value`
+  4 ok + the known `peg` range warning.
+
+### OPEN
+
+- `derive`'s share preference (`shares_diluted`, then `shares_out`, then
+  `shares_basic`) reads level columns that no longer exist, so it is now simply
+  `shares_out`. Whether it should read `shares_diluted_ttm` is a separate decision:
+  it would change every per-share growth metric. USDE is the one name left blank.
+- `shareholder_yield` treats a blank buyback as 0, so BSX, EROC, O and VZ lose a
+  partial (event-only) buyback figure rather than gaining a true TTM one.
+- Observed, not caused here: the score store went from 78,025,991 rows (10-11 20:56)
+  to 78,025,653 (10-12 01:40) between two `validate --only key` runs.
+
+
 ## State at 2026-10-11 (evening) — NEW FILINGS NOW COME STRAIGHT FROM EDGAR, THE NIGHT AFTER THEY ARE FILED
 
 Built the per-filing source designed in the audit below ("A FASTER SOURCE FOR NEW

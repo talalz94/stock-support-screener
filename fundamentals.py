@@ -1294,6 +1294,56 @@ AVERAGE_CONCEPTS = frozenset({"shares_basic", "shares_diluted"})
 # differs. See the ordering flip at the end of `_ttm`.
 NON_ADDITIVE_CONCEPTS = frozenset({"eps_basic", "eps_diluted"})
 
+# One quarter in days, the unit the bulk sets round `qtrs` with.
+QUARTER_DAYS = 365.25 / 4
+
+
+def is_ytd_stub(days_after_fy_end, qtrs):
+    """True where a stub ending `days_after_fy_end` days after the fiscal year
+    end is a YEAR-TO-DATE cumulative of `qtrs` quarters, i.e. starts at the
+    fiscal year start. Vectorised over Series; works on scalars too.
+
+    THE TEST IS "ROUNDS TO THE SAME NUMBER OF QUARTERS", the rule `qtrs` itself
+    was assigned by (the bulk sets round a duration to the nearest whole
+    quarter). It used to be "within 20 days of qtrs x 91.31", and 20 was a
+    guess that 52/53-week calendars break:
+
+        PEP (12/12/12/16 weeks)  Q3 YTD = 36 weeks = 252 days vs 274: 22 off
+        KR  (16/12/12/12 weeks)  Q1     = 16 weeks = 112 days vs  91: 21 off
+
+    so the roll-forward rejected PEP's Q3 stub and `eps_diluted_ttm` stayed at
+    the roll ending 2026-03-21, two quarters stale, while revenue had moved on
+    to 2026-08-31 (measured 2026-10-11). Month-end rounding of `ddate` adds up
+    to ~15 days more either way.
+
+    What the guard exists to stop is a BARE QUARTER labelled qtrs=1 that is not
+    fiscal Q1 (HZO's fiscal Q3, NVR's Q2): that row ends 2 or 3 quarters after
+    the year end, so it rounds to 2 or 3, never to 1. Half a quarter is the
+    widest margin that still separates the two cases, and it is not tuned --
+    it is the definition of "nearest whole quarter".
+    """
+    return whole_quarters(days_after_fy_end) == qtrs
+
+
+def whole_quarters(days):
+    """Days -> the nearest whole number of quarters (the bulk sets' rule)."""
+    return np.floor(pd.to_numeric(days, errors="coerce") / QUARTER_DAYS + 0.5)
+
+
+def is_one_year(gap_days):
+    """True where two period ends are one fiscal year apart: the gap rounds
+    to four quarters.
+
+    It used to be "350 to 380 days", which month-end rounding breaks for any
+    filer whose period ends near mid-month. KR's Q2 ended 2026-08-15 and
+    2025-08-16 -- one day apart in the calendar, but the bulk sets round the
+    first to 07-31 and the second to 08-31, a 334-day gap -- so the roll found
+    no prior-year stub and `eps_diluted_ttm` stayed on the fiscal year ended
+    January (measured 2026-10-12). The stubs this must reject are a quarter or
+    more away from a year (274 or 456 days), so half a quarter separates them.
+    """
+    return whole_quarters(gap_days) == 4
+
 
 _HIST_CACHE: dict = {}
 
@@ -1893,7 +1943,23 @@ def facts_asof(asof: str, tickers: list[str] | None = None,
     df["rank"] = df["tag"].map(lambda t: pref.get(t, (None, 99))[1])
     df = df[df["concept"].notna()]
 
-    inst = df[df["qtrs"] == 0]                    # balance-sheet instants
+    # ONLY A STOCK CONCEPT IS AN INSTANT, whatever `qtrs` says.
+    #
+    # The bulk sets round a duration to the nearest whole quarter, so anything
+    # under half a quarter is stored as qtrs=0 -- the code for an instant.
+    # Those rows are SHORT PERIODS, never balances: a SPAC's 28-day inception
+    # loss (CCXI -22,045 net income), a one-day buyback event (BSX's two $2.0B
+    # accelerated repurchases, VZ's $2.5B and $1.0B). Let into this frame they
+    # became LEVEL columns (`net_income`, `buybacks` ...), and `fund_metrics`
+    # falls back to a level when no `_ttm` exists, so a stub stood in for a
+    # year. Measured 2026-10-12 as of 10-09: 23 of 3,369 universe names took at
+    # least one flow figure that way (dividends 7, net income 5, buybacks 4).
+    #
+    # Dropped here, at read time, so all three stores are covered: the ingests
+    # keep the rows exactly as the bulk set has them (edgar.py matches it row
+    # for row on purpose). `history()` has applied this same rule all along.
+    # The stub still counts toward `last_ddate` below -- its period is real.
+    inst = df[(df["qtrs"] == 0) & df["concept"].isin(STOCK_CONCEPTS)]
     flow = df[df["qtrs"] > 0]                     # income / cash-flow durations
     _FRAME_CACHE["last"] = (asof, tuple(sorted(tm["ticker"])), inst, flow)
 
@@ -2303,8 +2369,9 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
     # Guarded three ways, because an earlier version of this was reverted:
     #   * the current stub must END AFTER the annual, else the annual already
     #     covers those twelve months and rolling would double count;
-    #   * the prior stub must be the SAME qtrs and 350-380 days earlier, so a
-    #     six-month stub is only ever netted against a six-month stub;
+    #   * the prior stub must be the SAME qtrs and ONE YEAR earlier (the gap
+    #     rounds to four quarters -- see `is_one_year`), so a six-month stub is
+    #     only ever netted against a six-month stub;
     #   * exactly one current stub and one prior stub per (ticker, concept),
     #     taken as the latest of each -- a many-to-many merge here is what
     #     produced the bogus figures the first time.
@@ -2361,12 +2428,12 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
             # entirely instead of choosing the right stub -- which is exactly
             # what happened to EPS.
             #
-            # A genuine YTD stub of n quarters ends about 3n months after the
-            # fiscal year end, so that is the test.
+            # A genuine YTD stub of n quarters ends about n quarters after the
+            # fiscal year end, so that is the test -- see `is_ytd_stub` for
+            # why "about" means "rounds to", not "within 20 days".
             _want = (pd.to_datetime(y["ddate"], errors="coerce")
                      - pd.to_datetime(y["_fy_end"], errors="coerce")).dt.days
-            y = y[((_want - y["qtrs"].astype(int) * 91.31).abs() <= 20)
-                  | (y["ddate"] <= y["_fy_end"])]
+            y = y[is_ytd_stub(_want, y["qtrs"]) | (y["ddate"] <= y["_fy_end"])]
 
             cur = y[y["ddate"] > y["_fy_end"]]
             if not cur.empty:
@@ -2382,7 +2449,7 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
                               how="inner")
                 gap = (pd.to_datetime(m["ddate"])
                        - pd.to_datetime(m["_p_end"])).dt.days
-                m = m[(gap >= 350) & (gap <= 380)]
+                m = m[is_one_year(gap)]
 
                 if not m.empty:
                     # Newest prior per TAG. Every tag with a complete set
@@ -2911,8 +2978,70 @@ def _selftest_source_choice() -> None:
 
 
 
+def _selftest_ytd_rules() -> None:
+    """The roll-forward's two date tests (`is_ytd_stub`, `is_one_year`).
+
+    Both were fixed tolerances that 52/53-week calendars fell outside; both are
+    now "rounds to whole quarters". The cases that must STILL be rejected are
+    the ones the guards were written for.
+    """
+    s = pd.Series
+    # (days after the fiscal year end, qtrs, is a YTD stub?)
+    cases = [(84, 1, True), (112, 1, True),     # 12-week Q1; KR's 16-week Q1
+             (168, 2, True), (252, 3, True),    # PEP's 24- and 36-week YTD
+             (91, 1, True), (274, 3, True),     # ordinary calendar quarters
+             (182, 1, False), (274, 1, False),  # NVR / HZO: a bare fiscal Q2/Q3
+             (91, 2, False)]
+    got = is_ytd_stub(s([c[0] for c in cases]), s([c[1] for c in cases])).tolist()
+    assert got == [c[2] for c in cases], f"is_ytd_stub: {got}"
+    # (gap between this year's stub and last year's, one fiscal year apart?)
+    gaps = [(334, True),   # KR: 08-15 and 08-16 rounded to 07-31 and 08-31
+            (365, True), (371, True), (357, True),
+            (274, False), (456, False), (730, False), (91, False)]
+    got = is_one_year(s([g for g, _ in gaps])).tolist()
+    assert got == [w for _, w in gaps], f"is_one_year: {got}"
+
+
+def _selftest_stub_not_level() -> None:
+    """A flow fact stored qtrs=0 (a sub-half-quarter stub) must not surface as
+    a level figure; a balance must. Runs on a temporary store."""
+    import tempfile
+    from pathlib import Path
+    saved = (config.FUNDAMENTALS, config.FUNDAMENTALS_CF, config.FUNDAMENTALS_EDGAR)
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            for name in ("FUNDAMENTALS", "FUNDAMENTALS_CF", "FUNDAMENTALS_EDGAR"):
+                setattr(config, name, Path(tmp) / name)
+                getattr(config, name).mkdir()
+            _READ_CACHE.clear()
+            invalidate_currency_cache()
+            rows = [  # KO's CIK, so the real ticker map resolves it
+                (21344, "A", "Assets", "2026-06-30", 0, 107.9e9),
+                (21344, "A", "NetIncomeLoss", "2026-06-30", 0, -22_045.0),  # stub
+                (21344, "A", "NetIncomeLoss", "2025-12-31", 4, 13.1e9),
+            ]
+            df = pd.DataFrame([(c, a, t, d, q, v, "2026-07-29", "10-Q", 2026,
+                                "Q2", 2080, "USD") for c, a, t, d, q, v in rows],
+                              columns=SCHEMA)
+            _typed(df).to_parquet(part_path("2026q3"), index=False)
+            w = facts_asof("2026-10-09", ["KO"]).set_index("ticker")
+            assert w.at["KO", "assets"] == 107.9e9, "a balance was lost"
+            assert "net_income" not in w.columns, (
+                "a qtrs=0 stub of a FLOW concept surfaced as a level figure")
+            assert w.at["KO", "net_income_ttm"] == 13.1e9, "the annual was lost"
+            assert w.at["KO", "last_ddate"] == "2026-06-30", \
+                "the stub's period must still count as the newest period"
+        finally:
+            (config.FUNDAMENTALS, config.FUNDAMENTALS_CF,
+             config.FUNDAMENTALS_EDGAR) = saved
+            _READ_CACHE.clear()
+            invalidate_currency_cache()
+
+
 def selftest(verbose: bool = True) -> None:
     fails = []
+    _selftest_ytd_rules()
+    _selftest_stub_not_level()
     _selftest_merge_near_periods()
     _selftest_read_cache()
     _selftest_share_count()
