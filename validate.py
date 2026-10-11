@@ -1034,6 +1034,32 @@ def check_currency(asof: str, quick: bool) -> None:
         return
 
     leaked = df[df["ticker"].isin(foreign) & df["metric"].isin(FM.NEEDS_FX)]
+    # THE PROVIDER'S OWN RATIOS ARE NOT A LEAK. Since the provider overlay
+    # (2026-08-12) a non-USD filer's P/E and P/B are Finnhub's, and Finnhub's are
+    # currency-consistent: audited 2026-10-11, close / pe / local EPS gives the
+    # real exchange rate on 8 names (EUR 1.10-1.24, CAD 0.70-0.73, GBP 1.36, DKK
+    # 0.155), where a USD-price-over-EUR-earnings P/E would give ~1.0. This check
+    # predates the overlay and failed every night on 256 provider values. What it
+    # exists to catch is OUR arithmetic mixing currencies, so a value equal to
+    # the provider's cached figure is excused and counted, and anything else
+    # still fails.
+    n_prov = 0
+    if len(leaked):
+        try:
+            fh = pd.read_parquet(config.DATA / "_finnhub_fund.parquet")
+            fh = fh.drop_duplicates("ticker").set_index("ticker")
+
+            def _from_provider(r) -> bool:
+                if r.metric not in fh.columns or r.ticker not in fh.index:
+                    return False
+                pv = pd.to_numeric(pd.Series([fh.at[r.ticker, r.metric]]), errors="coerce").iloc[0]
+                return bool(pd.notna(pv) and abs(r.value - pv) <= 1e-4 * max(1.0, abs(pv)))
+
+            prov = leaked.apply(_from_provider, axis=1)
+            n_prov = int(prov.sum())
+            leaked = leaked[~prov]
+        except Exception:                                        # noqa: BLE001
+            pass                    # no provider cache: every FX row stays a leak
     by_metric = sorted(leaked["metric"].unique()) if len(leaked) else []
     # And the converse: withholding must not have silenced them entirely, or
     # "scored on scale-free metrics" would really mean "dropped".
@@ -1046,7 +1072,8 @@ def check_currency(asof: str, quick: bool) -> None:
            else (f"{len(foreign)} non-USD filer(s) but none carries a "
                  f"scale-free metric -- withholding became exclusion"
                  if n_scored == 0 else
-                 f"{len(foreign)} non-USD filer(s), 0 FX-dependent rows, "
+                 f"{len(foreign)} non-USD filer(s), 0 FX-dependent rows of our own, "
+                 f"{n_prov} provider-supplied (currency-consistent), "
                  f"{n_scored} still scored on scale-free metrics"))
 
 

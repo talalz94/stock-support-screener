@@ -217,9 +217,10 @@ independently of touch count: four touches in one week is one event, not four.
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
 - **26 steps**, in this order: `universe, bars, macro, news, senti_cache,
-  sentiment, bounce, zones, shortvol, hype, provider, fundamental, sec_facts,
-  sec_gap, events, leaderboard, dip, combo, candidates, validate, explore,
-  snapshots, profiles, retention, dashboard, docs`. `bounce` and `zones` are deliberately
+  sentiment, bounce, zones, shortvol, hype, provider, sec_facts, sec_gap,
+  fundamental, events, leaderboard, dip, combo, candidates, validate, explore,
+  snapshots, profiles, retention, dashboard, docs`. The SEC steps come before
+  `fundamental` so a newly fetched filing is scored the same night. `bounce` and `zones` are deliberately
   early: they need only `bars` and take about 30 and 60 seconds, and they used to
   sit behind a three-hour step.
 - **A normal day takes about 2 hours** (1.9-2.4h over recent weeks); a pass with

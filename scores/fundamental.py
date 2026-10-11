@@ -172,6 +172,24 @@ class FundamentalModule:
                       f"({type(exc).__name__}); using our own figures",
                       flush=True)
 
+        # MARKET CAP IS WITHHELD FOR A NON-USD FILER: nobody converts it.
+        #
+        # The provider reports it in the filer's own currency and every page
+        # printed it with a dollar sign: TM 3.4e13 is JPY 34 trillion (~$230B),
+        # not $34 trillion; FMX 6.7e11 is MXN 665B (~$36B). Our own fallback, USD
+        # price x ordinary shares, is wrong by the ADR ratio instead (one TM ADR
+        # is ten shares). Found by the 2026-10-11 audit across ~150 names.
+        #
+        # Its P/E and P/B are NOT withheld here: the provider's were checked to be
+        # currency-consistent (price / pe / local EPS gives the real exchange
+        # rate: EUR 1.10-1.24, CAD 0.70-0.73, GBP 1.36, DKK 0.155 on 8 names).
+        # Display only -- no score reads mktcap except through metrics that are
+        # already withheld for these filers.
+        if "mktcap" in m.columns and "currency" in cur.columns:
+            ccy = m["ticker"].map(dict(zip(cur["ticker"], cur["currency"])))
+            foreign = ccy.notna() & (ccy.astype(str) != "USD")
+            m.loc[foreign, "mktcap"] = np.nan
+
         sector = _sector_for(m["ticker"])
         ranks = FM.rank_pillars(m, sector=sector.reset_index(drop=True))
         wide = m.merge(ranks, on="ticker", how="left")
