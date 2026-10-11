@@ -44,6 +44,210 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-12 (small hours) — THE FACTOR STUDY RE-RUN: TWO MORE MONTHS MOVED THE NUMBERS, AND SEVEN NEW METRICS ENTERED COMBO ON TOO LITTLE HISTORY
+
+Asked: `validate --only claims` warned that the study measures stale data ("3 past
+month(s) rewritten since the study ran (2026-08-13 04:30)"). Re-ran `study.py` from
+scratch, rebuilt everything that reads it, and compared old against new.
+**Done: study re-run, combo/explore/dashboard/docs rebuilt, `metrics.html` rebuilt,
+`validate --only claims` 2 ok / 0 warn, page audit 297 pages clean.**
+
+### WHAT RAN, AND ONE DEVIATION FROM THE BRIEF
+
+- Old table kept: `data/_factor_study_pre_20261011.parquet` (md5-identical to the
+  08-13 table, 1,536 cells).
+- **The original was NOT moved aside.** The nightly `combo` step reads
+  `data/_factor_study.parquet`; a half-built table there (or none) at a 04:40 stop
+  would have fitted 05:00's combo on partial evidence or emitted nothing. `study.OUT`
+  was pointed at staging files instead (same from-scratch measurement; `study.py`
+  skips only what its OUT file holds). The merged table replaced the live one
+  atomically at 01:24 on 10-12.
+- **Speed.** One process measured **1.7 cells/min** against 3.8 in the August run
+  (sentiment, same code; CPU-bound on ~1 core, the laptop was busy with other work).
+  At that rate 1,936 cells was ~16 h, so it was killed at 96 saved cells and split by
+  module over 3 processes at BelowNormal priority (A sentiment+dip 161 min, B
+  fundamental 205 min, C hype+combo 195 min; ~1-2.5 GB each, 4-6 GB free). Done 23:47,
+  4h24m wall. `keepawake` held the whole time: **0 sleep gaps** in all three. Nothing
+  overlapped the 05:00 run; the 04:40 self-stop never fired.
+- **1,856 cells written, not the 1,936 planned.** The 80 missing are five label
+  metrics with no numeric rows (`top_event`, `event_types`, `top_severity_band`,
+  `top_headline`, fundamental `currency`), absent from the old table too.
+- To redo it in parallel: wrapper + merge notes are in the shared notes folder
+  (`run_study.py`: `--out FILE --module M`, 04:40 deadline). Merge = concat the OUT
+  files, `drop_duplicates(module, metric, horizon, size)`.
+- Rebuilt with `orchestrator.py --wait-for-lock 60 --step combo --step explore --step
+  dashboard --step docs` (4 ran, 0 failed, 25 s) **and `python metrics_doc.py
+  --build`. That second one is in NO nightly step: `reports/metrics.html` was dated
+  Aug 11 -- the metric dictionary had been two months stale.**
+- That rebuild also explains the "−338 rows between two `validate --only key` runs"
+  noted in the TTM section below: combo 10-09 is 39,206 rows under the old study and
+  38,868 under the new, exactly −338. Not a loss; fewer names clear combo's coverage bar.
+
+### POPULATION
+
+Scored history 2016-09-26 .. 2026-10-09: 233 fundamental sessions, 278 dip, 375
+sentiment dates (h1 cell), hype from 2020-08-19; 1,700-3,300 tickers per date,
+depending on the metric. Forward
+returns from the NEXT open at h = 1, 5, 20, 60. `t` is the study's own: mean per-date
+Spearman IC over its standard error, with the overlap correction `n_eff = n_dates /
+(h / spacing)`, floored at 2. (The random-draw "luck p" is not used anywhere below.)
+`size = all` cells: 464, 438 with a t (26 NaN: 13 new fundamentals at h=60, which have
+no 60-session window yet, 5 combo output cells, and 8 that were NaN in August too);
+median 232 dates (min 23, max 375), against median 182 (max 321) in August. Cells:
+1,536 -> 1,856; metrics 96 -> 116 (115 distinct names; `mktcap` sits in two
+modules): 13 new fundamentals + 7 combo outputs; metrics reaching |t| >= 2 at their best
+horizon 58 -> 71.
+
+### WHAT CHANGED, AND WHY (the control that matters)
+
+Cell by cell (376 `size = all` cells with a t in both): corr(IC) 0.97, corr(t) 0.93;
+median |ΔIC| 0.0019, median |Δt| 0.28, p90 1.30. Cells at |t| >= 2: 108 -> 129
+(31 crossed up, 10 crossed down). The IC changed sign in 37 cells, but in only 7 does
+either t reach 1, and in none does either reach 2. By horizon, cells at |t| >= 2:
+h1 32 -> 39, h5 5 -> 15, h20 40 -> 40, h60 31 -> 35.
+
+**Is it new data or rewritten history?** Re-measured 152 old-metric cells (66
+metrics; every cell that reaches |t| >= 2 in either study or moved >= 1.2) on the OLD window only
+-- rows <= 2026-08-12, forward returns from bars <= 08-12 -- with today's stored scores.
+**The history that existed in August measures the same today: median |Δt| 0.06, p90
+0.35, largest 0.82, none above 1. 87% of the total |t| change is the two extra months;
+13% is rewriting.** (So the "3 past months rewritten" warning was mostly sessions
+appended to the July/August/September partitions, not changed values.)
+
+| cell (size=all) | IC old -> new | t old (dates) | same window, today's data | t new (dates) |
+|---|---|---|---|---|
+| fundamental `fund_score` h20 | +0.0254 -> +0.0370 | +5.21 (179) | +5.21 (178) | **+7.63** (213) |
+| fundamental `fund_score` h1 | +0.0152 -> +0.0229 | +3.13 (182) | +3.26 (191) | +4.97 (232) |
+| fundamental `safety_score` h20 | +0.0046 -> +0.0176 | +1.16 (179) | +1.16 (178) | **+4.38** (213) |
+| fundamental `net_debt_ebitda` h20 | -0.0143 -> -0.0277 | -2.66 (179) | -2.67 (178) | -5.18 (213) |
+| fundamental `fcf_yield` h20 | +0.0232 -> +0.0358 | +3.24 (179) | +3.31 (178) | +5.36 (213) |
+| fundamental `roic` h20 | +0.0302 -> +0.0352 | +4.08 (179) | +4.17 (178) | +5.22 (213) |
+| fundamental `z_score` h60 | -0.0567 -> -0.0563 | -4.63 (175) | -4.62 (174) | -4.63 (178) |
+| fundamental `mom_12_1` h20 | +0.0287 -> +0.0346 | +2.65 (167) | +2.65 (167) | **+0.79** (202) |
+| dip `dip_gate` h20 | +0.0151 -> +0.0208 | +4.33 (219) | +4.33 (219) | +5.86 (258) |
+| hype `avg_trade_size` h60 | +0.0463 -> +0.0446 | +4.11 (290) | +4.11 (290) | +3.56 (295) |
+| sentiment `sent_mean_30d` h1 | +0.0110 -> +0.0103 | +3.18 (321) | +3.08 (334) | +3.25 (375) |
+| combo `combo_h20` h20 | +0.0303 -> +0.0306 | +2.91 (174) | +2.91 (174) | +3.32 (213) |
+| combo `combo_h60` h60 | +0.0464 -> +0.0457 | +2.62 (171) | +2.62 (171) | +2.62 (174) |
+| combo `combo_h1` h1 | +0.0165 -> +0.0220 | +2.11 (178) | +2.02 (191) | +3.00 (232) |
+
+Random-ranking control IC on every one of these is within ±0.004. Full cell table:
+`data/_study_compare_20261012_cells.csv` (size=all, sorted by |Δt|); control:
+`data/_study_compare_20261012_same_window_control.csv`.
+
+Read plainly: **the old measurements were not wrong; they were two months short.**
+The 08-13 -> 10-09 stretch was very kind to quality, safety and cash-flow metrics
+(`safety_score` h20 went from nothing to t +4.4 on those months alone) and unkind to
+momentum (`mom_12_1`'s IC rose slightly while its t fell from 2.65 to 0.79, which
+implies a much wider date-to-date IC spread). Two months cannot say whether that is a
+regime or persistence; the long-history metrics (`z_score`, `avg_trade_size`,
+`dip_gate`) barely moved. `combo_h*` cells measure combo's STORED series, which is the
+OLD-weights score on every session -- see "NOT DONE" below.
+
+### WHICH METRICS COMBO ADMITS NOW
+
+Rule: |t| >= 2 at that horizon, |IC| beats the random control, raw metrics only, one
+per cluster at rho >= 0.90. Counts are after dedup.
+
+| score | old -> new | left the score | joined the score |
+|---|---|---|---|
+| `combo_h1` | 17 -> 25 | `peg`, `sent_decay_30d`, `sent_net_5d`, `trade_size_trend` | `drawdown`, `du_tax_burden`, `eps_growth`, `fcf_yield`, `sent_decay_90d`, `shareholder_yield`, **`ebitda_growth`\*, `eps_growth_q`\*, `gross_margin`\*, `gross_margin_chg`\*, `op_margin_chg`\*, `roa`\*** |
+| `combo_h20` | 22 -> 25 | `mom_12_1`, `turnover` | `eps_growth`, `short_ratio`, **`gross_margin`\*, `op_margin_chg`\*, `rev_growth_q`\*** |
+| `combo_h60` | 16 -> 18 | `mom_12_1` | `du_op_margin`, `fcf_yield`, `gpoa` |
+
+No sign flipped in any score. Theme weights (mean |t| of the theme's kept metrics) at
+h20: safety 3.69 -> 4.23, valuation 3.12 -> 3.86, profitability 3.29 -> 3.79, growth
+2.39 -> 3.49, efficiency 3.69 -> 3.50, attention 2.97 -> 2.55. At h60 the **growth theme
+is gone** (`mom_12_1` was its only member).
+
+**On the latest session (2026-10-09), same 3,527-name sibling frame.** Old combo was
+reproduced from the old study first: Spearman 1.000000, max |diff| 0.0000 against the
+stored rows, so the baseline is exact.
+
+| score | scored old -> new (left / joined) | Spearman old vs new (n) | top-20 | top-50 | top-100 | median / p90 |Δ percentile rank| |
+|---|---|---|---|---|---|---|
+| `combo_h1` | 2,707 -> 2,819 (58 / 170) | 0.892 (2,649) | 7/20 | **21/50** | 46/100 | 7.4 / 23.1 |
+| `combo_h20` | 3,054 -> 2,850 (208 / 4) | 0.898 (2,846) | 12/20 | **29/50** | 58/100 | 7.1 / 22.1 |
+| `combo_h60` | 3,227 -> 3,044 (184 / 1) | 0.938 (3,043) | 10/20 | **24/50** | 61/100 | 6.7 / 16.9 |
+
+The bottom-50 overlap is 34, 28 and 26 of 50. These are different scores, not a
+refresh. Per-ticker old/new ranks: the three `combo_h*_old_vs_new.csv` files in the
+notes folder.
+
+### THE PROBLEM: SEVEN ENTRANTS WITH ONE EARNINGS SEASON OF HISTORY (\* above)
+
+`ebitda_growth`, `eps_growth_q`, `gross_margin`, `gross_margin_chg`, `op_margin_chg`,
+`roa`, `rev_growth_q` were added to `fund_metrics` after August. Each has **43-49
+scored sessions, 2026-07-24 -> 2026-10-09, one earnings season** (13 new fundamentals
+in all; none has an h=60 cell yet). Combo's rule is |t| >= 2 and IC above the random
+control -- it has no minimum history, so they walked in:
+
+- At **h20** the three that joined (`gross_margin` IC +0.0731 t +2.25, `op_margin_chg`
+  +0.0577 / +3.35, `rev_growth_q` +0.0885 / +4.04) have **23-29 dates and n_eff = 2.0,
+  the floor, with a 100% hit rate**. That t is two effective observations. It is not
+  evidence of anything, and `rev_growth_q` (#18, with `ebitda_growth` at #17) sits in the
+  regenerated "strongest metrics" table on the metrics page right now.
+- At **h1** six joined, on 42-48 daily dates (n_eff 42-48, t +2.4 .. +4.4). The
+  statistics are formally fine, but it is one 11-week window.
+
+Cost, measured by rebuilding the live score without them (`sensitivity_out.txt`):
+`combo_h20` live vs without-them Spearman 0.974, top-50 overlap 39/50, and the
+short-history metrics cost **218 names** their h20 score (3,068 scored without, 2,850
+with: a name needs >= 50% of the admitted metrics and they are sparse); `combo_h1`
+0.984, top-50 43/50, 135 names. `combo_h60` contains none, so its change (above) is the
+real re-fit. Even without them the rank order moves a lot (h20 vs old: Spearman 0.912,
+top-50 29/50; h1: 0.907, 24/50), so the re-fit itself is large. I did NOT change the
+admission rule -- that is a method decision (see NOT DONE).
+
+### THE NON-USD FILERS IN THE SIZE TERCILES (asked: how many rows does it drop?)
+
+**Almost none, because the fix reached one session.** Market cap was withheld for the
+152 non-USD filers only in the 2026-10-09 re-score. The study's point-in-time size
+frame is 620,343 (session, ticker) pairs over 233 sessions; **152 pairs dropped (the
+10-09 session, which has no forward return at any horizon). The other 232 sessions
+still hold 8,311 pairs for today's non-USD filers = 1.34% of 620,343**, in local
+currency (sample session 2026-09-14: non-USD caps median 1.8e10, mean 4.2e12, max
+2.6e14). They land in the top tercile: 89 of 150 `large`, 34 `mid`, 27 `small` (59%
+vs 33% expected), ~10% of that tercile's names. The tercile edges barely move
+($1.28B / $6.46B with them, $1.24B / $6.11B without). **`size = all` cells, and so
+combo, are unaffected; the `large` / `mid` / `small` cells inherit this.** Per-size
+cells at |t| >= 2, old -> new: large 103 -> 114, mid 88 -> 114, small 107 -> 143.
+Fixing it needs a currency filter in `study.size_bucket_frame`.
+
+### CHECKS
+
+`validate --only claims` 2 ok, 0 warnings ("no past partition changed since
+2026-10-11 23:47"); `status.audit_pages()` 297 pages clean.
+
+### NOT DONE, IN ORDER OF WHAT I WOULD DO
+
+1. **Decide the minimum-history rule for combo** (e.g. n_eff >= 5 and >= N scored
+   sessions). Today's live `combo_h1`/`combo_h20` contain the seven entrants above.
+   The rule is one line in `scores/combo.py:admitted`; `sensitivity_out.txt` shows what
+   it would do. Until then treat `combo_h60` as the re-fit that stands on its evidence.
+2. **Combo history is now mixed.** Only session 10-09 was rebuilt: it is on the new
+   weights, the 232 sessions before it are on the old. Any per-ticker combo trend shows
+   a step at 10-09 (median ~7 percentile points). `combo_refresh.py` rebuilds the whole
+   series and re-measures combo's cells; it was not run (long, and it is a method
+   choice). Tonight's 05:00 run scores 10-12 on the new weights.
+3. **Wire `metrics_doc.build` into a nightly step** (it is called from nowhere, which is
+   how `metrics.html` went two months stale). `orchestrator.py` is `edgar-ingest`'s file
+   tonight, so not touched.
+4. **Size terciles: filter non-USD out of `size_bucket_frame`** and re-measure the
+   per-size cells only.
+5. `scores/combo.py`'s module docstring still quotes hand-typed t-stats (combo_h1
+   +1.96, combo_h20 +3.59, combo_h60 +4.75, `z_score` h60 -5.44 / h20 -3.37) that match no
+   study table (now +3.00, +3.32, +3.25, -4.63). `claims` scans labels, not module
+   docstrings. Not edited.
+6. The TTM fix in the section below changes `derive` inputs for 35 names (fund_score
+   moves for 1,584, by more than 5 points for 2) from session 10-12. History is untouched unless someone rebuilds it; if it is, `validate` will warn
+   again and the study needs this re-run (use the parallel recipe above).
+
+Local files: `data/_study_20261011_{p0,A,B,C}.log`, `data/_study_rebuild_20261012.log`,
+`data/_nonusd_mktcap_by_session.csv`, the three `data/_study_compare_20261012_*.csv`,
+and the notes folder `study-rerun-tables/` (combo old-vs-new ranks, theme weights,
+population of the new metrics, sensitivity, all console output).
+
 ## State at 2026-10-12 — TWO TTM BUGS FIXED: 52/53-WEEK ROLLS, AND STUBS POSING AS YEARS
 
 Both were found while verifying the EDGAR ingest (section below) and fixed the same
@@ -2932,7 +3136,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-11 09:00 — do not edit by hand._
+_Generated 2026-10-12 01:30 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -2949,27 +3153,28 @@ _Generated 2026-10-11 09:00 — do not edit by hand._
 | `provider` | daily | 64.3 min | 65.1 min | 66.3 min | 120.0 min | 40 |
 | `sec_facts` | quarterly | 26s | 5s | 26s | 60.0 min | 12 |
 | `sec_gap` | weekly | 2.5 min | 5.2 min | 7.8 min | 20.0 min | 11 |
+| `sec_edgar` | daily | 14s | 14s | 14s | 30.0 min | 1 |
 | `fundamental` | daily | 61.8 min | 2.4 min | 61.8 min | 180.0 min | 47 |
 | `events` | weekly | 7.9 min | 10.3 min | 16.3 min | 30.0 min | 12 |
 | `leaderboard` | weekly | 29.1 min | 36.4 min | 90.2 min ⚠ | 90.0 min | 13 |
 | `dip` | daily | 6s | 14s | 12s | 15.0 min | 47 |
-| `combo` | daily | 7s | 12s | 10s | 15.0 min | 43 |
+| `combo` | daily | 15s | 12s | 15s | 15.0 min | 44 |
 | `candidates` | daily | 3s | 2s | 3s | 5.0 min | 3 |
 | `validate` | daily | 4.9 min | 5.8 min | 7.1 min | 60.0 min | 33 |
-| `explore` | daily | 3s | 7s | 8s | 5.0 min | 49 |
+| `explore` | daily | 7s | 7s | 8s | 5.0 min | 50 |
 | `snapshots` | daily | 0s | 4s | 7s | 5.0 min | 66 |
 | `profiles` | daily | 19.9 min | 22.5 min | 32.4 min ⚠ | 15.0 min | 48 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 59 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 55 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 67 |
+| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 56 |
+| `docs` | daily | 0s | 0s | 1s | 5.0 min | 68 |
 
-**Daily total ≈ 103.5 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 103.7 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-11 09:00 — do not edit by hand._
+_Generated 2026-10-12 01:30 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -2985,7 +3190,8 @@ _Generated 2026-10-11 09:00 — do not edit by hand._
 | rejects | 21 | 7.7 | 2026-09-11 → 2026-10-09 |
 | zones | 31 | 17.5 | 2026-08-27 → 2026-10-09 |
 | fundamentals (companyfacts) | 130 | 74.4 | 1980q3 → 2028q2 |
-| loose (macro, universe, jobs, study) | 31 | 56.6 | — |
+| fundamentals (EDGAR filings) | 15 | 0.2 | 2015q4 → 2026q3 |
+| loose (macro, universe, jobs, study) | 35 | 56.8 | — |
 
 **`data/` total ≈ 1,300 MB.** `reports/` is a further 87 MB across 297 pages.
 
@@ -2995,7 +3201,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-11 09:00 — do not edit by hand._
+_Generated 2026-10-12 01:30 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -3009,32 +3215,32 @@ _Generated 2026-10-11 09:00 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-11 09:00 — do not edit by hand._
+_Generated 2026-10-12 01:30 — do not edit by hand._
 
-1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
+1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
-**58 metric(s) reach |t| >= 2 at their best horizon.**
+**71 metric(s) reach |t| >= 2 at their best horizon.**
 | metric | module | best h | IC | t | hit |
 |---|---|---:|---:|---:|---:|
-| `fund_score` | fundamental | 20 | +0.0254 | +5.21 | 65% |
-| `z_score` | fundamental | 60 | -0.0567 | -4.63 | 22% |
-| `dip_gate` | dip | 20 | +0.0151 | +4.33 | 66% |
-| `net_issuance` | fundamental | 20 | -0.0307 | -4.17 | 41% |
-| `avg_trade_size` | hype | 60 | +0.0463 | +4.11 | 74% |
-| `roic` | fundamental | 20 | +0.0302 | +4.08 | 64% |
-| `interest_cover` | fundamental | 20 | +0.0345 | +4.05 | 61% |
-| `roe` | fundamental | 20 | +0.0324 | +3.95 | 62% |
-| `ev_sales` | fundamental | 20 | -0.0345 | -3.91 | 39% |
-| `f_score` | fundamental | 1 | +0.0258 | +3.91 | 63% |
-| `roic_wacc` | fundamental | 20 | +0.0319 | +3.71 | 63% |
-| `du_asset_turnover` | fundamental | 20 | +0.0218 | +3.69 | 58% |
-| `asset_turnover` | fundamental | 20 | +0.0218 | +3.69 | 58% |
-| `quality_score` | fundamental | 20 | +0.0262 | +3.58 | 61% |
-| `combo_h60_cov` | combo | 20 | +0.0203 | +3.47 | 58% |
-| `safety_score` | fundamental | 1 | +0.0147 | +3.46 | 60% |
-| `combo_h20_cov` | combo | 20 | +0.0215 | +3.43 | 58% |
-| `fund_rank` | dip | 20 | +0.0187 | +3.37 | 62% |
-| `du_leverage` | fundamental | 20 | +0.0260 | +3.32 | 58% |
-| `combo_h1_cov` | combo | 60 | +0.0311 | +3.29 | 68% |
+| `fund_score` | fundamental | 20 | +0.0370 | +7.63 | 68% |
+| `dip_gate` | dip | 20 | +0.0208 | +5.86 | 68% |
+| `fcf_yield` | fundamental | 20 | +0.0358 | +5.36 | 60% |
+| `roic` | fundamental | 20 | +0.0352 | +5.22 | 67% |
+| `interest_cover` | fundamental | 20 | +0.0408 | +5.21 | 63% |
+| `net_debt_ebitda` | fundamental | 20 | -0.0277 | -5.18 | 33% |
+| `fund_rank` | dip | 20 | +0.0286 | +5.07 | 65% |
+| `quality_score` | fundamental | 20 | +0.0330 | +5.06 | 65% |
+| `net_issuance` | fundamental | 20 | -0.0343 | -5.05 | 39% |
+| `growth_score` | fundamental | 20 | +0.0221 | +4.99 | 65% |
+| `safety_score` | fundamental | 1 | +0.0178 | +4.88 | 62% |
+| `f_score` | fundamental | 1 | +0.0289 | +4.80 | 62% |
+| `gpoa` | fundamental | 20 | +0.0284 | +4.77 | 61% |
+| `z_score` | fundamental | 60 | -0.0563 | -4.63 | 23% |
+| `roic_wacc` | fundamental | 20 | +0.0347 | +4.54 | 66% |
+| `roe` | fundamental | 20 | +0.0344 | +4.50 | 63% |
+| `ebitda_growth` | fundamental | 1 | +0.0407 | +4.40 | 69% |
+| `rev_growth_q` | fundamental | 20 | +0.0885 | +4.04 | 100% |
+| `ev_sales` | fundamental | 20 | -0.0297 | -3.93 | 39% |
+| `fcf_growth` | fundamental | 1 | +0.0129 | +3.87 | 61% |
 <!-- /GENERATED:study -->
 
