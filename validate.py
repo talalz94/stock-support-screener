@@ -163,8 +163,10 @@ def check_time(asof: str, quick: bool) -> None:
     qs = FD.stored_quarters()
     look = qs[-4:] if quick else qs[-16:]
     viol, seen = 0, 0
-    for q in look:
-        p = FD.part_path(q)
+    # The per-filing EDGAR store parses its own dates (edgar.py), so it gets
+    # the same look-ahead test as the bulk partitions it stands in for.
+    for p in [FD.part_path(q) for q in look] + \
+            sorted(config.FUNDAMENTALS_EDGAR.glob("*q*.parquet")):
         if not p.exists():
             continue
         d = pd.read_parquet(p, columns=["ddate", "filed"])

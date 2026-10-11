@@ -44,6 +44,106 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-11 (evening) — NEW FILINGS NOW COME STRAIGHT FROM EDGAR, THE NIGHT AFTER THEY ARE FILED
+
+Built the per-filing source designed in the audit below ("A FASTER SOURCE FOR NEW
+FILINGS"), in a side session while `study.py` re-ran. Nothing was scored here: the
+new rows reach `data/scores` at the next 05:00 run.
+
+### WHAT WAS BUILT
+
+- **`edgar.py`**. Discover: EDGAR's daily index (`master.YYYYMMDD.idx`, ~95 KB gzip),
+  plus the latest-filings Atom feed for the day whose index is not out yet (SEC
+  publishes it ~22:00 ET = 07:00 PKT, two hours after the run). Forms: the bulk
+  ingest's own rule (10-K, 10-Q, 20-F, 40-F and /A, KT). CIKs: `ticker_map()`.
+  Submissions API for `--tickers`. Fetch: index.json, FilingSummary.xml, the
+  presentation linkbase and the `*_htm.xml` instance, gzip. Parse into the bulk
+  SCHEMA through `fundamentals._typed`. Store `data/fundamentals_edgar/YYYYqQ.parquet`
+  (period quarter), plus `_ledger.parquet` (one row per filing, status) and
+  `_days.json` (which index days are settled). `--diff ADSH` re-checks any filing
+  against the bulk set; `--selftest` runs offline.
+- **`fundamentals.read`** drops any EDGAR row whose accession the bulk or
+  companyfacts store holds, before the bulk/cf partition choice, so one filing is
+  never read twice. `reporting_currency` and the read-cache fingerprint include the
+  new store. `edgar.prune` deletes rows once the bulk set holds the accession.
+- **Step `sec_edgar`** (27 steps): after `sec_gap`, before `fundamental`, order
+  only. Daily by calendar, not session, so Friday's index is read on Sunday rather
+  than Tuesday. Same convergence as `sec_gap`: retry failures once, fail the step
+  above `SEC_GAP_MAX_FAIL`; a failed filing stays `error` in the ledger and is
+  retried nightly; an index day that could not be read stays unsettled.
+- Fair access: `config.SEC_UA`, 6 workers sharing one 5 req/s pacer (measured
+  4.8 req/s on the peak day).
+- Also: `validate.py`'s look-ahead check now reads the EDGAR partitions too;
+  `dashboard.py` and `docs.py` list the store; README and SCORE_MODULES updated.
+
+### MATCHING THE BULK SET -- EVERY RULE WAS FORCED BY A DIFF
+
+| rule | case that forced it |
+|---|---|
+| only concepts on a FACE statement (FilingSummary "Statements" roles) | KO: `InterestExpense` sits in a segment note only; bulk lacks it |
+| period end rounded to the nearest month end | KO quarter ended 07-03, bulk says 06-30 |
+| uom = numerator (EPS is "USD"); -0.00 stored as 0 | AMFN EPS |
+| a stub under half a quarter kept as qtrs 0, as bulk keeps it | a SPAC's 28-day inception period |
+| a dei fact counts only on a date a statement fact uses | BBRY cover-date share count (bulk omits) vs SCI balance-sheet date (bulk keeps) |
+| one key, two facts: the more precise wins, then the better-fitting period | MUFG 11,980,601,000 vs 11,981,000,000; LOGC tax at decimals -5 vs -6, capex 91 vs 123 days |
+| linkbase may be embedded in the .xsd | MSFT FY2026 10-K has no `_pre.xml` |
+| an Archives 403 `AccessDenied` is a missing file, not throttling | Labor Day's index: cost 70s of backoff and stayed "unsettled" |
+
+### MEASURED
+
+- **Agreement with the bulk set**, 2026q3 filings it already holds: **261 distinct
+  filings** (171 10-Q, 19 10-K, 20 20-F, 4 40-F, 2 10-KT, 45 amendments; KO, AAPL,
+  MSFT, JPM, WFC, NKE, NVDA, KR, MUFG, BHP, DEO plus three seeded random draws),
+  **20,272 bulk rows, all matched on every field** (value, cik, filed, form, fy,
+  fp, sic). **One residual: 2 extra rows** (FPS share counts for a 145-day post-IPO
+  period, a column SEC's renderer suppresses; not reproduced -- guessing its
+  threshold would be tuning). The rules were fixed on the first three sets; the
+  fourth (106 filings, 8,070 rows) was drawn after all but the last rule and
+  matched under both orderings of it.
+- **Backfill since 2026-07-28 (75 days):** 54 index days, 5,102 universe filings
+  listed, 4,965 already in bulk/companyfacts, 137 fetched: **60 stored** (4,244 rows,
+  all filed 10-01..10-09: PEP, DAL, MU 10-K, NKE, CTAS, STZ, LEVI, JEF, LEN ...),
+  5 empty, 30 without XBRL, 42 without statements (mostly Part III 10-K/As), **0
+  failed**. **516 requests, 13.1 MB, 144 s.**
+- **A typical day**, every universe filing of the day fetched into a temporary
+  store with nothing skipped (the Q3/Q4 case, when no other store has them):
+  median day 09-25 **21 filings, 82 requests, 3.1 MB, 32 s**; mid-season 08-12
+  274 filings, 1,094 requests, 32.9 MB, 234 s; peak 08-06 **661 filings, 2,645
+  requests, 113.4 MB, 552 s** (0.83 s per filing, rate-bound). A night with
+  nothing new: 4 requests, 5 s. Step budget 1,800 s.
+- **Read cost:** universe read from 2023q3, 18.5 s with the store vs 18.8 s
+  without (cold first run 23.4 s), +2,494 rows. Not measurable.
+- **Freshness, asof 2026-10-09, 3,369 universe names with facts:** newest period
+  more than 120 days old **417 (12.4%) -> 387 (11.5%)**. 30 names crossed back
+  under 120 days, 32 moved forward, 0 moved back. Newest FILING more than 120
+  days old unchanged at 342 (10.2%); why those names have nothing since June was
+  not investigated.
+- **KO** unchanged, as designed (its 10-Q came with the bulk set on 10-10):
+  eps_diluted_ttm 3.33.
+- **Checks:** `regression_pins.py` 28/28; `validate.py` `time` 4 ok + the
+  pre-existing warning (221 of 7,232,707 facts filed early; the 4,244 EDGAR rows
+  contribute 0); `key` 3/3; `edgar.py --selftest` (rounding, parse, index/feed,
+  read dedup + prune -- the dedup assertion fails when the filter is removed);
+  `fundamentals.py --selftest`; `orchestrator.py --step sec_edgar` ran ok.
+
+### LIMITS AND OPEN
+
+- A filing accepted after ~20:00 ET misses that night's feed and arrives the next
+  night with its index. The step runs once per calendar day, not on the 2-hourly
+  repeats.
+- Filers whose every statement fact carries a dimension (Presidio: Successor /
+  Predecessor members) are empty here, exactly as in the bulk set.
+- Found while verifying, NOT this module's, unchanged: (1) PEP's eps_diluted_ttm
+  is stuck at the roll ending 2026-03-21: its 12/12/12/16-week calendar puts the
+  36-week YTD stub at 252 days against the 274 +/- 20 `_ttm` requires, with bulk
+  rows too. (2) Bulk keeps sub-half-quarter stubs as qtrs 0, and
+  `fund_metrics.py:236` falls back to that level when no TTM exists, so a SPAC's
+  28-day loss can stand as its net income; a read-time fix would cover all three
+  stores. (3) `fundamentals.sector_map()` reads `part_path(q)` for every quarter
+  in `stored_quarters(include_cf=True)` and would fail on a companyfacts-only
+  quarter; it has no caller today.
+
+
 ## State at 2026-10-11 (later) — FULL ACCURACY AUDIT: ONE REAL DISPLAY BUG, ONE FRESHNESS GAP, TWO CHECKERS WRONG
 
 Asked: "is all the stats, fundamentals and score accurate and updated? please audit and confirm".

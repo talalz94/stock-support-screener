@@ -85,6 +85,14 @@ FUNDAMENTALS = DATA / "fundamentals"        # fundamentals/YYYYqQ.parquet (SEC X
 # RCI, BIRK and ZGN with 194-353 IFRS concepts each. So the bulk sets
 # systematically omit large foreign issuers that this API has in full.
 FUNDAMENTALS_CF = DATA / "fundamentals_cf"  # fundamentals_cf/YYYYqQ.parquet
+# Per-FILING XBRL straight from EDGAR (edgar.py, nightly step `sec_edgar`), for
+# filings neither of the above has yet. Separate for the same reason as
+# FUNDAMENTALS_CF, and because it is TEMPORARY by design: `fundamentals.read`
+# ignores any row whose accession the bulk or companyfacts store holds, and
+# `edgar.prune` deletes it once the quarterly bulk set delivers that filing.
+# MEASURED 2026-10-11: KO's 07-29 10-Q was still absent from companyfacts and
+# reached the store only with the 2026q3 bulk set on 10-10, 73 days later.
+FUNDAMENTALS_EDGAR = DATA / "fundamentals_edgar"  # fundamentals_edgar/YYYYqQ.parquet
 SHORTVOL = DATA / "shortvol"                # FINRA Reg SHO daily short volume
 
 EVENT_SEVERITY_FILE = DATA / "_event_severity.parquet"   # measured |ret|/ATR per event
@@ -906,7 +914,7 @@ def dirs() -> None:
     """Create every directory the pipeline writes to. Idempotent."""
     for d in (DATA, REPORTS, BARS / "1d", BARS / "1h", FLAGS, REJECTS, ZONES,
               NEWS, SENTI, SCORES, BARS_ETF, SHORTVOL, FUNDAMENTALS,
-              FUNDAMENTALS_CF, *REPORT_DIRS):
+              FUNDAMENTALS_CF, FUNDAMENTALS_EDGAR, *REPORT_DIRS):
         d.mkdir(parents=True, exist_ok=True)
 
 

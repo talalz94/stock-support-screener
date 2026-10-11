@@ -349,7 +349,13 @@ def cf_part_path(q: str):
     return config.FUNDAMENTALS_CF / f"{q}.parquet"
 
 
-def stored_quarters(include_cf: bool = False) -> list[str]:
+def edgar_part_path(q: str):
+    """Per-filing EDGAR rows (edgar.py), partitioned by period quarter."""
+    return config.FUNDAMENTALS_EDGAR / f"{q}.parquet"
+
+
+def stored_quarters(include_cf: bool = False,
+                    include_edgar: bool = False) -> list[str]:
     """Quarters on disk. **Bulk store only, by default.**
 
     THE DEFAULT IS THE CONSERVATIVE ANSWER, AND IT IS THAT WAY BECAUSE THE
@@ -372,12 +378,18 @@ def stored_quarters(include_cf: bool = False) -> list[str]:
     Forgetting the flag now means re-fetching something you might have, which is
     a wasted download. Before, it meant never fetching something you do not
     have. Only `read()` and the SIC map ask for the union, explicitly.
+
+    `include_edgar` adds the per-filing EDGAR store, which only `read()` and
+    `reporting_currency` ask for: it holds a few days to a quarter of filings
+    and is never what "fetched" means for a bulk quarter.
     """
     qs = set()
     if config.FUNDAMENTALS.exists():
         qs |= {p.stem for p in config.FUNDAMENTALS.glob("*q*.parquet")}
     if include_cf and config.FUNDAMENTALS_CF.exists():
         qs |= {p.stem for p in config.FUNDAMENTALS_CF.glob("*q*.parquet")}
+    if include_edgar and config.FUNDAMENTALS_EDGAR.exists():
+        qs |= {p.stem for p in config.FUNDAMENTALS_EDGAR.glob("*q*.parquet")}
     return sorted(qs)
 
 
@@ -892,7 +904,8 @@ def _store_fingerprint() -> tuple:
     microseconds, against the 86-second read it protects.
     """
     n = mt = sz = 0
-    for d in (config.FUNDAMENTALS, config.FUNDAMENTALS_CF):
+    for d in (config.FUNDAMENTALS, config.FUNDAMENTALS_CF,
+              config.FUNDAMENTALS_EDGAR):
         if not d.exists():
             continue
         for p in d.glob("*q*.parquet"):
@@ -1037,7 +1050,7 @@ def read(start_q: str | None = None, ciks: set[int] | None = None) -> pd.DataFra
 
     # The union: this is the READ path, so a quarter the fallback supplies must
     # be visible even when the bulk store lacks it.
-    qs = stored_quarters(include_cf=True)
+    qs = stored_quarters(include_cf=True, include_edgar=True)
     if start_q:
         qs = [q for q in qs if q >= start_q]
     if not qs:
@@ -1065,6 +1078,20 @@ def read(start_q: str | None = None, ciks: set[int] | None = None) -> pd.DataFra
                 d = d[d["cik"].isin(ciks)]
         return d
 
+    # THE PER-FILING EDGAR STORE IS A SUPPLEMENT KEYED BY ACCESSION, not a third
+    # authority per (cik, quarter). Each of its rows is one filing exactly as
+    # the bulk set will later publish it (same rounding, same face-statement
+    # scope -- see edgar.py), so mixing it with older bulk filings is what the
+    # bulk set itself does. What must never happen is ONE FILING READ TWICE: so
+    # any accession the bulk or companyfacts store holds is dropped from here,
+    # whichever of those two then wins the partition below. Read first, so the
+    # accessions are known before that choice discards anything.
+    ed_frames = [e for e in (_one(edgar_part_path(q)) for q in qs)
+                 if e is not None and len(e)]
+    ed_ciks = set(pd.concat([e["cik"] for e in ed_frames]).unique()) \
+        if ed_frames else set()
+    held: set = set()
+
     frames = []
     for q in qs:
         bulk = _one(part_path(q))
@@ -1089,6 +1116,12 @@ def read(start_q: str | None = None, ciks: set[int] | None = None) -> pd.DataFra
         cf = _one(cf_part_path(q))
         has_bulk = bulk is not None and len(bulk)
         has_cf = cf is not None and len(cf)
+        if ed_ciks:
+            # cik first (an integer isin, cheap) so the string work touches
+            # only the few filers the EDGAR store actually holds.
+            for src, has in ((bulk, has_bulk), (cf, has_cf)):
+                if has:
+                    held.update(src.loc[src["cik"].isin(ed_ciks), "adsh"].unique())
         if has_bulk and has_cf:
             # WHICHEVER SOURCE FILED MORE RECENTLY WINS, per (cik, partition).
             #
@@ -1118,6 +1151,11 @@ def read(start_q: str | None = None, ciks: set[int] | None = None) -> pd.DataFra
             frames.append(bulk)
         if has_cf and len(cf):
             frames.append(cf)
+    if ed_frames:
+        ed = pd.concat(ed_frames, ignore_index=True)
+        ed = ed[~ed["adsh"].isin(held)]
+        if len(ed):
+            frames.append(ed)
     if not frames:
         return pd.DataFrame(columns=SCHEMA)
     # `_with_uom` on the concatenated frame, not per partition: partitions
@@ -1180,13 +1218,16 @@ def reporting_currency(ciks=None, lookback_q: int = 8) -> dict[int, str]:
     # sampled almost-empty future quarters: `reporting_currency` resolved 52
     # filers instead of thousands and reported ZERO non-USD, which silently
     # switched all 75 foreign filers back to their stray bulk rows.
-    qs = [q for q in stored_quarters(include_cf=True)
+    # EDGAR partitions vote too: a foreign filer whose first filings arrive
+    # that way would otherwise default to USD and have its own-currency rows
+    # filtered out of `facts_asof` as strays.
+    qs = [q for q in stored_quarters(include_cf=True, include_edgar=True)
           if q <= _current_quarter()][-lookback_q:]
     if not qs:
         return {}
     frames = []
     for q in qs:
-        for p in (part_path(q), cf_part_path(q)):
+        for p in (part_path(q), cf_part_path(q), edgar_part_path(q)):
             if not p.exists():
                 continue
             try:
