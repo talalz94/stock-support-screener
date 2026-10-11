@@ -3,7 +3,11 @@
 Run: python rule_accuracy.py   (~3 min, idle machine)
 
   A. HISTORY   the 50-date point-in-time panel (2016-2026), 20/40/120/250 bars forward
-  B. LUCK      the same number of picks drawn at random from the same-day pool
+  B. LUCK      the same number of picks drawn at random from the same-day pool.
+               CAVEAT (found 2026-10-11, lowclimb_study.py): this treats picks as
+               independent draws. Picks that move together (same sectors, same kind
+               of stock) make it overstate significance -- it read p = 0.000 for an
+               effect whose t across dates was -1.80. The t across dates is the test.
   C. LIVE      days AFTER the study was finished (2026-08-30), scored with the rule
                exactly as it stands, outcomes the study never saw.
 
