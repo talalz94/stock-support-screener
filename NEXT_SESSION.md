@@ -44,6 +44,90 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-11 (later) — FULL ACCURACY AUDIT: ONE REAL DISPLAY BUG, ONE FRESHNESS GAP, TWO CHECKERS WRONG
+
+Asked: "is all the stats, fundamentals and score accurate and updated? please audit and confirm".
+
+### WHAT RAN
+
+`validate.py` (all 12 groups, 36 checks), `regression_pins.py` (28 filing-verified
+values), a freshness sweep (every score module, bars, zones, pages, provider cache),
+the nightly SEC recompute and provider cross-checks read field by field, a fresh
+Yahoo comparison on 80 random scored names, and direct SEC lookups for KO, NOG, XOM.
+
+### UPDATED? YES, as of the 2026-10-09 close
+
+All five score modules, bars, zones and every page are on 10-09 (the last session);
+Finnhub refreshed 10-10 06:06. After the fixes below, 10-09 was re-scored through the
+orchestrator (`--step fundamental ... docs`): 10 ran, 0 failed, validate CLEAN.
+
+### FOUND AND FIXED
+
+1. **SEC's companyfacts API lags filings by months for some companies, and only the
+   quarterly bulk set fills the gap.** KO's Q2 10-Q (filed 07-29) was not in the store
+   until the 2026q3 bulk set arrived 10-10; on 10-11 SEC's companyfacts for KO STILL
+   ends at the 04-30 10-Q (fetched directly). The weekly refresh targeted KO five times
+   (replayed: stale from 09-04, newest period 03-31) and got the same old answer.
+   309 scored names (11%) got their newest period only from the 10-10 bulk set, a
+   median 72 days after filing (p90 74, max 101). XOM's case is different: its Q2 10-Q
+   was filed under a NEW CIK (2115436); the store already follows it.
+2. **The 10-10 run scored before it ingested.** `fundamental` ran 06:08, the bulk set
+   landed 06:10, so those 309 names waited for the next session (3 days over a weekend).
+   `sec_facts` and `sec_gap` now run BEFORE `fundamental` (order only, no new
+   dependency). Re-scoring 10-09: KO last_filed 04-30 -> 07-29, fund_score 54.1 -> 55.5,
+   ROIC 20.2% -> 20.8%; 27 names moved > 5 points, 7 > 10; names whose latest filing is
+   > 120 days old fell from 15% to 10%. NOTE: the first fundamental run after a fact-
+   store change is cold -- it took 3,706s instead of ~100s.
+3. **Market cap for non-USD filers was in their own currency and printed with "$".**
+   Finnhub's figure: TM 3.4e13 = JPY 34T (~$230B), TSM 6.6e13 = TWD 66T, FMX 6.7e11 =
+   MXN 665B (~$36B) -- the "$665B FMX" seen earlier. Now WITHHELD (a dash) for the 152
+   non-USD filers, after the overlay, in `scores/fundamental.py`. Display-only: no score
+   reads mktcap except through metrics already withheld for these filers; dip only
+   passes it through; `study.py` size terciles had them misbucketed. Verified on the
+   Explore page: TM and FMX show a dash, AAPL $4,912.98B, KO $378.84B.
+4. **The KO regression pin was the stale value** (3.18 = TTM to Q1). Re-pinned at 3.33
+   from the filings: FY25 3.04 + H1-26 1.94 - H1-25 1.65, = 0.86 + 0.53 + 0.91 + 1.03.
+   Pins 28/28.
+5. **The currency check failed every night on 256 correct values.** Since the provider
+   overlay (2026-08-12) a non-USD filer's P/E and P/B are Finnhub's, and Finnhub's P/E is
+   currency-consistent: close / pe / local EPS gives the real exchange rate on 8 names
+   (EUR 1.10-1.24, CAD 0.70-0.73, GBP 1.36, DKK 0.155). The check now excuses values
+   equal to the provider's and still fails on anything of our own. P/B was checked on
+   one name only (ASML: not raw local currency, but its implied rate 1.45 is off our
+   book value by ~25%) -- treat P/B for non-USD filers as unverified.
+   SIDE EFFECT OF THE OVERLAY, NOT A BUG: non-USD filers now get a value pillar from
+   those provider ratios, which the "3 of 4 pillars" design note no longer describes.
+
+### CHECKED AND FOUND TO BE THE REFERENCE'S FAULT, NOT OURS
+
+- **SEC recompute "30% mismatch"** (176 of 591): cash-flow TTMs are 77 of them, and for
+  93% of cfo and 85% of capex mismatches the SEC-side value IS the latest full-year
+  figure -- the naive checker cannot roll year-to-date cash flows (documented; the
+  `rollforward` check re-derives them from the legs: 246/246). Of the income-statement
+  and balance-sheet mismatches, XOM/EXLS/CLBK/SHEN are SEC's copy ending at Q1 while ours
+  runs to Q2 (XOM: Q2-26 net income $14.5B vs $7.1B a year earlier, as filed), SNA is a
+  definition (total revenues incl. financial services vs net sales), HZO is a filing-
+  verified pin the checker disagrees with, and the rest are 1-5% EPS rounding.
+- **Yahoo agreement 80.7%** (951 fields, 80 random names). Price 100%, mktcap 91%, P/E
+  88%, revenue 87%, EPS 86%; ROA 49%, EBITDA 64%, FCF 65%, op margin 72%. Disagreements
+  scatter both ways (no units error). Checked one: NOG op margin ours -24% vs Yahoo +57%
+  -- NOG booked $856M of ceiling-test impairments in the TTM (SEC), so ours is the GAAP
+  figure and Yahoo's excludes them. File: `data/_provider_compare_audit_20261011.csv`.
+
+### STILL OPEN
+
+- **Q3 10-Qs arrive mid-Oct to mid-Nov and, for names whose companyfacts lags, will not
+  reach the store until the 2026q4 bulk set (early January).** Needs a faster source
+  than companyfacts for those names. Not done.
+- **`study.py` is stale**: 3 past months rewritten since it ran 2026-08-13; combo's
+  weights and every MEASURED label come from it. Re-run is ~4-5 h. Not done.
+- Warnings left as they were: peg documented range 0.5-3 vs actual median 0.49; 221 of
+  7.2M facts filed before their period ended (0.003%); 2 unexplained coverage gaps
+  (GMTL, XPRO); 14 near-duplicate sentiment metric pairs.
+- `data/_tech_levels_20261009.csv` predates the mktcap fix but holds no non-USD names,
+  so it is unaffected.
+
+
 ## State at 2026-10-11 — "LOWER LOW, NOW CLIMBING", MEASURED: NO EDGE, AND WORSE IN TECH
 
 Asked for tech names "at or nearing a level, or at a lower low but climbing". The
@@ -2644,7 +2728,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-11 05:00 — do not edit by hand._
+_Generated 2026-10-11 09:00 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -2659,29 +2743,29 @@ _Generated 2026-10-11 05:00 — do not edit by hand._
 | `shortvol` | daily | 4s | 4s | 5s | 10.0 min | 45 |
 | `hype` | daily | 56s | 2.1 min | 2.0 min | 120.0 min | 48 |
 | `provider` | daily | 64.3 min | 65.1 min | 66.3 min | 120.0 min | 40 |
-| `fundamental` | daily | 1.7 min | 2.4 min | 2.8 min | 180.0 min | 46 |
 | `sec_facts` | quarterly | 26s | 5s | 26s | 60.0 min | 12 |
 | `sec_gap` | weekly | 2.5 min | 5.2 min | 7.8 min | 20.0 min | 11 |
+| `fundamental` | daily | 61.8 min | 2.4 min | 61.8 min | 180.0 min | 47 |
 | `events` | weekly | 7.9 min | 10.3 min | 16.3 min | 30.0 min | 12 |
 | `leaderboard` | weekly | 29.1 min | 36.4 min | 90.2 min ⚠ | 90.0 min | 13 |
-| `dip` | daily | 8s | 14s | 12s | 15.0 min | 46 |
-| `combo` | daily | 9s | 12s | 10s | 15.0 min | 42 |
-| `candidates` | daily | 2s | 2s | 2s | 5.0 min | 2 |
-| `validate` | daily | 5.0 min | 5.9 min | 7.1 min | 60.0 min | 32 |
-| `explore` | daily | 3s | 7s | 8s | 5.0 min | 48 |
-| `snapshots` | daily | 0s | 4s | 7s | 5.0 min | 65 |
-| `profiles` | daily | 32.4 min | 22.6 min | 32.4 min ⚠ | 15.0 min | 47 |
+| `dip` | daily | 6s | 14s | 12s | 15.0 min | 47 |
+| `combo` | daily | 7s | 12s | 10s | 15.0 min | 43 |
+| `candidates` | daily | 3s | 2s | 3s | 5.0 min | 3 |
+| `validate` | daily | 4.9 min | 5.8 min | 7.1 min | 60.0 min | 33 |
+| `explore` | daily | 3s | 7s | 8s | 5.0 min | 49 |
+| `snapshots` | daily | 0s | 4s | 7s | 5.0 min | 66 |
+| `profiles` | daily | 19.9 min | 22.5 min | 32.4 min ⚠ | 15.0 min | 48 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 59 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 54 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 66 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 55 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 67 |
 
-**Daily total ≈ 103.8 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 103.5 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-11 05:00 — do not edit by hand._
+_Generated 2026-10-11 09:00 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -2697,9 +2781,9 @@ _Generated 2026-10-11 05:00 — do not edit by hand._
 | rejects | 21 | 7.7 | 2026-09-11 → 2026-10-09 |
 | zones | 31 | 17.5 | 2026-08-27 → 2026-10-09 |
 | fundamentals (companyfacts) | 130 | 74.4 | 1980q3 → 2028q2 |
-| loose (macro, universe, jobs, study) | 30 | 18.3 | — |
+| loose (macro, universe, jobs, study) | 31 | 56.6 | — |
 
-**`data/` total ≈ 1,262 MB.** `reports/` is a further 87 MB across 297 pages.
+**`data/` total ≈ 1,300 MB.** `reports/` is a further 87 MB across 297 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -2707,12 +2791,12 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-11 05:00 — do not edit by hand._
+_Generated 2026-10-11 09:00 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
 | `sentiment` | 26 | 376 | 2016-09-27 → 2026-10-09 |
-| `fundamental` | 61 | 234 | 2016-08-25 → 2026-10-09 |
+| `fundamental` | 61 | 233 | 2016-09-26 → 2026-10-09 |
 | `hype` | 20 | 351 | 2016-10-25 → 2026-10-09 |
 | `dip` | 10 | 278 | 2016-09-27 → 2026-10-09 |
 | `combo` | 15 | 233 | 2016-11-04 → 2026-10-09 |
@@ -2721,7 +2805,7 @@ _Generated 2026-10-11 05:00 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-11 05:00 — do not edit by hand._
+_Generated 2026-10-11 09:00 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

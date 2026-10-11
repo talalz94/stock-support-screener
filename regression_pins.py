@@ -86,7 +86,13 @@ PINS: list[tuple[str, str, float, float, str]] = [
 
     # --- large caps: the sanity floor
     ("AAPL", "eps_diluted_ttm", 8.72, 0.02, "web ~8.7"),
-    ("KO", "eps_diluted_ttm", 3.18, 0.02, "web ~3.18"),
+    # Was 3.18 ("web ~3.18"): the TTM to Q1, pinned while KO's Q2 10-Q (filed
+    # 2026-07-29) was missing from the store -- SEC's companyfacts API never
+    # served it and the 2026q3 bulk set only arrived 2026-10-10. Corrected
+    # 2026-10-11 from the filings themselves.
+    ("KO", "eps_diluted_ttm", 3.33, 0.02,
+     "FY25 3.04 (10-K) + H1-26 1.94 - H1-25 1.65 (10-Q filed 2026-07-29); "
+     "= 0.86 + 0.53 + 0.91 + 1.03 by quarter"),
     ("NVDA", "eps_diluted_ttm", 6.53, 0.03, "internally consistent"),
     ("MU", "eps_diluted_ttm", 44.24, 0.03, "internally consistent"),
     ("CACI", "eps_diluted_ttm", 24.16, 0.03, "internally consistent"),

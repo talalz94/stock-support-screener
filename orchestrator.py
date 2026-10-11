@@ -1406,6 +1406,20 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("universe",), timeout=7200,
          desc="finnhub metric cache for the universe (the source for displayed "
               "ratios; ~58 min at 60 req/min)"),
+    # THE SEC STEPS RUN BEFORE `fundamental`, NOT AFTER. They used to follow it,
+    # so whatever they fetched was scored a run later: on 2026-10-10 the 2026q3
+    # bulk set landed at 06:10, two minutes AFTER fundamental scored 10-09 at
+    # 06:08, and 309 names' newest filings (median 72 days old already) waited
+    # for the next session -- three days, over a weekend. Order only; no
+    # dependency is added, so a failed fetch still never blocks scoring.
+    Step("sec_facts", _step_sec_facts, config.CADENCE_QUARTERLY, timeout=3600,
+         session_indexed=False, due_fn=_due_sec_facts,
+         desc="SEC Financial Statement Data Sets, one ZIP per quarter"),
+    Step("sec_gap", _step_sec_gap, config.CADENCE_WEEKLY, timeout=1200,
+         # 332 companies at ~0.85s each was 4.7 min measured; the steady state
+         # is far smaller because only NEW gap names are fetched.
+         session_indexed=False, depends_on=("sec_facts",),
+         desc="companyfacts for filers the bulk data sets omit, and stale ones"),
     # DAILY, NOT WEEKLY, NOW THAT THE PROVIDER SWEEP IS DAILY.
     #
     # It was weekly because it is filing-driven -- fundamentals genuinely only
@@ -1423,14 +1437,6 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("bars", "provider"), timeout=10800,
          desc="fundamental score module + dashboard (daily: it applies the "
               "provider overlay, which is refreshed nightly)"),
-    Step("sec_facts", _step_sec_facts, config.CADENCE_QUARTERLY, timeout=3600,
-         session_indexed=False, due_fn=_due_sec_facts,
-         desc="SEC Financial Statement Data Sets, one ZIP per quarter"),
-    Step("sec_gap", _step_sec_gap, config.CADENCE_WEEKLY, timeout=1200,
-         # 332 companies at ~0.85s each was 4.7 min measured; the steady state
-         # is far smaller because only NEW gap names are fetched.
-         session_indexed=False, depends_on=("sec_facts",),
-         desc="companyfacts for filers the bulk data sets omit"),
     Step("events", _step_events, config.CADENCE_WEEKLY, depends_on=("news",),
          timeout=1800, desc="empirical event-severity calibration"),
     # 5400s, not 1800s. MEASURED 3210s once hype and dip had real history
