@@ -338,6 +338,9 @@ sheet — the falling knife the thesis exists to avoid.
 
 Depression legs: `drawdown`, `senti_gap` (inverted 30d sentiment), `not_extended`
 (inverted `extension_pct`). `mktcap` is emitted so factor_lab can slice by size.
+Since 2026-10-11 `mktcap` is blank for non-USD filers: the provider reports it in the
+filer's own currency (TM's "$34T" was JPY 34T), so size slices now exclude ~150 names
+rather than misplacing them.
 
 **Measured on 107 dates (2026-08-08).** The **gate works and the ranking does
 not**: `dip_gate` reaches t=+2.75, `dip_score` only t=+0.52. Deepening the series

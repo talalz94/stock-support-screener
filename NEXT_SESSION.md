@@ -114,13 +114,48 @@ orchestrator (`--step fundamental ... docs`): 10 ran, 0 failed, validate CLEAN.
   -- NOG booked $856M of ceiling-test impairments in the TTM (SEC), so ours is the GAAP
   figure and Yahoo's excludes them. File: `data/_provider_compare_audit_20261011.csv`.
 
+### A FASTER SOURCE FOR NEW FILINGS -- RECOMMENDATION (measured, not yet built)
+
+**Compute is not the bottleneck; source latency is.** A full fact read for the
+tradeable universe measured 36 s wall / 38 s CPU on 2026-10-11 (prior-year read 37 s),
+and the fundamental step is 100-250 s on every normal day -- including the days after a
+weekly `sec_gap` write, so a store write does not make the next run cold. Two runs were
+far slower for reasons NOT yet found: 2,078 s on 09-30 and 3,706 s on the 10-11 re-score
+(no backfill ran; facts read normally afterwards). Watch the next nightly time before
+blaming anything.
+
+**Use EDGAR itself, per filing.** Verified on KO: SEC's submissions API
+(`data.sec.gov/submissions/CIK0000021344.json`) lists the 07-29 10-Q
+(0001628280-26-050503); the filing folder's `index.json` names the extracted XBRL
+instance (`ko-20260703_htm.xml`, 2.9 MB); it carries EarningsPerShareDiluted 1.03 /
+0.88 / 1.94 / 1.65 -- exactly what the bulk set had. 3 requests, 7.6 s -- while
+companyfacts still does not serve that filing at all.
+
+    discover  EDGAR daily form index (one request a day lists every 10-Q/10-K/20-F/40-F
+              accepted), filtered to universe CIKs; submissions API as a per-name fallback
+    fetch     each new filing's `*_htm.xml` instance, gzip (XML compresses ~10x);
+              ~150-400 universe filings a day in earnings season = 1-2 min at 6 req/s
+    parse     non-dimensional contexts only, WANTED tags only, period start/end -> ddate
+              and qtrs, written in the bulk SCHEMA through `fundamentals._typed`
+    dedupe    by accession number (`adsh`): when the quarterly bulk set arrives it
+              supersedes the same filing, so the bulk set stays the reconciliation
+              backstop and companyfacts stays the history/backfill source
+    when      nightly, before `fundamental` (the SEC steps already moved there)
+
+Effect: a 10-Q filed after Monday's close is scored at Tuesday 05:00, instead of up to
+~100 days later. Fallback if EDGAR parsing proves brittle: Finnhub
+`/stock/financials-reported` (as-reported XBRL, key already in .env, 60 req/min) --
+third-party, so it would need the same cross-checks. SEC's monthly "Financial Statement
+and Notes" sets were considered and rejected: a month of lag and multi-GB downloads.
+
 ### STILL OPEN
 
 - **Q3 10-Qs arrive mid-Oct to mid-Nov and, for names whose companyfacts lags, will not
-  reach the store until the 2026q4 bulk set (early January).** Needs a faster source
-  than companyfacts for those names. Not done.
+  reach the store until the 2026q4 bulk set (early January).** Fix designed above;
+  being built in a parallel session (2026-10-11).
 - **`study.py` is stale**: 3 past months rewritten since it ran 2026-08-13; combo's
-  weights and every MEASURED label come from it. Re-run is ~4-5 h. Not done.
+  weights and every MEASURED label come from it. Re-run (~4-5 h) started in a parallel
+  session 2026-10-11.
 - Warnings left as they were: peg documented range 0.5-3 vs actual median 0.49; 221 of
   7.2M facts filed before their period ended (0.003%); 2 unexplained coverage gaps
   (GMTL, XPRO); 14 near-duplicate sentiment metric pairs.
