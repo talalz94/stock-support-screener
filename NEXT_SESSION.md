@@ -44,6 +44,99 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-11 — "LOWER LOW, NOW CLIMBING", MEASURED: NO EDGE, AND WORSE IN TECH
+
+Asked for tech names "at or nearing a level, or at a lower low but climbing". The
+list was shown first (below), marked unmeasured; then `lowclimb_study.py` measured
+the pattern. ~4 min to build the panel (`data/_lowclimb_panel.parquet`, 777,024 rows),
+seconds to analyse.
+
+### THE PATTERN (fixed before any result; no tuning)
+
+    recent low = lowest LOW of the last 20 sessions; prior low = lowest LOW of 21..120 back
+    lower low  : recent low < prior low * 0.99
+    climbing   : low >= 3 sessions old, close >= low * 1.03, close > close 5 sessions ago
+    still near : close <= low * 1.15
+
+On a median date it flags 74 names, 4.4% of eligible stocks. The study's flags
+reproduce the 10-09 list exactly (15 of 15 tech-labelled names, 0 extra).
+
+### RESULTS -- 245 dates 2017-01..2026-10, windows never overlap, 18 tests declared up front
+
+    test (excess = picks minus the same-day pool)       h   dates  picks/date  excess    t
+    PRIMARY  lower low, now climbing, all stocks        20   121     109     -0.26pp  -0.89
+             same                                       10   241     120     -0.09pp  -0.59
+             same                                       40    61     106     -0.73pp  -1.58
+    tech     core-tech picks vs core-tech pool          10   166      17     -0.23pp  -0.76
+             same                                       20    83      16     -0.93pp  -1.62
+             same                                       40    41      17     -3.65pp  -2.74
+    control  lower low, any                             20   122     513     -0.44pp  -1.80
+             lower low, NOT climbing                    20   122     308     -0.41pp  -1.62
+             lower low, any                             40    61     533     -0.79pp  -1.96
+             lower low, NOT climbing                    40    61     311     -1.17pp  -2.23
+    strength vs own quartile of % of 1y high, Q1..Q4    40   59/57/45/20     -0.85 / -0.55 / -0.98 / -1.21pp
+                                                                             t -1.00 / -1.19 / -1.65 / -0.99
+    support  (49 coupling dates) vs own band, AT/NEAR   40    47      84     -1.06pp  -1.68
+             APPROACHING                                40    42      19     +0.78pp  +0.47
+             no support                                 40    44      19     -1.13pp  -1.30
+             no support & <= 64% of 1y high             40    40      14     -0.12pp  -0.09
+
+Hit rate at the primary horizon: 51.6% of picks up vs 51.6% of the pool. Halves:
+-0.52pp (2017-21) and -0.01pp (2021-26). Tails at 40 bars: lost >20% 11.1% of picks
+vs 10.8% of the pool; gained >20% 8.6% vs 11.7%. Same disasters, fewer jackpots.
+
+**The tech result is the only one that stands out, and it points the wrong way.**
+Robustness on the same 41 dates: median-vs-median -2.18pp (t=-1.99); returns clipped
+to -60%..+100% -3.14pp (t=-2.42); without the 3 most extreme dates -3.22pp (t=-2.83);
+picks lagged on 66% of dates. It is still one of 18 tests and does not clear a
+multiple-comparisons bar (|t| ~3.0), so: a consistent warning, not proof.
+
+### VERDICT, PLAIN
+
+No edge. Across all stocks, buying a lower low that has started to climb did the same
+as buying an average stock over 2-4 weeks, and slightly worse over 2 months. In tech
+it did worse than the average tech stock. Waiting for the climb is LESS BAD than buying
+a lower low that is still falling (-0.73 vs -1.17pp at 40 bars) but both trail the
+average stock. The pattern sits mostly in beaten-down names (77% in the bottom two
+quartiles of % of 1-year high) and lagged its own peers in every quartile. Inside the
+measured avoid profile (no support, <= 64% of high) a climb changed nothing (t=-0.09).
+
+### A METHOD FLAW FOUND, AFFECTING rule_accuracy.py TOO
+
+The "luck p" (random same-size draws from each date's pool) assumes the picks are
+independent. They are not -- beaten-down names move together -- so with hundreds of
+picks a day it read p = 0.000 for "lower low, any", whose t across dates is only -1.80.
+The t across dates is the test; both scripts now say so (`lowclimb_study.py` prints it,
+`rule_accuracy.py` in its docstring; the good-level luck p of 0.26 was non-significant
+anyway, so that verdict stands).
+A proper fix is a permutation that keeps each date's cross-sectional structure (e.g.
+shuffle by sector blocks); not done.
+
+### BIASES
+
+Survivorship: 1.0% of rows (1.1% of pattern rows) are names not active today, and a
+name that delists inside a window has no forward return. Both flatter weak stocks --
+exactly what this pattern selects -- so the true result is likely WORSE than measured.
+First run's avoid-profile stratum came back empty: the coupling panel records pct_hi
+only when a level exists. Fixed by taking pct_hi from the bars (the two agree to 0.0000
+over 111,188 rows where both exist).
+
+### THE TECH LIST ITSELF (2026-10-09 close, `data/_tech_levels_20261009.csv`)
+
+"Tech" = sector map Technology + Semiconductors, narrowed to core SIC codes
+(3570-3579, 3661-3679, 3825, 7370-7379): 381 tradeable names, of 462 carrying the label.
+(The chat answer said 456 -- wrong, never computed.) The SIC "Technology"
+label also covers electrical equipment, instruments and defence electronics (OTIS,
+Woodward, Danaher, Garmin, EyePoint -- a drug maker on SIC 3826); the 54 of those 81 that
+made the list stay in the file with `core_tech=False`. At or near a level: 235 of the
+381 (62%), so the filter alone selects little. Shown in chat: the 40 also within 20% of the 1-year high
+with fund_score >= 55, and 11 core lower-low-climbing names (AVGO, TBLA, ADTN, COUR AT a
+level; FSLR, ALKT NEAR; APP, TTWO with no level within 6%; TRIP, FLUT, KDK matching the
+measured avoid profile). Only 1 of the 40 (IMMR) has hype <= 45, which is why tech barely
+appears on the Candidates page. The list was built by a scratch script; the pattern
+logic is now in `lowclimb_study.py`.
+
+
 ## State at 2026-10-09 — THE GOOD-LEVEL LIST CAN NOW BE SEEN, AND FILTERED BY SECTOR
 
 Asked: "how can I visually see the line of level where these stocks are and the
@@ -2551,62 +2644,62 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-09 06:52 — do not edit by hand._
+_Generated 2026-10-11 05:00 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 7s | 7s | 474.9 min ⚠ | 2.0 min | 46 |
-| `bars` | daily | 56s | 47s | 2.1 min | 10.0 min | 46 |
-| `macro` | daily | 82s | 1.7 min | 1.8 min | 15.0 min | 46 |
-| `news` | daily | 5s | 5s | 8s | 10.0 min | 46 |
-| `senti_cache` | daily | 1s | 2s | 2s | 10.0 min | 46 |
-| `sentiment` | daily | 12s | 14s | 20s | 15.0 min | 47 |
-| `bounce` | daily | 37s | 39s | 77s | 15.0 min | 47 |
-| `zones` | daily | 79s | 86s | 2.2 min | 30.0 min | 30 |
-| `shortvol` | daily | 5s | 4s | 6s | 10.0 min | 44 |
-| `hype` | daily | 79s | 2.1 min | 2.3 min | 120.0 min | 47 |
-| `provider` | daily | 64.6 min | 65.1 min | 72.4 min | 120.0 min | 39 |
-| `fundamental` | daily | 2.3 min | 2.4 min | 2.8 min | 180.0 min | 45 |
-| `sec_facts` | quarterly | 8s | 4s | 8s | 60.0 min | 11 |
-| `sec_gap` | weekly | 4.0 min | 5.4 min | 7.8 min | 20.0 min | 10 |
-| `events` | weekly | 9.9 min | 10.6 min | 16.3 min | 30.0 min | 11 |
-| `leaderboard` | weekly | 36.4 min | 38.2 min | 90.2 min ⚠ | 90.0 min | 12 |
-| `dip` | daily | 12s | 14s | 12s | 15.0 min | 45 |
-| `combo` | daily | 10s | 12s | 10s | 15.0 min | 41 |
-| `candidates` | daily | 2s | 2s | 2s | 5.0 min | 1 |
-| `validate` | daily | 7.1 min | 6.0 min | 7.1 min | 60.0 min | 31 |
-| `explore` | daily | 8s | 7s | 8s | 5.0 min | 47 |
-| `snapshots` | daily | 7s | 4s | 7s | 5.0 min | 63 |
-| `profiles` | daily | 31.6 min | 22.5 min | 31.6 min ⚠ | 15.0 min | 46 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 57 |
-| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 53 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 64 |
+| `universe` | daily | 6s | 7s | 474.9 min ⚠ | 2.0 min | 47 |
+| `bars` | daily | 36s | 46s | 58s | 10.0 min | 47 |
+| `macro` | daily | 62s | 1.7 min | 1.6 min | 15.0 min | 47 |
+| `news` | daily | 4s | 5s | 6s | 10.0 min | 47 |
+| `senti_cache` | daily | 1s | 2s | 2s | 10.0 min | 47 |
+| `sentiment` | daily | 9s | 14s | 20s | 15.0 min | 48 |
+| `bounce` | daily | 24s | 38s | 58s | 15.0 min | 48 |
+| `zones` | daily | 52s | 82s | 1.6 min | 30.0 min | 31 |
+| `shortvol` | daily | 4s | 4s | 5s | 10.0 min | 45 |
+| `hype` | daily | 56s | 2.1 min | 2.0 min | 120.0 min | 48 |
+| `provider` | daily | 64.3 min | 65.1 min | 66.3 min | 120.0 min | 40 |
+| `fundamental` | daily | 1.7 min | 2.4 min | 2.8 min | 180.0 min | 46 |
+| `sec_facts` | quarterly | 26s | 5s | 26s | 60.0 min | 12 |
+| `sec_gap` | weekly | 2.5 min | 5.2 min | 7.8 min | 20.0 min | 11 |
+| `events` | weekly | 7.9 min | 10.3 min | 16.3 min | 30.0 min | 12 |
+| `leaderboard` | weekly | 29.1 min | 36.4 min | 90.2 min ⚠ | 90.0 min | 13 |
+| `dip` | daily | 8s | 14s | 12s | 15.0 min | 46 |
+| `combo` | daily | 9s | 12s | 10s | 15.0 min | 42 |
+| `candidates` | daily | 2s | 2s | 2s | 5.0 min | 2 |
+| `validate` | daily | 5.0 min | 5.9 min | 7.1 min | 60.0 min | 32 |
+| `explore` | daily | 3s | 7s | 8s | 5.0 min | 48 |
+| `snapshots` | daily | 0s | 4s | 7s | 5.0 min | 65 |
+| `profiles` | daily | 32.4 min | 22.6 min | 32.4 min ⚠ | 15.0 min | 47 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 59 |
+| `dashboard` | daily | 0s | 0s | 0s | 2.0 min | 54 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 66 |
 
-**Daily total ≈ 103.9 min.** Weekly adds 54.2 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 103.8 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-09 06:52 — do not edit by hand._
+_Generated 2026-10-11 05:00 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 123 | 249.4 | 2016-08 → 2026-10 |
+| bars 1d | 123 | 249.5 | 2016-08 → 2026-10 |
 | bars 1h | 5 | 0.7 | 2026-06 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
-| news | 123 | 170.8 | 2016-08 → 2026-10 |
+| news | 123 | 170.9 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 11.8 | 2016-08 → 2026-10 |
-| scores | 123 | 308.8 | 2016-08 → 2026-10 |
-| fundamentals | 69 | 335.1 | 2009q2 → 2026q2 |
+| scores | 122 | 309.9 | 2016-09 → 2026-10 |
+| fundamentals | 70 | 337.3 | 2009q2 → 2026q3 |
 | short volume | 75 | 56.3 | 2020-08 → 2026-10 |
-| flags | 49 | 4.2 | 2026-07-31 → 2026-10-08 |
-| rejects | 22 | 8.0 | 2026-09-09 → 2026-10-08 |
-| zones | 30 | 17.0 | 2026-08-27 → 2026-10-08 |
+| flags | 50 | 4.3 | 2026-07-31 → 2026-10-09 |
+| rejects | 21 | 7.7 | 2026-09-11 → 2026-10-09 |
+| zones | 31 | 17.5 | 2026-08-27 → 2026-10-09 |
 | fundamentals (companyfacts) | 130 | 74.4 | 1980q3 → 2028q2 |
 | loose (macro, universe, jobs, study) | 30 | 18.3 | — |
 
-**`data/` total ≈ 1,258 MB.** `reports/` is a further 85 MB across 293 pages.
+**`data/` total ≈ 1,262 MB.** `reports/` is a further 87 MB across 297 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -2614,21 +2707,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-09 06:52 — do not edit by hand._
+_Generated 2026-10-11 05:00 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 375 | 2016-09-27 → 2026-10-08 |
-| `fundamental` | 61 | 233 | 2016-08-25 → 2026-10-08 |
-| `hype` | 20 | 350 | 2016-10-25 → 2026-10-08 |
-| `dip` | 10 | 277 | 2016-09-27 → 2026-10-08 |
-| `combo` | 15 | 232 | 2016-11-04 → 2026-10-08 |
+| `sentiment` | 26 | 376 | 2016-09-27 → 2026-10-09 |
+| `fundamental` | 61 | 234 | 2016-08-25 → 2026-10-09 |
+| `hype` | 20 | 351 | 2016-10-25 → 2026-10-09 |
+| `dip` | 10 | 278 | 2016-09-27 → 2026-10-09 |
+| `combo` | 15 | 233 | 2016-11-04 → 2026-10-09 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-09 06:52 — do not edit by hand._
+_Generated 2026-10-11 05:00 — do not edit by hand._
 
 1,536 cells measured across 95 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

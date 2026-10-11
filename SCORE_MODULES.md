@@ -480,6 +480,11 @@ is already beaten down is the strongest effect found (-5.3pp, t = -5.8) and is b
 read as an AVOID flag. Numbers, tests and the multiple-comparisons count are in
 `NEXT_SESSION.md`.
 
+**"Lower low, now climbing" was measured too** (`lowclimb_study.py`, 2026-10-11): no edge
+across all stocks (-0.26pp at 20 bars, t = -0.89), worse in tech (-3.65pp at 40 bars,
+t = -2.74, one of 18 tests). A climb after a lower low is less bad than a lower low still
+falling, and both trail the average stock.
+
 **Seeing it.** `reports/zones/candidates.html` (nav "Candidates", step `candidates`, built
 after `combo` because it needs the same session's fundamental and hype scores) draws
 each name on the good-level list: a price chart with the support level as a dashed

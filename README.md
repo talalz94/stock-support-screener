@@ -404,6 +404,7 @@ as bankruptcy text and asserts no metric moves.
 | `couple_study.py` | reads that panel: IC and top-minus-bottom spread at four horizons, raw and sector-neutral, with the test count printed |
 | `good_level.py` | the "good level" rule applied to the latest session -> `data/_good_level_<date>.csv`. A screen, **not a buy list** |
 | `rule_accuracy.py` | measures that rule: history, luck, and live days after the study |
+| `lowclimb_study.py` | measures "lower low, now climbing" over 245 non-overlapping dates since 2017: no edge, worse in tech. Builds `data/_lowclimb_panel.parquet` once; `--rebuild` |
 | **`orchestrator.py`** | **THE scheduled entry point** — 26-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |
 
