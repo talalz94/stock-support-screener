@@ -99,6 +99,24 @@ PINS: list[tuple[str, str, float, float, str]] = [
     ("SCCO", "eps_diluted_ttm", 6.84, 0.03, "internally consistent"),
     ("HOOD", "eps_diluted_ttm", 2.26, 0.03, "internally consistent"),
     ("MRNA", "eps_diluted_ttm", -7.98, 0.03, "internally consistent"),
+    # --- 52/53-week calendars: the roll-forward's YTD and one-year tests used
+    # to be "within 20 days" / "350-380 days", which a 16-week Q1 and mid-
+    # month period ends fail (2026-10-12; see fundamentals.is_ytd_stub).
+    ("KR", "eps_diluted_ttm", 1.71, 0.02,
+     "FY25 1.54 (10-K 0001104659-26-037723) + Q1-26 1.46 - Q1-25 1.29 "
+     "(10-Q 0001104659-26-078236); Q1 is 16 weeks"),
+]
+
+# Pins that only exist at a LATER date than ASOF: (asof, ticker, field,
+# expected, rel_tol, source). Same rules as PINS.
+DATED_PINS: list[tuple[str, str, str, float, float, str]] = [
+    ("2026-10-09", "PEP", "eps_diluted_ttm", 7.95, 0.02,
+     "FY25 6.00 (10-K 0000077476-26-000007) + Q3-26 YTD 6.10 - Q3-25 YTD 4.15 "
+     "(10-Q 0000077476-26-000048, filed 2026-10-08); by quarter "
+     "1.85 + 1.70 + 2.18 + 2.23 = 7.96. Was stuck at 6.37 (the Q1 roll)"),
+    ("2026-10-09", "KR", "eps_diluted_ttm", 1.85, 0.02,
+     "FY25 1.54 + H1-26 2.51 - H1-25 2.20 (10-Q 0001104659-26-108926, filed "
+     "2026-09-18); H1 ends 08-15 and 08-16, rounded to 07-31 and 08-31"),
 ]
 
 # Share counts that must stay DROPPED -- the filers contradict themselves.
@@ -107,6 +125,14 @@ MUST_BE_NULL: list[tuple[str, str, str]] = [
      "10-Q tags 1.735437e10 while CommonStockSharesOutstanding is 1.811355e7"),
     ("TEM", "shares_diluted_ttm",
      "10-Q tags 182,397 shares for a company with ~180 MILLION"),
+    # A period under half a quarter is stored qtrs=0; it must never become a
+    # LEVEL figure that fund_metrics falls back to (2026-10-12).
+    ("BRR", "net_income",
+     "24,618,000 is a 28-day inception stub to 2025-06-30 (10-Q filed "
+     "2026-08-13), not a year's income"),
+    ("BSX", "buybacks",
+     "two one-day $2.0B accelerated repurchases (10-Q filed 2026-08-03) are "
+     "events, not a year of buybacks"),
 ]
 
 
@@ -143,7 +169,20 @@ def check(asof: str = ASOF) -> int:
                 fails.append((tk, field, f"{got:,.0f} (should be dropped)",
                               float("nan"), why))
 
-    n = len(PINS) + len(MUST_BE_NULL)
+    for when in sorted({p[0] for p in DATED_PINS}):
+        here = [p for p in DATED_PINS if p[0] == when]
+        g = FD.facts_asof(when, sorted({p[1] for p in here}))
+        g = g.set_index("ticker") if not g.empty else g
+        for _w, tk, field, want, tol, src in here:
+            if g.empty or tk not in g.index or field not in g.columns:
+                fails.append((tk, field, f"MISSING @{when}", want, src))
+                continue
+            got = pd.to_numeric(pd.Series([g.at[tk, field]]),
+                                errors="coerce").iloc[0]
+            if pd.isna(got) or abs(float(got) - want) / max(abs(want), 1e-9) > tol:
+                fails.append((tk, field, f"{got:,.4f} @{when}", want, src))
+
+    n = len(PINS) + len(MUST_BE_NULL) + len(DATED_PINS)
     if not fails:
         print(f"regression_pins: {n} pin(s) OK  (asof {asof})")
         return 0
