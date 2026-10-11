@@ -83,6 +83,7 @@ STORES = [
     ("rejects", config.REJECTS, "*.parquet"),
     ("zones", config.ZONES, "*.parquet"),
     ("fundamentals (companyfacts)", config.FUNDAMENTALS_CF, "*.parquet"),
+    ("fundamentals (EDGAR filings)", config.FUNDAMENTALS_EDGAR, "*q*.parquet"),
 ]
 
 STATUS_HELP = {

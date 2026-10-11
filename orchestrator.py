@@ -957,6 +957,59 @@ def _step_sec_gap(asof: str) -> tuple[int, str]:
     return n, detail
 
 
+def _step_sec_edgar(asof: str) -> tuple[int, str]:
+    """New 10-Q/10-K/20-F/40-F filings, per filing, straight from EDGAR.
+
+    The two SEC steps above lag: the bulk sets by a quarter, and companyfacts
+    by months for some companies -- KO's 07-29 10-Q was still absent from it on
+    10-11 and reached the store only with the 2026q3 bulk set, 73 days late.
+    This reads EDGAR's daily index (and the latest-filings feed for the day
+    whose index is not out yet), fetches each new universe filing's XBRL, and
+    stores it in the bulk schema. `fundamentals.read` dedupes by accession, so
+    a filing the other stores already hold is never counted twice.
+
+    Same convergence rule as `sec_gap`: retry the failures once, then judge
+    the run by the SHARE still failing. A failed filing stays in the ledger as
+    an error and is retried every night until it clears; a day whose index
+    could not be fetched stays unsettled and is re-read the next night.
+    """
+    import edgar
+    res = edgar.run(verbose=False)
+    failed = list(res.get("failed_filings") or [])
+    recovered = 0
+    if failed:
+        r2 = edgar.ingest(failed, verbose=False)
+        still = list(r2.get("failed_filings") or [])
+        recovered = len(failed) - len(still)
+        for k in ("ok", "empty", "no_xbrl", "no_statements", "gone", "rows"):
+            res[k] = int(res.get(k, 0) or 0) + int(r2.get(k, 0) or 0)
+        failed = still
+    attempted = int(res.get("attempted", 0) or 0)
+    share = len(failed) / max(attempted, 1)
+    days_failed = list(res.get("days_failed") or [])
+    if (failed and share > config.SEC_GAP_MAX_FAIL) or (
+            days_failed and len(days_failed) >= int(res.get("days_tried", 0) or 0)):
+        raise RuntimeError(
+            f"EDGAR failed: {len(failed)} of {attempted} filing(s) "
+            f"({share:.0%}, ceiling {config.SEC_GAP_MAX_FAIL:.0%}) after a retry "
+            f"pass, {len(days_failed)} of {res.get('days_tried', 0)} index day(s): "
+            f"{', '.join(days_failed[:3])}")
+    n = int(res.get("ok", 0) or 0)
+    detail = (f"{n} filing(s) stored ({int(res.get('rows', 0) or 0):,} rows) of "
+              f"{res.get('listed', 0)} universe filing(s) listed since "
+              f"{res.get('since')}, {res.get('in_store', 0)} already in the "
+              f"bulk/companyfacts store, {res.get('in_ledger', 0)} already "
+              f"ingested; {int(res.get('requests', 0) or 0):,} "
+              f"requests, {int(res.get('wire_bytes', 0) or 0) / 1e6:.1f} MB")
+    if res.get("pruned"):
+        detail += f"; {res['pruned']:,} row(s) pruned as now in the bulk set"
+    if recovered or failed or days_failed:
+        detail += (f"; {recovered} recovered on retry, {len(failed)} still "
+                   f"failing ({share:.1%}), {len(days_failed)} index day(s) "
+                   f"to re-read")
+    return n, detail
+
+
 def _due_sec_facts(prev) -> tuple[bool, str]:
     """Due iff a quarter in the window is not on disk AND we have not probed for
     it this week.
@@ -1420,6 +1473,16 @@ REGISTRY: tuple[Step, ...] = (
          # is far smaller because only NEW gap names are fetched.
          session_indexed=False, depends_on=("sec_facts",),
          desc="companyfacts for filers the bulk data sets omit, and stale ones"),
+    # DAILY BY CALENDAR, not by session. EDGAR publishes day D's index at
+    # ~22:00 ET (07:00 PKT), two hours AFTER the 05:00 run: the latest-filings
+    # feed covers what was accepted before the run, and the index settles the
+    # rest a night later. Friday's index is first readable on Sunday's run,
+    # which a session-indexed step would skip (asof does not move) until
+    # Tuesday. Order only, like the two above: it never blocks scoring.
+    Step("sec_edgar", _step_sec_edgar, config.CADENCE_DAILY, timeout=1800,
+         session_indexed=False,
+         desc="EDGAR per-filing XBRL for new 10-Q/10-K/20-F/40-F, scored the "
+              "night after filing instead of a quarter later"),
     # DAILY, NOT WEEKLY, NOW THAT THE PROVIDER SWEEP IS DAILY.
     #
     # It was weekly because it is filing-driven -- fundamentals genuinely only

@@ -216,11 +216,13 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **26 steps**, in this order: `universe, bars, macro, news, senti_cache,
+- **27 steps**, in this order: `universe, bars, macro, news, senti_cache,
   sentiment, bounce, zones, shortvol, hype, provider, sec_facts, sec_gap,
-  fundamental, events, leaderboard, dip, combo, candidates, validate, explore,
-  snapshots, profiles, retention, dashboard, docs`. The SEC steps come before
-  `fundamental` so a newly fetched filing is scored the same night. `bounce` and `zones` are deliberately
+  sec_edgar, fundamental, events, leaderboard, dip, combo, candidates, validate,
+  explore, snapshots, profiles, retention, dashboard, docs`. The SEC steps come before
+  `fundamental` so a newly fetched filing is scored the same night; `sec_edgar`
+  reads each new 10-Q/10-K/20-F/40-F straight from EDGAR, so a filing reaches the
+  scores a night after it is filed instead of a quarter later. `bounce` and `zones` are deliberately
   early: they need only `bars` and take about 30 and 60 seconds, and they used to
   sit behind a three-hour step.
 - **A normal day takes about 2 hours** (1.9-2.4h over recent weeks); a pass with
@@ -406,7 +408,8 @@ as bankruptcy text and asserts no metric moves.
 | `good_level.py` | the "good level" rule applied to the latest session -> `data/_good_level_<date>.csv`. A screen, **not a buy list** |
 | `rule_accuracy.py` | measures that rule: history, luck, and live days after the study |
 | `lowclimb_study.py` | measures "lower low, now climbing" over 245 non-overlapping dates since 2017: no edge, worse in tech. Builds `data/_lowclimb_panel.parquet` once; `--rebuild` |
-| **`orchestrator.py`** | **THE scheduled entry point** — 26-step registry, watermark catch-up, `data/_jobs.parquet` |
+| `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
+| **`orchestrator.py`** | **THE scheduled entry point** — 27-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |
 
 ---
