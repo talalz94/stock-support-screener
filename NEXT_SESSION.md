@@ -44,6 +44,25 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-12 (later morning) — COMBO IN EXPLORE, TWO METRICS NO LONGER DROPPED, REBUILD RUN DETACHED
+
+- **Explore shows the combined scores**: `combo_h1`, `combo_h20`, `combo_h60` lead
+  `explore.DEFAULT_METRICS` (they were in the store, never in the table). Their tooltips
+  carry the out-of-sample verdicts. Checked on the page: AAPL 70.08 / 62.59 / 55.59.
+- **Two significant metrics were silently refused as "unthemed"** (the combo selftest
+  warning): `above_200dma` (hype; t +2.18 at h=1 on 344 dates) now sits in the
+  `attention` theme and enters `combo_h1` (admitted pre-dedup 27 -> 28);
+  `debt_to_equity` replaces `debt_equity` in `safety` -- no module ever emitted
+  `debt_equity`. It is still held out by COMBO_MIN_DATES (29 dates at h=20) and enters on
+  its own once its history reaches 100. Selftest: no unthemed warning.
+- **The rebuild runs as a one-off Windows task, not under Claude**, so the app can be
+  closed: task `Screener-OneOff-Rebuild-20261012` runs `data/_bg_rebuild_20261012.py`
+  (pythonw, hidden): `orchestrator.py --step combo --step explore --step profiles --step
+  dashboard --step docs`, then `metrics_doc.py --build`, the combo selftest and the page
+  audit. Log `data/_bg_rebuild_20261012.log`; result `data/_bg_rebuild_20261012_status.json`
+  (per step: rc, seconds). The task deletes itself when done (and expires after 12 h).
+  Needs the laptop on and the user logged in, like the nightly task.
+
 ## State at 2026-10-12 (morning) — COMBO NOW REQUIRES 100 DATES OF EVIDENCE PER METRIC
 
 The study re-run (section below) admitted seven metrics into `combo_h1`/`combo_h20` on
