@@ -829,6 +829,14 @@ DIP_MIN_COVERAGE = 0.50       # fraction of depression components present
 COMBO_MIN_T = 2.0
 COMBO_DEDUP_RHO = 0.90        # above this, two metrics are one signal
 COMBO_MIN_COVERAGE = 0.50
+# A study cell must rest on at least this many dates before its metric may enter
+# a combo. Added 2026-10-12 after the study re-run admitted seven metrics with
+# ~one earnings season of history (23-48 dates): three at h=20 sat on about two
+# independent 20-day windows and "hit" 100% of the time. Every established
+# admitted cell has >= 178 dates, so any value from 49 to 178 admits exactly the
+# same set -- 100 is not tuned to a result. Re-admission is automatic once a
+# metric's own history reaches it.
+COMBO_MIN_DATES = 100
 
 # ===========================================================================
 # Orchestrator  (orchestrator.py -- the one scheduled entry point)

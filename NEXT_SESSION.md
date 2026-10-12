@@ -44,6 +44,41 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-12 (morning) — COMBO NOW REQUIRES 100 DATES OF EVIDENCE PER METRIC
+
+The study re-run (section below) admitted seven metrics into `combo_h1`/`combo_h20` on
+about one earnings season of history (23-48 dates; three at h=20 on ~two independent
+windows, "hit" 100%). Fixed by rule, not by hand: a study cell must rest on at least
+`config.COMBO_MIN_DATES` = 100 dates before its metric may enter a combo. Every
+established admitted cell has >= 178 dates and the thin ones <= 48, so ANY floor from
+49 to 178 admits the same set -- 100 is not tuned. Metrics re-enter on their own once
+their history reaches it. `scores/combo.py` selftest now asserts it.
+
+    admitted (pre-dedup)   h1 33 -> 27   h20 28 -> 25   h60 22 -> 22 (unchanged)
+    dropped                eps_growth_q, ebitda_growth, gross_margin_chg, op_margin_chg,
+                           roa (h1, 48 dates), gross_margin (h1 and h20), rev_growth_q (h20)
+
+Combo for 10-09 rebuilt (`--step combo --step explore --step profiles --step dashboard
+--step docs`, 0 failed) and `metrics_doc.py --build` rerun. Effect, same session:
+
+    score   fixed vs thin-metric version              fixed vs the August weights
+    h1      Spearman 0.98, top-50 41/50, +135 names   Spearman 0.91, top-50 22/50
+    h20     Spearman 0.97, top-50 36/50, +218 names   Spearman 0.91, top-50 29/50
+    h60     identical                                 Spearman 0.94, top-50 23/50
+
+The change against August is the legitimate one: two more months of evidence
+(fund_score h20 t +5.2 -> +7.6; mom_12_1 dropped out).
+
+NOT DONE, NOTED: the combo selftest reports two significant metrics with no theme,
+silently dropped -- `above_200dma`, and `debt_to_equity` (THEMES lists `debt_equity`,
+which may be the same metric under an old name). Admitting them is a model change and
+was left for a decision. Combo HISTORY is still on the old weights (only 10-09 is new),
+so per-ticker combo trends show a step there; `combo_refresh.py` would rebuild it.
+
+First nightly `sec_edgar` (05:00): ok, 9.7 s, 28 universe filings listed since 10-01, 26
+already ingested, 2 already in bulk/companyfacts, 4 requests.
+
+
 ## State at 2026-10-12 (small hours) — THE FACTOR STUDY RE-RUN: TWO MORE MONTHS MOVED THE NUMBERS, AND SEVEN NEW METRICS ENTERED COMBO ON TOO LITTLE HISTORY
 
 Asked: `validate --only claims` warned that the study measures stale data ("3 past
@@ -3136,7 +3171,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-12 01:30 — do not edit by hand._
+_Generated 2026-10-12 05:50 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -3153,28 +3188,28 @@ _Generated 2026-10-12 01:30 — do not edit by hand._
 | `provider` | daily | 64.3 min | 65.1 min | 66.3 min | 120.0 min | 40 |
 | `sec_facts` | quarterly | 26s | 5s | 26s | 60.0 min | 12 |
 | `sec_gap` | weekly | 2.5 min | 5.2 min | 7.8 min | 20.0 min | 11 |
-| `sec_edgar` | daily | 14s | 14s | 14s | 30.0 min | 1 |
+| `sec_edgar` | daily | 10s | 12s | 14s | 30.0 min | 2 |
 | `fundamental` | daily | 61.8 min | 2.4 min | 61.8 min | 180.0 min | 47 |
 | `events` | weekly | 7.9 min | 10.3 min | 16.3 min | 30.0 min | 12 |
 | `leaderboard` | weekly | 29.1 min | 36.4 min | 90.2 min ⚠ | 90.0 min | 13 |
 | `dip` | daily | 6s | 14s | 12s | 15.0 min | 47 |
-| `combo` | daily | 15s | 12s | 15s | 15.0 min | 44 |
+| `combo` | daily | 23s | 12s | 23s | 15.0 min | 45 |
 | `candidates` | daily | 3s | 2s | 3s | 5.0 min | 3 |
 | `validate` | daily | 4.9 min | 5.8 min | 7.1 min | 60.0 min | 33 |
-| `explore` | daily | 7s | 7s | 8s | 5.0 min | 50 |
-| `snapshots` | daily | 0s | 4s | 7s | 5.0 min | 66 |
-| `profiles` | daily | 19.9 min | 22.5 min | 32.4 min ⚠ | 15.0 min | 48 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 59 |
-| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 56 |
-| `docs` | daily | 0s | 0s | 1s | 5.0 min | 68 |
+| `explore` | daily | 10s | 7s | 10s | 5.0 min | 51 |
+| `snapshots` | daily | 0s | 4s | 7s | 5.0 min | 67 |
+| `profiles` | daily | 48.0 min | 22.6 min | 48.0 min ⚠ | 15.0 min | 49 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 60 |
+| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 57 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 69 |
 
-**Daily total ≈ 103.7 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 103.9 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-12 01:30 — do not edit by hand._
+_Generated 2026-10-12 05:50 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -3187,11 +3222,11 @@ _Generated 2026-10-12 01:30 — do not edit by hand._
 | fundamentals | 70 | 337.3 | 2009q2 → 2026q3 |
 | short volume | 75 | 56.3 | 2020-08 → 2026-10 |
 | flags | 50 | 4.3 | 2026-07-31 → 2026-10-09 |
-| rejects | 21 | 7.7 | 2026-09-11 → 2026-10-09 |
+| rejects | 20 | 7.3 | 2026-09-14 → 2026-10-09 |
 | zones | 31 | 17.5 | 2026-08-27 → 2026-10-09 |
 | fundamentals (companyfacts) | 130 | 74.4 | 1980q3 → 2028q2 |
 | fundamentals (EDGAR filings) | 15 | 0.2 | 2015q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 35 | 56.8 | — |
+| loose (macro, universe, jobs, study) | 32 | 56.7 | — |
 
 **`data/` total ≈ 1,300 MB.** `reports/` is a further 87 MB across 297 pages.
 
@@ -3201,7 +3236,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-12 01:30 — do not edit by hand._
+_Generated 2026-10-12 05:50 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -3215,7 +3250,7 @@ _Generated 2026-10-12 01:30 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-12 01:30 — do not edit by hand._
+_Generated 2026-10-12 05:50 — do not edit by hand._
 
 1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
