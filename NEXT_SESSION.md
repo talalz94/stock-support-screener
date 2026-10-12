@@ -78,6 +78,24 @@ so per-ticker combo trends show a step there; `combo_refresh.py` would rebuild i
 First nightly `sec_edgar` (05:00): ok, 9.7 s, 28 universe filings listed since 10-01, 26
 already ingested, 2 already in bulk/companyfacts, 4 requests.
 
+**Then 10-09 was re-scored** (`--step fundamental ... docs`, 10 ran, 0 failed, validate
+CLEAN) so the pages carry the EDGAR filings and the two TTM fixes: PEP now scores on its
+10-08 filing, DAL and MU on 10-09, NKE 10-02, CTAS/STZ/LEVI 10-07 (KO unchanged, 07-29).
+Interface checked against the store: Explore (PEP 58.34, MU 78.71, KO 55.49, TM market cap
+"-"), all 93 profiles rebuilt with combo @ 2026-10-09 (AAPL combo_h20 62.6 on page and in
+store), hub lists `sec_edgar` and the EDGAR store, metrics page shows the re-run study
+(fund_score h20 t 7.6), page audit 0 problems over all pages. Explore has NO combo column
+-- the combined scores appear on profile pages only; that is how Explore was built.
+
+**THE "UNEXPLAINED" SLOW FUNDAMENTAL RUNS ARE EXPLAINED.** This re-score took 3,739 s and
+the process used 243 s of CPU in its first hour, holding one HTTPS connection to finnhub.io.
+`providers.TTL_HOURS = 20`: the overlay re-fetches every name whose cached Finnhub row is
+older than 20 h, at the free tier's ~54-60 names/min (3,200 of 3,527 after 59 min). In the
+nightly run the `provider` step refreshes the cache minutes before `fundamental`, so it is
+fast (100-250 s); any re-score OUTSIDE that run (10-11 07:33, 10-12 05:52, and almost
+certainly 09-30) pays the full ~60-minute refetch inside `fundamental`. Not a bug; a
+re-score off-cycle should expect it.
+
 
 ## State at 2026-10-12 (small hours) — THE FACTOR STUDY RE-RUN: TWO MORE MONTHS MOVED THE NUMBERS, AND SEVEN NEW METRICS ENTERED COMBO ON TOO LITTLE HISTORY
 
@@ -528,9 +546,9 @@ orchestrator (`--step fundamental ... docs`): 10 ran, 0 failed, validate CLEAN.
 tradeable universe measured 36 s wall / 38 s CPU on 2026-10-11 (prior-year read 37 s),
 and the fundamental step is 100-250 s on every normal day -- including the days after a
 weekly `sec_gap` write, so a store write does not make the next run cold. Two runs were
-far slower for reasons NOT yet found: 2,078 s on 09-30 and 3,706 s on the 10-11 re-score
-(no backfill ran; facts read normally afterwards). Watch the next nightly time before
-blaming anything.
+far slower: 2,078 s on 09-30 and 3,706 s on the 10-11 re-score. EXPLAINED 10-12: an
+off-cycle re-score finds the Finnhub cache older than its 20 h TTL and re-fetches every
+name at ~60/min inside the step (see the 10-12 morning section).
 
 **Use EDGAR itself, per filing.** Verified on KO: SEC's submissions API
 (`data.sec.gov/submissions/CIK0000021344.json`) lists the 07-29 10-Q
@@ -3171,7 +3189,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-12 05:50 — do not edit by hand._
+_Generated 2026-10-12 07:25 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -3189,27 +3207,27 @@ _Generated 2026-10-12 05:50 — do not edit by hand._
 | `sec_facts` | quarterly | 26s | 5s | 26s | 60.0 min | 12 |
 | `sec_gap` | weekly | 2.5 min | 5.2 min | 7.8 min | 20.0 min | 11 |
 | `sec_edgar` | daily | 10s | 12s | 14s | 30.0 min | 2 |
-| `fundamental` | daily | 61.8 min | 2.4 min | 61.8 min | 180.0 min | 47 |
+| `fundamental` | daily | 62.3 min | 2.4 min | 62.3 min | 180.0 min | 48 |
 | `events` | weekly | 7.9 min | 10.3 min | 16.3 min | 30.0 min | 12 |
 | `leaderboard` | weekly | 29.1 min | 36.4 min | 90.2 min ⚠ | 90.0 min | 13 |
-| `dip` | daily | 6s | 14s | 12s | 15.0 min | 47 |
-| `combo` | daily | 23s | 12s | 23s | 15.0 min | 45 |
-| `candidates` | daily | 3s | 2s | 3s | 5.0 min | 3 |
-| `validate` | daily | 4.9 min | 5.8 min | 7.1 min | 60.0 min | 33 |
-| `explore` | daily | 10s | 7s | 10s | 5.0 min | 51 |
-| `snapshots` | daily | 0s | 4s | 7s | 5.0 min | 67 |
-| `profiles` | daily | 48.0 min | 22.6 min | 48.0 min ⚠ | 15.0 min | 49 |
+| `dip` | daily | 8s | 14s | 12s | 15.0 min | 48 |
+| `combo` | daily | 9s | 12s | 23s | 15.0 min | 46 |
+| `candidates` | daily | 3s | 2s | 3s | 5.0 min | 4 |
+| `validate` | daily | 7.1 min | 5.9 min | 7.1 min | 60.0 min | 34 |
+| `explore` | daily | 6s | 7s | 10s | 5.0 min | 52 |
+| `snapshots` | daily | 0s | 4s | 4s | 5.0 min | 68 |
+| `profiles` | daily | 22.9 min | 22.8 min | 48.0 min ⚠ | 15.0 min | 50 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 60 |
-| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 57 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 69 |
+| `dashboard` | daily | 0s | 0s | 1s | 2.0 min | 58 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 70 |
 
-**Daily total ≈ 103.9 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 104.2 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-12 05:50 — do not edit by hand._
+_Generated 2026-10-12 07:25 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -3236,7 +3254,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-12 05:50 — do not edit by hand._
+_Generated 2026-10-12 07:25 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -3250,7 +3268,7 @@ _Generated 2026-10-12 05:50 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-12 05:50 — do not edit by hand._
+_Generated 2026-10-12 07:25 — do not edit by hand._
 
 1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
