@@ -160,7 +160,11 @@ THEMES = {
     "valuation":     {"pe", "pb", "ps", "ps_ratio", "ev_sales", "ev_ebitda",
                       "fcf_yield", "earnings_yield", "shareholder_yield", "peg"},
     "safety":        {"z_score", "m_score", "net_debt_ebitda", "interest_cover",
-                      "du_leverage", "net_issuance", "debt_equity",
+                      # `debt_to_equity`, not `debt_equity`: no module has ever
+                      # emitted `debt_equity`, so the real metric was refused as
+                      # unthemed (the selftest warning, 2026-10-12). It still
+                      # waits on COMBO_MIN_DATES -- 29 dates at h=20 then.
+                      "du_leverage", "net_issuance", "debt_to_equity",
                       "current_ratio", "quick_ratio", "altman_z"},
     "growth":        {"rev_growth", "eps_growth", "fcf_growth", "ebitda_growth",
                       "book_growth", "mom_12_1",
@@ -185,7 +189,11 @@ THEMES = {
     "attention":     {"avg_trade_size", "turnover", "vol_surge", "trade_surge",
                       "trade_size_trend", "range_expansion", "gap_freq",
                       "short_ratio", "short_surge", "extension_pct",
-                      "px_vs_rev", "drawdown", "senti_gap", "not_extended"},
+                      "px_vs_rev", "drawdown", "senti_gap", "not_extended",
+                      # Price vs its 200-day average: a trend/extension reading
+                      # beside extension_pct. Measured t=+2.18 at h=1 on 344
+                      # dates, refused as unthemed until 2026-10-12.
+                      "above_200dma"},
 }
 
 _THEME_OF = {m: th for th, ms in THEMES.items() for m in ms}

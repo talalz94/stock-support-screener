@@ -54,6 +54,10 @@ OUT = config.REPORTS_EXPLORE / "latest.html"
 # Sensible default columns, spanning all three modules. Anything in the score
 # store can be requested with --metrics.
 DEFAULT_METRICS = [
+    # The three combined scores, first. They were in the store all along but not
+    # in this list, so the one table that shows every stock never showed them
+    # (added 2026-10-12). Each tooltip carries its out-of-sample verdict.
+    "combo_h1", "combo_h20", "combo_h60",
     "fund_score", "quality_score", "value_score", "growth_score", "safety_score",
     "pe", "pb", "ev_ebitda", "fcf_yield", "roe", "roic", "f_score", "z_score",
     # The growth pillar went from 5 metrics to 11 on 2026-08-23. The sequential
