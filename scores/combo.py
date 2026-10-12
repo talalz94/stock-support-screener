@@ -21,7 +21,9 @@ predict" answerable.
 EVERY WEIGHT COMES FROM `study.py`, NOT FROM JUDGEMENT
 -------------------------------------------------------
 A metric enters a horizon's score only if its study cell at THAT horizon
-(size="all") clears |t| >= 2 **and** its |IC| beats the random control's. The
+(size="all") clears |t| >= 2, its |IC| beats the random control's, **and** the
+cell rests on at least `COMBO_MIN_DATES` dates (a big t on one earnings season
+is not evidence; added 2026-10-12). The
 sign is the measured sign, never an assumption -- this project has twice been
 wrong by deciding a direction before measuring it.
 
@@ -101,6 +103,7 @@ THEME_HORIZON = 20
 MIN_T = config.COMBO_MIN_T
 DEDUP_RHO = config.COMBO_DEDUP_RHO
 MIN_COVERAGE = config.COMBO_MIN_COVERAGE
+MIN_DATES = config.COMBO_MIN_DATES
 
 # Composites, ranks of composites, and presence flags. A blend of blends
 # double-counts; a presence flag is not a signal.
@@ -205,6 +208,12 @@ def admitted(horizon: int, study_df: pd.DataFrame | None = None) -> pd.DataFrame
     s = s[s["t"].abs() >= MIN_T]
     # Beat the random control, not merely the zero line.
     s = s[s["ic"].abs() > s["ic_random"].abs()]
+    # ENOUGH HISTORY, not merely a big t. A t-stat on 23 dates of a 20-day
+    # horizon is about two independent observations; the 2026-10-11 study re-run
+    # admitted seven such metrics (one earnings season, 100% "hit") and they
+    # moved 11 of combo_h20's top 50. See config.COMBO_MIN_DATES.
+    if "n_dates" in s.columns:
+        s = s[pd.to_numeric(s["n_dates"], errors="coerce") >= MIN_DATES]
     s = s[~s["metric"].isin(COMPOSITE)]
     s = s[~s["metric"].isin(EXCLUDED)]
     if s.empty:
@@ -447,6 +456,12 @@ def _selftest() -> None:
         assert set(adm["metric"]) <= set(cells["metric"]), \
             f"{lab}: admitted a metric with no cell at h={h}"
         assert (adm["t"].abs() >= MIN_T).all(), f"{lab}: admitted |t| < {MIN_T}"
+        # THE HISTORY GUARD: no admitted cell may rest on fewer than MIN_DATES dates.
+        if "n_dates" in cells.columns:
+            nd = cells.set_index(["module", "metric"])["n_dates"]
+            thin = [m for mo, m in zip(adm["module"], adm["metric"])
+                    if pd.to_numeric(nd.get((mo, m)), errors="coerce") < MIN_DATES]
+            assert not thin, f"{lab}: admitted on < {MIN_DATES} dates: {thin}"
 
     # Any metric the study finds significant but THEMES does not know about is
     # silently dropped. Report it: that is how a new metric goes missing.

@@ -366,9 +366,12 @@ and where each actually peaks is measured and stated in `metrics_doc` rather
 than encoded in a name.
 
 **No weight is written by hand.** A metric enters a horizon only if its
-`study.py` cell at *that* horizon clears |t| ≥ 2 **and** beats the random
-control, and its sign is the measured sign. If the study has not run the module
-emits nothing rather than falling back to equal weights.
+`study.py` cell at *that* horizon clears |t| ≥ 2, beats the random control,
+**and** rests on at least `COMBO_MIN_DATES` = 100 dates (added 2026-10-12: the
+study re-run had admitted seven metrics on one earnings season, 23-48 dates; every
+established cell has ≥ 178, so the floor is not tuned). Its sign is the measured
+sign. If the study has not run the module emits nothing rather than falling back
+to equal weights.
 
 Three refusals, each of which would otherwise inflate the score:
 
