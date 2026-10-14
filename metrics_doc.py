@@ -183,8 +183,12 @@ READ: dict[str, tuple[str, str]] = {
                  "sales predicted LOWER returns", "0.5-15; >30 is extreme"),
     "fcf_yield": ("higher = more cash per dollar of enterprise value",
                   "0.02-0.10"),
-    "peg": ("P/E divided by growth. Below 1 is the classic cheap-growth mark",
-            "0.5-3"),
+    # Range MEASURED 2026-10-14 (10-13 session, 1,078 names): IQR 0.16-1.33, median
+    # 0.48. "0.5-3" was the textbook band; PEG exists here only for positive
+    # growth, which is often large, so the stored values sit lower.
+    "peg": ("P/E divided by growth (growth in %). Below 1 is the classic "
+            "cheap-growth mark; only names with positive P/E and growth have one",
+            "0.15-1.3"),
     "mktcap": ("market cap = price x point-in-time share count", "USD"),
     # --- quality / returns -------------------------------------------------
     "roe": ("net income / equity. Very high can mean thin equity, not skill",
@@ -399,6 +403,14 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
     "has_hype": ("Has hype score", "1 if enough components were present"),
     "bars_used": ("Bars used", "sessions of history behind the score"),
     "has_dip": ("Has dip score", "1 if it passed the gate and was scored"),
+    # sector_score.py -- not a score module; joined onto rows by explore.collect.
+    "sector_score": ("Sector score",
+                     "0-100, the stock's SECTOR, not the stock: average rank of the "
+                     "sector's 1-month return vs the market and its share of stocks "
+                     "above their 200-day average. Chosen on 2017-2022 and tested on "
+                     "2022-2026, which it had never seen: IC +0.142, t +4.13 over 55 "
+                     "months (sector_study.py, 2026-10-14). Tilts the odds for a month; "
+                     "it does not pick stocks. Details on the Sectors page."),
 }
 
 # How the two comparison columns are computed. This is #14: they were unexplained
@@ -863,7 +875,10 @@ def selftest(verbose: bool = True) -> None:
         f"ui.METRIC_LABELS) -- an undocumented column on a dashboard is a "
         f"number nobody can act on.")
 
-    stale = sorted(k for k in EXTRA_LABELS if k not in live)
+    # Fields that are not score-module metrics but ARE real columns, joined onto
+    # rows from their own file. Named with their source so this is not a loophole.
+    JOINED = {"sector_score": "sector_score.py via explore.collect"}
+    stale = sorted(k for k in EXTRA_LABELS if k not in live and k not in JOINED)
     assert not stale, (
         f"EXTRA_LABELS documents metric(s) no module emits: {stale}. "
         f"Remove them, or the reference describes something that does not "
@@ -884,7 +899,11 @@ def selftest(verbose: bool = True) -> None:
     # The two claims the UI must never lose: hype is a magnitude, and an
     # unvalidated score says so on its own tooltip.
     assert "not a direction" in tooltip("hype_score").lower()
-    assert "not significant" in tooltip("dip_score").lower(), tooltip("dip_score")
+    # The tooltip must STATE ITS EVIDENCE, whichever way it went. This asserted
+    # "not significant" outright until the 2026-10-11 study re-run measured dip at
+    # t=+2.06 -- a test that freezes one finding breaks the moment the data moves.
+    _dip = tooltip("dip_score").lower()
+    assert "not significant" in _dip or "measured t=" in _dip, tooltip("dip_score")
 
     bad_ranges = check_ranges(verbose=False)
     assert not bad_ranges, (

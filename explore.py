@@ -58,6 +58,9 @@ DEFAULT_METRICS = [
     # in this list, so the one table that shows every stock never showed them
     # (added 2026-10-12). Each tooltip carries its out-of-sample verdict.
     "combo_h1", "combo_h20", "combo_h60",
+    # The stock's SECTOR score (sector_score.py) -- measured out of sample; joined
+    # in `collect` because it lives outside the score store.
+    "sector_score",
     "fund_score", "quality_score", "value_score", "growth_score", "safety_score",
     "pe", "pb", "ev_ebitda", "fcf_yield", "roe", "roic", "f_score", "z_score",
     # The growth pillar went from 5 metrics to 11 on 2026-08-23. The sequential
@@ -166,6 +169,19 @@ def collect(metrics: list[str], asof: str) -> tuple[pd.DataFrame, dict]:
         wide = wide.join(m.set_index("ticker"), how="left")
     except Exception:                                            # noqa: BLE001
         wide["sector"] = None
+
+    # THE SECTOR SCORE is not a score module (sector_score.py writes its own file),
+    # so it is joined here from the newest file on or before asof. Missing file ->
+    # the column is blank, never zero.
+    if "sector_score" in metrics:
+        try:
+            import sector_score as SC
+            sx = SC.load(asof)
+            if sx is not None and len(sx):
+                wide = wide.join(sx.drop_duplicates("ticker").set_index("ticker")[["sector_score"]], how="left")
+                prov["sector"] = str(sx["session"].iloc[0])
+        except Exception:                                        # noqa: BLE001
+            pass
 
     return wide.sort_index(), prov
 

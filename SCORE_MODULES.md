@@ -62,7 +62,7 @@ backtest just quietly improves.
 
 ### orchestrator owns the schedule
 
-Twenty-seven registry steps in fixed execution order (`python orchestrator.py
+Twenty-nine registry steps in fixed execution order (`python orchestrator.py
 --dry-run` prints it), replacing three independent schedules. Each writes a row to `data/_jobs.parquet`
 (`run_id | step | cadence | watermark | started | ended | duration_s | status |
 rows | detail | error | traceback`), which is the only thing the master
@@ -74,9 +74,10 @@ failed — not the same thing as failing), `skipped` (cadence says not due), and
 a wall clock**, so a laptop closed for a week catches up on resume and one
 closed for a quarter falls back to `ORCH_MAX_CATCHUP_SESSIONS`.
 
-Cadences: 23 daily (`universe, bars, macro, news, senti_cache, sentiment,
+Cadences: 25 daily (`universe, bars, macro, news, senti_cache, sentiment,
 bounce, zones, shortvol, hype, provider, sec_edgar, fundamental, dip, combo,
-candidates, validate, explore, snapshots, profiles, retention, dashboard, docs`); `sec_gap, events,
+candidates, floor, sectors, validate, explore, snapshots, profiles, retention,
+dashboard, docs`); `sec_gap, events,
 leaderboard` weekly; `sec_facts` quarterly, and its dueness is derived from
 which quarters are missing on disk rather than from a calendar.
 

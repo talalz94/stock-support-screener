@@ -290,7 +290,8 @@ def build_sector_map(limit: int = 0, verbose: bool = True,
         try:
             import fundamentals as FD
             if FD.stored_quarters():
-                return FD.sector_map(verbose=verbose)
+                return _fill_missing_sic(FD.sector_map(write_file=False, verbose=verbose),
+                                         verbose=verbose)
             if verbose:
                 log("  sectors: fact store empty, falling back to the SEC scrape "
                     "(run `python fundamentals.py --backfill` to avoid this)")
@@ -350,6 +351,64 @@ def build_sector_map(limit: int = 0, verbose: bool = True,
         log(f"  sectors: {len(df):,} tickers, {miss} not in SEC's map, "
             f"{df['sector'].nunique()} sectors, {time.time() - t0:.0f}s")
     return df
+
+
+SIC_CACHE = config.DATA / "_sic_cache.parquet"
+
+
+def _fill_missing_sic(m: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
+    """SIC for TRADEABLE names the bulk data sets never classified, from SEC's
+    submissions API, then writes the map.
+
+    Found 2026-10-14: 614 of 3,467 tradeable names had no SIC and were filed under
+    "Other" -- foreign and companyfacts-only filers, and any company that changed
+    CIK (XOM's 2026 10-Q came from a new holding-company CIK, so XOM read "Other"
+    instead of Energy). "Other" was the LARGEST sector on every page. One request
+    per CIK, cached in data/_sic_cache.parquet so each is asked once (a SIC rarely
+    changes; delete the cache to refresh). ~5 req/s, under SEC's limit.
+    """
+    import bars
+    import calendar_us
+    out = m.copy()
+    cache = (pd.read_parquet(SIC_CACHE) if SIC_CACHE.exists()
+             else pd.DataFrame({"cik": pd.Series(dtype="int64"), "sic": pd.Series(dtype="float64")}))
+    known = dict(zip(cache["cik"].astype("int64"), cache["sic"]))
+    try:
+        uni = set(bars.tradeable_universe(calendar_us.last_closed_session()))
+    except Exception:                                            # noqa: BLE001
+        uni = set(out["ticker"].astype(str))
+    sic = pd.to_numeric(out["sic"], errors="coerce")
+    need = out[(sic.isna() | (sic <= 0)) & out["ticker"].astype(str).isin(uni) & out["cik"].notna()]
+    todo = sorted(set(need["cik"].astype("int64")) - set(known))
+    hdr = {"User-Agent": config.SEC_UA, "Accept-Encoding": "gzip, deflate"}
+    t0, got = time.time(), 0
+    for i, c in enumerate(todo):
+        try:
+            time.sleep(0.2)
+            r = _SESSION.get(config.SEC_SUBMISSIONS_URL.format(cik=int(c)), headers=hdr, timeout=30)
+            v = r.json().get("sic") if r.status_code == 200 else None
+            known[int(c)] = float(v) if v not in (None, "") else np.nan
+            got += 1
+        except Exception:                                        # noqa: BLE001
+            continue                                             # retried on the next build
+        if verbose and (i + 1) % 100 == 0:
+            log(f"    SIC fill {i + 1}/{len(todo)} ({time.time() - t0:.0f}s)")
+    if todo:
+        pd.DataFrame({"cik": list(known), "sic": list(known.values())}).to_parquet(SIC_CACHE, index=False)
+    fill = sic.isna() | (sic <= 0)
+    filled = out.loc[fill, "cik"].map(lambda c: known.get(int(c)) if pd.notna(c) else np.nan)
+    out.loc[fill, "sic"] = filled
+    redo = fill & out["sic"].notna()
+    out.loc[redo, "sector"] = out.loc[redo, "sic"].map(sic_to_sector)
+    out.loc[redo, "sector_etf"] = out.loc[redo, "sector"].map(lambda s: SECTOR_ETF_FOR.get(s, "SPY"))
+    out["sector"] = out["sector"].fillna("Other")
+    tmp = config.SECTOR_MAP_FILE.with_suffix(".parquet.tmp")
+    out.to_parquet(tmp, compression=config.COMPRESSION, index=False)
+    store.atomic_replace(tmp, config.SECTOR_MAP_FILE)
+    if verbose:
+        log(f"  sectors: {int(redo.sum())} SIC(s) filled from submissions ({got} fetched, "
+            f"{len(todo)} asked, {time.time() - t0:.0f}s); {int(out['sic'].isna().sum())} still without")
+    return out
 
 
 def load_sector_map() -> pd.DataFrame:
