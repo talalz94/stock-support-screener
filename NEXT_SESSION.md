@@ -44,6 +44,158 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-14 — ROWS THAT CONTRADICTED THEMSELVES, BANK REVENUE, A STALE SECTOR MAP; A SOFI CATEGORY; A VALIDATED SECTOR SCORE; SEASONALITY MEASURED NOT PREDICTIVE
+
+Done unattended (user away ~06:40-16:30, asked to keep going and to resume itself after
+any usage-limit pause -- a session cron job every hour at :43 did that once). Order agreed
+beforehand: fix the data, then the SOFI pattern, the sector score, seasonality (price
+first, no EIA/NOAA keys), then the integrated view. 29 pipeline steps now.
+
+### 1. THE DATA: ROWS, BANK REVENUE, THE SECTOR MAP
+
+**Why the earlier audits missed it:** every check compared a FIELD with its SOURCE (SEC,
+Finnhub, Yahoo). The provider overlay swaps fields one by one, so a row could hold
+Finnhub's EPS beside our P/E and pass every field check while contradicting itself.
+New nightly `rows` validation group (validate.check_rows, run by the validate step):
+
+    10-13 before    positive P/E beside a loss EPS 65 | provider P/E vs EPS >25% apart 214
+                    | margin sign vs EPS 38 | revenue below net income 75 (65 Financials)
+    after re-score  validate CLEAN, rows:pass
+
+`scores/fundamental._row_consistency` (after the overlay, before ranking): a loss EPS gets
+no P/E; when P/E and EPS disagree by >25%, OUR SEC EPS breaks the tie (the provider's EPS
+matched SEC 10 of 12 checked -- IBKR 2.512 vs 2.52 with a P/E of 131, a split the P/E
+never absorbed -- but for ADRs the P/E is right and the EPS is per ordinary share: HSBC
+2.204 x 5 = 11.0 per ADR); with no SEC EPS the P/E is kept and the EPS WITHHELD; a margin
+contradicting the EPS sign is withheld with its sister margin. First run: pe_blank 65,
+pe_recomputed 74, eps_recomputed 32, eps_withheld 109, margins_withheld 37.
+
+**Bank revenue.** SOFI's revenue was its fee line ($610M TTM) -- banks report net interest
+income separately. Added `RevenuesNetOfInterestExpense` to `revenue` and made the
+AGGREGATE_MAX rule (largest alias wins -- the REXR fix) apply in the 4-quarter sum and the
+same-day tie between rolls too; it applied only to the annual path. Data: bulk re-ingested
+3 years (14 quarters, 7.7 min, 0 failed), EDGAR store rebuilt (91 filings), companyfacts
+refetched for the 150 tickers / 43 CIKs that report the tag (read() lets the newer source
+win per partition, and the old companyfacts copy lacked it). SOFI revenue_ttm 610.2M ->
+**4,305.7M** = FY25 3,613.4 + H1-26 2,319.0 - H1-25 1,626.7 (pinned); net margin 104% ->
+14.8%; fund_score 24.9 -> 55. Pins 35/35. Still 71 names (60 traditional banks) with no
+total revenue tagged: their impossible revenue is now WITHHELD in `fund_metrics.derive`
+(blank, not scored). OPEN, user decision: NII + noninterest income needs
+`InterestIncomeExpenseNet` moved out of `interest_exp`, which 413 filers (147
+non-financial) use. Also open: the Piotroski F-score is structurally low for banks (blank
+current ratio / gross margin count as fails).
+
+**The sector map** (`data/_sector_map.parquet`) was last written 2026-08-07 and never
+refreshed: 614 of 3,467 tradeable names had no SIC and read "Other" -- the LARGEST sector on
+every page -- including XOM (its 10-Q now comes from a new CIK). Rebuilt from the fact
+store plus SEC submissions for the gaps (`macro._fill_missing_sic`, cached in
+`data/_sic_cache.parquet`): no-SIC 614 -> 133, "Other" 630 -> 152; XOM -> Energy, NVS ->
+pharma, TM -> autos. `fundamentals.sector_map` read companyfacts-only quarters as bulk
+paths (flagged by edgar-ingest 10-12) -- fixed. The `sectors` step now rebuilds the map
+weekly. fund_score ranks within sector, so 10-13 was re-scored again after this.
+
+metrics_doc selftest repaired: its dip assertion froze "not significant" and broke when
+the re-run measured t +2.06; PEG's documented range 0.5-3 -> 0.15-1.3 (measured IQR).
+
+**Afternoon: a regression of mine, caught by checking who LOST a score.** After the
+sector-map re-score 2,800 names had a fund_score against 2,839 on 10-12. Of the 49 lost:
+38 had revenue withheld (30 regional banks -- FITB, HBAN, MTB, ZION...), 4 a margin
+withheld, 7 had no rows (universe). Looking at the non-banks found two errors:
+
+* **AD -$1,538M and TDS -$493M revenue_ttm.** My morning change put "largest alias wins"
+  AHEAD of the filing date in `_ttm`'s quarterly dedup, so an ORIGINAL beat its own
+  RESTATEMENT: AD restated 2025 for the wireless sale (Q1 $891M -> $27M), the originals
+  won and the derived Q4 = FY - Q1 - Q2 - Q3 came out -$1,691M. Fixed: the filing date
+  decides, the max applies only WITHIN a filing -- in `_ttm`, `_latest` and `history()`
+  (the last two had the cross-filing max since 08-07). That exposed rows the max had
+  hidden: FIX's Q1-2026 10-Q carries a twelve-month revenue of $1,831M for 2025-12-31
+  beside its 10-K's $9,102M (JAKK $113M vs $571M) -- so an ANNUAL revenue now comes from
+  an annual report when one exists (`_ANNUAL_FORM_RE`). Net: revenue_ttm moved on 118
+  names; against each name's latest 10-K year the new figure is closer for 37 of 59 that
+  moved >2%, and every large error went (3 negatives, WTRG 2.11x, VISN 1.52x, TFX 1.31x,
+  CALY 1.26x, DD 1.21x); "before closer" are small gaps or real growth (GPN bought
+  Worldpay). Pins AD 213.53M and FIX 11,228M added (37/37); a selftest feeds AD's filed
+  rows through `_ttm` (old code -1,537,957,000, new 213,530,000).
+* **"Revenue below net income" blanked real revenue** where a tax release or a gain on a
+  sale lifts net income above it (AUPH, RIGL, TRS, AIV, VISN, DUOT). Now exempt when
+  operating income (else pre-tax) is known and below revenue -- operating first, because
+  pre-tax carries non-operating gains (BYND: pre-tax $300M on $259M revenue, operating
+  LOSS $304M). validate's WARN uses the same rule and a new WARN flags negative revenue.
+
+After both fixes (re-score 3): 2,804 scored; 45 that had a score on 10-12 do not -- 30
+regional banks (NII + noninterest income is the open fix, below), 7 with no rows on 10-13
+(universe), 3 margin-withheld (ALLT, PDS, PTRN), CPT (a REIT whose stored revenue is a
+$13M component of ~$1.5B), AD and ATEX (licence/spectrum-sale gains put OPERATING income
+above revenue, so the rule cannot tell them from a component), HYPD, OSG. TDS, AUPH, TRS,
+RIGL, AIV, VISN, DUOT, XMAX are scored again.
+
+**A stray process is slowing the machine.** `find / -iname *STEAL_The_1-Minute*` (Git
+Bash, PID 14916) has run since 2026-10-13 07:02 with its parent gone -- 87,700 CPU-s, one
+full core, plus a whole-disk walk contending for I/O. The profiles step took 5,355s (1,886s
+in the morning, 1,192s on 10-11) and one cold page 527s, 420s of it in 748 score-parquet
+reads. Stopping it was refused by the permission classifier -- the USER should end it
+(Task Manager, `find.exe`). Profiles was over its 900s budget before this anyway.
+
+### 2. FLOOR RETEST -- THE SOFI PATTERN (`floorretest_study.py`, `floor_page.py`)
+
+Definition fixed before results: a run >= 2x within 2 years (high older than the floor
+window); close 35-70% below that high and >= 1.3x the run start; a floor = lowest low of
+the last 9 months with >= 3 swing lows within 3%, >= 10 sessions apart, over >= 60
+sessions; close within 6% of it; >= $10M/day. ONE change before any result: the window
+was declared 6 months and missed SOFI's own March/April floor tests; widened to 9.
+RARE: 0.04% of liquid rows, usually none on a day -- so measured as an event study (each
+episode once, vs the same-day liquid pool, t across quarters). 20 tests, ~1 by chance:
+
+    tier                      episodes   40 days: up vs pool   excess (median)    t     floor broke
+    pattern                      129       58% vs 54%         +4.29pp (+1.42)   +1.36      32%
+    + quieting                    66       56% vs 54%         +4.70pp (+0.36)   +1.25      31%
+    NEAR MISS (1 short)          411       49% vs 54%         -1.66pp (-2.18)   -2.88      34%
+    pullback, no floor          6,003      50% vs 52%         +0.08pp           +1.28      18%
+    floor, no prior run           941      51% vs 53%         -1.06pp           -1.97      17%
+
+Positive but NOT proven, high variance (the floor broke twice as often as for controls).
+Near misses are measured WORSE -- the page shows full matches by default and labels near
+misses "measured WORSE". 10-13: SOFI the only full match (+ SVRA, BKNG, SRAD near misses).
+Page `reports/zones/floor.html`, nav "Floor retest", step `floor`.
+
+### 3. SECTOR SCORE (`sectors.py`, `sector_study.py`, `sector_score.py`)
+
+Groups: the SIC sector + hand-named sub-industries (energy split into producers, drilling
+& services, equipment, refiners, gas pipelines, gas utilities, electric utilities, coal);
+equal-weight point-in-time returns over names tradeable that day. 32 tests declared.
+After the sector-map repair (first-run figures in brackets):
+
+    sector, next month (21 groups, 109 months 2017-09..2026-09)
+      breadth200 (share above 200d)   t +4.42 [+3.95]   top-minus-bottom third +1.02pp/mo, t +3.23
+      rs252 (12 mo vs market)         t +3.41 [+3.56]   +1.15pp/mo, t +3.27
+      rs21  (1 mo)                    t +3.58 [+3.01]
+      median fund_score               t +0.34
+    composite chosen on 2017-09..2022-02 = rs21 + breadth200, then on UNSEEN 2022-03..2026-09:
+      IC +0.142, t +4.13 over 55 months  [first run +0.106, t +2.95]
+    sub-industries: rs252 t +3.07, breadth t +3.19 over the full history, but nothing passed
+      on the first half alone -> context only, no score
+
+`sector_score.py` computes it daily (selftest: equals the study exactly on 2026-09-01) ->
+`data/sectors/`; Explore column "Sector score" (joined in explore.collect); Sectors page
+`reports/sectors/latest.html` (sectors with score, sub-industries as context, each group's
+stocks in Candidates / Floor retest / Bounce flag / AT a zone); step `sectors`.
+
+### 4. SEASONALITY (`season_study.py`) -- MEASURED, NOT PREDICTIVE
+
+Same-calendar-month history (prior years only, >= 4) vs that month's excess, 72 months
+2020-10..2026-09: sectors IC -0.013 t -0.37, sub-industries -0.027 t -0.95, stocks +0.002
+t +0.16. Energy calendar profiles: 4 of 108 cells |t| >= 2 (~5 by chance); gas utilities
+show NO winter strength (Nov -1.1, Dec -1.1, Jan -0.9). As agreed, no demand data was added;
+seasonality is shown on the Sectors page as context, labelled not predictive.
+
+### PIPELINE AND FILES
+
+Steps added: `floor`, `sectors` (29 total; order in README). New: floorretest_study.py,
+floor_page.py, sectors.py, sector_study.py, season_study.py, sector_score.py,
+sectors_page.py. Data: _floor_panel, _floor_study_summary.json, _wide_1d.parquet,
+_sector_panel_*.parquet, _sector_study_summary.json, _season_study_summary.json,
+data/sectors/, _sic_cache.parquet; backups _fundamentals_edgar_pre20261014/.
+
 ## State at 2026-10-12 (later morning) — COMBO IN EXPLORE, TWO METRICS NO LONGER DROPPED, REBUILD RUN DETACHED
 
 - **Explore shows the combined scores**: `combo_h1`, `combo_h20`, `combo_h60` lead
@@ -3208,64 +3360,66 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-12 07:25 — do not edit by hand._
+_Generated 2026-10-14 14:51 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 7s | 474.9 min ⚠ | 2.0 min | 47 |
-| `bars` | daily | 36s | 46s | 58s | 10.0 min | 47 |
-| `macro` | daily | 62s | 1.7 min | 1.6 min | 15.0 min | 47 |
-| `news` | daily | 4s | 5s | 6s | 10.0 min | 47 |
-| `senti_cache` | daily | 1s | 2s | 2s | 10.0 min | 47 |
-| `sentiment` | daily | 9s | 14s | 20s | 15.0 min | 48 |
-| `bounce` | daily | 24s | 38s | 58s | 15.0 min | 48 |
-| `zones` | daily | 52s | 82s | 1.6 min | 30.0 min | 31 |
-| `shortvol` | daily | 4s | 4s | 5s | 10.0 min | 45 |
-| `hype` | daily | 56s | 2.1 min | 2.0 min | 120.0 min | 48 |
-| `provider` | daily | 64.3 min | 65.1 min | 66.3 min | 120.0 min | 40 |
+| `universe` | daily | 11s | 7s | 11s | 2.0 min | 49 |
+| `bars` | daily | 1.6 min | 48s | 1.6 min | 10.0 min | 49 |
+| `macro` | daily | 1.5 min | 1.6 min | 1.6 min | 15.0 min | 49 |
+| `news` | daily | 6s | 5s | 6s | 10.0 min | 49 |
+| `senti_cache` | daily | 6s | 2s | 6s | 10.0 min | 49 |
+| `sentiment` | daily | 31s | 14s | 31s | 15.0 min | 50 |
+| `bounce` | daily | 71s | 38s | 71s | 15.0 min | 50 |
+| `zones` | daily | 3.4 min | 82s | 3.4 min | 30.0 min | 33 |
+| `shortvol` | daily | 8s | 4s | 8s | 10.0 min | 47 |
+| `hype` | daily | 2.7 min | 2.1 min | 2.7 min | 120.0 min | 50 |
+| `provider` | daily | 79.6 min | 65.1 min | 79.6 min | 120.0 min | 42 |
 | `sec_facts` | quarterly | 26s | 5s | 26s | 60.0 min | 12 |
 | `sec_gap` | weekly | 2.5 min | 5.2 min | 7.8 min | 20.0 min | 11 |
-| `sec_edgar` | daily | 10s | 12s | 14s | 30.0 min | 2 |
-| `fundamental` | daily | 62.3 min | 2.4 min | 62.3 min | 180.0 min | 48 |
+| `sec_edgar` | daily | 51s | 12s | 51s | 30.0 min | 4 |
+| `fundamental` | daily | 11.5 min | 2.8 min | 11.5 min | 180.0 min | 53 |
 | `events` | weekly | 7.9 min | 10.3 min | 16.3 min | 30.0 min | 12 |
 | `leaderboard` | weekly | 29.1 min | 36.4 min | 90.2 min ⚠ | 90.0 min | 13 |
-| `dip` | daily | 8s | 14s | 12s | 15.0 min | 48 |
-| `combo` | daily | 9s | 12s | 23s | 15.0 min | 46 |
-| `candidates` | daily | 3s | 2s | 3s | 5.0 min | 4 |
-| `validate` | daily | 7.1 min | 5.9 min | 7.1 min | 60.0 min | 34 |
-| `explore` | daily | 6s | 7s | 10s | 5.0 min | 52 |
-| `snapshots` | daily | 0s | 4s | 4s | 5.0 min | 68 |
-| `profiles` | daily | 22.9 min | 22.8 min | 48.0 min ⚠ | 15.0 min | 50 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 60 |
-| `dashboard` | daily | 0s | 0s | 1s | 2.0 min | 58 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 70 |
+| `dip` | daily | 54s | 14s | 54s | 15.0 min | 53 |
+| `combo` | daily | 55s | 13s | 55s | 15.0 min | 52 |
+| `candidates` | daily | 16s | 3s | 16s | 5.0 min | 9 |
+| `floor` | daily | 2.5 min | 2.1 min | 2.5 min | 15.0 min | 3 |
+| `sectors` | daily | 3.7 min | 2.8 min | 3.7 min | 30.0 min | 3 |
+| `validate` | daily | 18.7 min | 6.2 min | 18.7 min | 60.0 min | 39 |
+| `explore` | daily | 13s | 7s | 26s | 5.0 min | 59 |
+| `snapshots` | daily | 0s | 4s | 13s | 5.0 min | 72 |
+| `profiles` | daily | 89.3 min | 24.3 min | 89.3 min ⚠ | 15.0 min | 55 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 62 |
+| `dashboard` | daily | 1s | 0s | 2s | 2.0 min | 65 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 77 |
 
-**Daily total ≈ 104.2 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 111.2 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-12 07:25 — do not edit by hand._
+_Generated 2026-10-14 14:51 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 123 | 249.5 | 2016-08 → 2026-10 |
+| bars 1d | 122 | 248.3 | 2016-09 → 2026-10 |
 | bars 1h | 5 | 0.7 | 2026-06 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
-| news | 123 | 170.9 | 2016-08 → 2026-10 |
-| sentiment cache | 123 | 11.8 | 2016-08 → 2026-10 |
-| scores | 122 | 309.9 | 2016-09 → 2026-10 |
-| fundamentals | 70 | 337.3 | 2009q2 → 2026q3 |
-| short volume | 75 | 56.3 | 2020-08 → 2026-10 |
-| flags | 50 | 4.3 | 2026-07-31 → 2026-10-09 |
-| rejects | 20 | 7.3 | 2026-09-14 → 2026-10-09 |
-| zones | 31 | 17.5 | 2026-08-27 → 2026-10-09 |
-| fundamentals (companyfacts) | 130 | 74.4 | 1980q3 → 2028q2 |
-| fundamentals (EDGAR filings) | 15 | 0.2 | 2015q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 32 | 56.7 | — |
+| news | 123 | 171.1 | 2016-08 → 2026-10 |
+| sentiment cache | 123 | 11.9 | 2016-08 → 2026-10 |
+| scores | 122 | 312.2 | 2016-09 → 2026-10 |
+| fundamentals | 70 | 339.5 | 2009q2 → 2026q3 |
+| short volume | 75 | 56.4 | 2020-08 → 2026-10 |
+| flags | 52 | 4.4 | 2026-07-31 → 2026-10-13 |
+| rejects | 22 | 8.1 | 2026-09-14 → 2026-10-13 |
+| zones | 33 | 18.6 | 2026-08-27 → 2026-10-13 |
+| fundamentals (companyfacts) | 131 | 75.1 | 1980q3 → 2028q3 |
+| fundamentals (EDGAR filings) | 16 | 0.2 | 2015q4 → 2026q3 |
+| loose (macro, universe, jobs, study) | 37 | 174.8 | — |
 
-**`data/` total ≈ 1,300 MB.** `reports/` is a further 87 MB across 297 pages.
+**`data/` total ≈ 1,424 MB.** `reports/` is a further 91 MB across 308 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3273,21 +3427,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-12 07:25 — do not edit by hand._
+_Generated 2026-10-14 14:51 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 376 | 2016-09-27 → 2026-10-09 |
-| `fundamental` | 61 | 233 | 2016-09-26 → 2026-10-09 |
-| `hype` | 20 | 351 | 2016-10-25 → 2026-10-09 |
-| `dip` | 10 | 278 | 2016-09-27 → 2026-10-09 |
-| `combo` | 15 | 233 | 2016-11-04 → 2026-10-09 |
+| `sentiment` | 26 | 378 | 2016-09-27 → 2026-10-13 |
+| `fundamental` | 61 | 235 | 2016-09-26 → 2026-10-13 |
+| `hype` | 20 | 353 | 2016-10-25 → 2026-10-13 |
+| `dip` | 10 | 280 | 2016-09-27 → 2026-10-13 |
+| `combo` | 15 | 235 | 2016-11-04 → 2026-10-13 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-12 07:25 — do not edit by hand._
+_Generated 2026-10-14 14:51 — do not edit by hand._
 
 1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

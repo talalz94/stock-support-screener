@@ -147,6 +147,10 @@ class FundamentalModule:
         # the look-ahead the point-in-time design exists to prevent and would
         # silently invalidate every backtest. The guard is the asof comparison
         # below, not a comment.
+        # Our own SEC EPS, kept BEFORE the overlay replaces it: the tie-breaker when
+        # the provider's P/E and EPS disagree (see `_row_consistency`).
+        _sec_eps = (pd.to_numeric(m["eps_diluted_ttm"], errors="coerce").copy()
+                    if "eps_diluted_ttm" in m.columns else None)
         _cur = _is_current(asof)
         _on = getattr(config, "PROVIDER_OVERLAY", True)
         if not (_cur and _on):
@@ -189,6 +193,13 @@ class FundamentalModule:
             ccy = m["ticker"].map(dict(zip(cur["ticker"], cur["currency"])))
             foreign = ccy.notna() & (ccy.astype(str) != "USD")
             m.loc[foreign, "mktcap"] = np.nan
+
+        # No row may contradict itself (P/E vs EPS, margin vs EPS) -- see
+        # `_row_consistency`. After the overlay, before ranking.
+        m, _cons = _row_consistency(m, _sec_eps)
+        if any(_cons.values()):
+            print(f"  [fundamental] row consistency on {asof}: "
+                  + ", ".join(f"{k}={v}" for k, v in _cons.items()), flush=True)
 
         sector = _sector_for(m["ticker"])
         ranks = FM.rank_pillars(m, sector=sector.reset_index(drop=True))
@@ -416,7 +427,100 @@ def _beta(piv: pd.DataFrame, asof: str) -> pd.Series:
 MODULE = register(FundamentalModule())
 
 
+def _row_consistency(m: pd.DataFrame, sec_eps: pd.Series | None = None) -> tuple[pd.DataFrame, dict]:
+    """A DISPLAYED ROW MUST NOT CONTRADICT ITSELF.
+
+    The provider overlay replaces our figures FIELD BY FIELD, so one row can carry
+    Finnhub's EPS beside our own P/E: every field agrees with its own source and the
+    row is still impossible. Found 2026-10-14 on session 10-12, 88 of 3,360 names:
+      * 67 showed a POSITIVE P/E next to a LOSS EPS (WIX: EPS -3.54, P/E 84, which
+        is our older SEC EPS of +0.88 -- the provider publishes no P/E on a loss, so
+        ours stayed);
+      * 37 showed a net margin whose sign contradicts the EPS (SOFI: Finnhub net
+        margin -19.8% and op margin -19.9% beside Finnhub's own EPS of +0.47 -- its
+        margin divides by a bank's fee income, not its revenue).
+    The field-by-field audits all passed, because none compared a row with itself.
+
+    A THIRD CASE, found by the nightly `rows` check on 10-13: 214 rows where the
+    provider's OWN P/E and EPS disagree by more than 25%. Against our SEC EPS the
+    provider's EPS was right in 10 of 12 checked (IBKR EPS 2.512 vs SEC 2.52, P/E
+    131 implying 0.67 -- a split the P/E never absorbed; APH, BX, DVN alike), but for
+    ADRs the P/E is right and the EPS is per ORDINARY share (HSBC 2.204 x 5 shares
+    = 11.0 per ADR, matching its P/E; BP, PAM, PBR alike).
+
+    Rules, applied after the overlay and before ranking:
+      P/E      EPS <= 0 -> no P/E (a P/E on a loss is not a number anyone should
+               read). EPS > 0 and the P/E implies an EPS more than 25% away: our
+               SEC EPS breaks the tie -- whichever of the two is closer to it is
+               kept and the other is recomputed from it (P/E = price / EPS, or
+               EPS = price / P/E). With no SEC EPS to judge by (often an ADR), the
+               P/E is kept and the EPS is WITHHELD, because a per-ordinary-share
+               EPS beside an ADR price is the likelier error.
+      margins  a net margin whose sign contradicts the EPS is WITHHELD, and the
+               operating margin with it -- both share the revenue denominator that
+               produced the contradiction. Blank, never zero.
+    """
+    out = m.copy()
+    n = {"pe_blank_on_loss": 0, "pe_recomputed": 0, "eps_recomputed": 0,
+         "eps_withheld": 0, "margins_withheld": 0}
+    if "eps_diluted_ttm" not in out.columns:
+        return out, n
+    eps = pd.to_numeric(out["eps_diluted_ttm"], errors="coerce")
+    sec = (pd.to_numeric(sec_eps, errors="coerce").reindex(out.index)
+           if sec_eps is not None else pd.Series(np.nan, index=out.index))
+    if "pe" in out.columns:
+        pe = pd.to_numeric(out["pe"], errors="coerce")
+        loss = (pe > 0) & (eps <= 0)
+        out.loc[loss, "pe"] = np.nan
+        n["pe_blank_on_loss"] = int(loss.sum())
+        if "price" in out.columns:
+            price = pd.to_numeric(out["price"], errors="coerce")
+            implied = price / pe
+            off = (pe > 0) & (eps > 0) & price.notna() & ((implied - eps).abs() > 0.25 * eps)
+            judge = off & sec.notna() & (sec > 0)
+            eps_wins = judge & ((eps - sec).abs() <= (implied - sec).abs())
+            pe_wins = judge & ~eps_wins
+            out.loc[eps_wins, "pe"] = (price / eps)[eps_wins]
+            out.loc[pe_wins, "eps_diluted_ttm"] = implied[pe_wins]
+            no_judge = off & ~judge
+            out.loc[no_judge, "eps_diluted_ttm"] = np.nan
+            n["pe_recomputed"] = int(eps_wins.sum())
+            n["eps_recomputed"] = int(pe_wins.sum())
+            n["eps_withheld"] = int(no_judge.sum())
+            eps = pd.to_numeric(out["eps_diluted_ttm"], errors="coerce")
+    if "net_margin" in out.columns:
+        nm = pd.to_numeric(out["net_margin"], errors="coerce")
+        bad = ((nm < 0) & (eps > 0)) | ((nm > 0) & (eps < 0))
+        for c in ("net_margin", "op_margin"):
+            if c in out.columns:
+                out.loc[bad, c] = np.nan
+        n["margins_withheld"] = int(bad.sum())
+    return out, n
+
+
 def _selftest() -> None:
+    # Row consistency: each case below was a real row on 2026-10-12.
+    t = pd.DataFrame({"ticker": ["WIX", "SOFI", "OK", "IBKR", "HSBC", "NOSEC"],
+                      "eps_diluted_ttm": [-3.54, 0.47, 2.0, 2.512, 2.204, 2.0],
+                      "pe": [84.28, 30.9, 10.0, 131.465, 8.503, 30.0],
+                      "price": [74.17, 15.23, 20.0, 87.49, 94.85, 20.0],
+                      "net_margin": [-0.08, -0.198, 0.10, 0.2, 0.2, 0.1],
+                      "op_margin": [-0.10, -0.199, 0.12, 0.2, 0.2, 0.1]})
+    sec = pd.Series([0.88, 0.49, 2.0, 2.52, 11.0, np.nan], index=t.index)
+    got, cnt = _row_consistency(t, sec)
+    g = got.set_index("ticker")
+    assert pd.isna(g.at["WIX", "pe"]), "a positive P/E survived next to a loss EPS"
+    assert abs(g.at["SOFI", "pe"] - 30.9) < 1e-9, "a consistent P/E was changed"
+    assert pd.isna(g.at["SOFI", "net_margin"]) and pd.isna(g.at["SOFI", "op_margin"]), \
+        "a margin contradicting the EPS survived"
+    assert g.at["OK", "pe"] == 10.0 and g.at["OK", "net_margin"] == 0.10, "a clean row was touched"
+    assert abs(g.at["IBKR", "pe"] - 87.49 / 2.512) < 1e-9, "IBKR: the EPS SEC agrees with must win"
+    assert abs(g.at["HSBC", "eps_diluted_ttm"] - 94.85 / 8.503) < 1e-9, "HSBC: the P/E SEC agrees with must win"
+    assert pd.isna(g.at["NOSEC", "eps_diluted_ttm"]) and g.at["NOSEC", "pe"] == 30.0, \
+        "with no SEC EPS the P/E is kept and the EPS withheld"
+    assert cnt == {"pe_blank_on_loss": 1, "pe_recomputed": 1, "eps_recomputed": 1,
+                   "eps_withheld": 1, "margins_withheld": 1}, cnt
+
     declared = set(MODULE.metrics())
     for name in FM.REGISTRY:
         assert name in declared, f"metrics() omits registered metric {name!r}"

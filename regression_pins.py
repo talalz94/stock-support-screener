@@ -84,6 +84,26 @@ PINS: list[tuple[str, str, float, float, str]] = [
     ("LASR", "net_income_ttm", -12_477_000, 0.05,
      "Q1-26 +0.6M, Q2-26 -1.3M, Q2-25 -3.6M press releases"),
 
+    # --- SOFI: the first bank-like pin. Its fee line ($610M TTM) used to stand in
+    # for revenue; RevenuesNetOfInterestExpense is the total (2026-10-14).
+    ("SOFI", "revenue_ttm", 4_305_700_000, 0.002,
+     "FY25 3,613.4M (10-K 2026-02-17) + H1-26 2,319.0M - H1-25 1,626.7M "
+     "(10-Q 2026-08-06), RevenuesNetOfInterestExpense"),
+    ("SOFI", "net_income_ttm", 636_200_000, 0.002,
+     "FY25 481.3M + H1-26 323.3M - H1-25 168.4M (same filings)"),
+
+    # --- A RESTATEMENT MUST BEAT ITS ORIGINAL (2026-10-14). AD restated 2025 for
+    # the wireless sale; with the originals winning its Q4 derived to -$1,691M and
+    # revenue_ttm read -$1,538M.
+    ("AD", "revenue_ttm", 213_530_000, 0.002,
+     "FY25 162.961M (10-K 2026-02-20) + H1-26 106.082M - H1-25 RESTATED 55.513M "
+     "(10-Q 2026-08-07; the original H1-25 was 1,807M)"),
+    # ...and a 10-Q's stray twelve-month row must not beat the 10-K's year: FIX's
+    # Q1-2026 10-Q carries $1,831M for 2025-12-31 beside the 10-K's $9,101.6M.
+    ("FIX", "revenue_ttm", 11_228_000_000, 0.002,
+     "FY25 9,101.6M (10-K 2026-02-19) + H1-26 6,131.0M - H1-25 4,004.6M "
+     "(10-Q 2026-07-23)"),
+
     # --- large caps: the sanity floor
     ("AAPL", "eps_diluted_ttm", 8.72, 0.02, "web ~8.7"),
     # Was 3.18 ("web ~3.18"): the TTM to Q1, pinned while KO's Q2 10-Q (filed

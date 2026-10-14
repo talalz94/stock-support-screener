@@ -229,6 +229,30 @@ def derive(f: pd.DataFrame) -> pd.DataFrame:
 
     rev = _d(f, "revenue_ttm").fillna(_d(f, "revenue"))
     cogs = _d(f, "cogs_ttm").fillna(_d(f, "cogs"))
+    # AN IMPOSSIBLE REVENUE IS WITHHELD, NOT SCORED. Revenue below a POSITIVE net
+    # income means the tag we hold is a component, not the total -- for a
+    # traditional bank its fee line, because banks report net interest income
+    # and noninterest income separately and no total. Found 2026-10-14: 71 of
+    # 2,916 universe names after `RevenuesNetOfInterestExpense` fixed the bank-
+    # like filers that do report a total (SOFI: $610M -> $4,306M). Scoring the
+    # fee line gave net margins over 100% and fee-income "revenue growth". A
+    # blank is honest; the proper fix (NII + noninterest income) needs the
+    # interest tags restructured, which touches 413 filers' interest expense.
+    #
+    # NOT when the income statement explains it. Net income CAN exceed a real
+    # revenue -- a tax-allowance release (AUPH, RIGL), a gain on a sold business
+    # or property (TRS, AIV, VISN). Those gains sit below operating income, so
+    # an operating income (or, untagged, a pre-tax income) that is known and
+    # below revenue proves the revenue is the real top line: 6 of the first 71
+    # withheld were genuine that way. Operating before pre-tax because pre-tax
+    # carries non-operating gains too (BYND's debt exchange: pre-tax $300M on
+    # $259M revenue with an operating LOSS of $304M). Banks tag neither, or a
+    # pre-tax above their fee line, so they stay withheld.
+    _ni = _d(f, "net_income_ttm").fillna(_d(f, "net_income"))
+    _op = _d(f, "opinc_ttm").fillna(_d(f, "opinc"))
+    _ceil = _op.where(_op.notna(), _d(f, "pretax_ttm").fillna(_d(f, "pretax")))
+    _explained = _ceil.notna() & (rev >= _ceil)
+    rev = rev.where(~((_ni > 0) & rev.notna() & (rev < _ni) & ~_explained))
     d["revenue"] = rev
     d["cogs"] = cogs
     d["gross_profit"] = _d(f, "gross_profit_ttm").fillna(rev - cogs)
@@ -940,6 +964,18 @@ def selftest(verbose: bool = True) -> None:
     roe = 100.0 / 400.0
     if abs(recon - roe) > 1e-6:
         fails.append(f"DuPont product {recon:.6f} != ROE {roe:.6f}")
+
+    # A COMPONENT REVENUE IS WITHHELD; A REAL ONE BELOW NET INCOME IS NOT.
+    # Shapes measured 2026-10-13: a bank's fee line (no operating or pre-tax
+    # income tagged), AUPH (tax release: operating income below revenue), BYND
+    # (debt-exchange gain: operating LOSS, pre-tax above revenue).
+    rv = derive(_frame(revenue=[177.0, 311.5, 258.8], net_income=[711.0, 314.1, 299.9],
+                       opinc=[np.nan, 150.7, -303.6], pretax=[np.nan, 160.4, 299.9],
+                       assets=[1000.0, 1000.0, 1000.0]))
+    got = list(rv["revenue"])
+    if not (np.isnan(got[0]) and got[1] == 311.5 and got[2] == 258.8):
+        fails.append(f"component-revenue rule: revenue {got}, "
+                     "want [nan, 311.5, 258.8] (bank withheld, AUPH and BYND kept)")
 
     # Sloan: cash-backed earnings must score lower than accrual-heavy ones.
     a_clean = sloan_accruals(derive(_frame(net_income=[100.0], cfo=[150.0],

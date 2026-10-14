@@ -1079,11 +1079,92 @@ def check_currency(asof: str, quick: bool) -> None:
                  f"{n_scored} still scored on scale-free metrics"))
 
 
+def check_rows(asof: str, quick: bool) -> None:
+    """Every DISPLAYED row must agree with itself.
+
+    Added 2026-10-14. Every earlier check compared a number with its SOURCE (SEC
+    filings, Finnhub, Yahoo) one field at a time, and all passed while 88 of 3,360
+    rows on 10-12 contradicted themselves: the provider overlay swaps fields one by
+    one, so Finnhub's EPS sat beside our P/E (WIX: EPS -3.54, P/E 84) and Finnhub's
+    bank margin beside its own positive EPS (SOFI: -19.8% vs +0.47). Separately,
+    75 names (65 Financials) carried a "revenue" smaller than their net income:
+    the fee line of a bank, not its revenue.
+
+      FAIL  a positive P/E next to a loss EPS
+      FAIL  a P/E implying an EPS more than 25% from the EPS shown
+      FAIL  a net margin whose sign contradicts the EPS
+      WARN  revenue below a positive net income that operating (else pre-tax)
+            income does not explain -- a component, withheld from scoring by
+            fund_metrics.derive; reported with names so it can be read
+      WARN  negative revenue (AD and TDS read -$1.5B / -$0.5B on 10-13 while
+            an original filing beat its restatement -- see fundamentals._ttm)
+    """
+    import scores
+    scores.load_all()
+    df = scores.read(module="fundamental", start=asof, end=asof)
+    if df is None or df.empty:
+        record("rows", "displayed rows agree with themselves", WARN, "no fundamental rows at asof")
+        return
+    w = df.pivot_table(index="ticker", columns="metric", values="value", aggfunc="first")
+    for c in ("eps_diluted_ttm", "pe", "net_margin"):
+        if c not in w.columns:
+            w[c] = np.nan
+    eps, pe, nm = w["eps_diluted_ttm"], w["pe"], w["net_margin"]
+    loss = w.index[(pe > 0) & (eps <= 0)]
+    sign = w.index[((nm < 0) & (eps > 0)) | ((nm > 0) & (eps < 0))]
+    off = []
+    try:
+        import store
+        px = store.read(interval="1d", start=asof, end=asof, tickers=list(w.index),
+                        columns=["ticker", "date", "close"])
+        close = px.drop_duplicates("ticker", keep="last").set_index("ticker")["close"]
+        price = close.reindex(w.index)
+        bad = (pe > 0) & (eps > 0) & price.notna() & ((price / pe - eps).abs() > 0.25 * eps)
+        off = list(w.index[bad])
+    except Exception as exc:                                     # noqa: BLE001
+        record("rows", "P/E implies the EPS shown", WARN, f"price unavailable: {repr(exc)[:60]}")
+    for name, hits in (("no positive P/E on a loss EPS", loss),
+                       ("P/E implies the EPS shown (within 25%)", off),
+                       ("no margin contradicts the EPS sign", sign)):
+        record("rows", name, FAIL if len(hits) else OK,
+               f"{len(hits)} of {int(pe.notna().sum()) if 'P/E' in name else int(nm.notna().sum())}"
+               + (f": {sorted(hits)[:8]}" if len(hits) else ""))
+
+    if quick:
+        return
+    try:
+        import bars
+        import fundamentals as FD
+        f = FD.facts_asof(asof, bars.tradeable_universe(asof))
+        r, ni = f.get("revenue_ttm"), f.get("net_income_ttm")
+        if r is not None and ni is not None:
+            # Same rule as fund_metrics.derive: an operating (else pre-tax)
+            # income known and below revenue explains the excess as a
+            # below-the-line gain or tax release, so that revenue is real.
+            nan = pd.Series(np.nan, index=f.index)
+            op, pt = f.get("opinc_ttm", nan), f.get("pretax_ttm", nan)
+            ceil = op.where(op.notna(), pt)
+            explained = ceil.notna() & (r >= ceil)
+            narrow = f.loc[(ni > 0) & r.notna() & (r < ni) & ~explained, "ticker"]
+            record("rows", "revenue is not a component (below net income, unexplained)",
+                   WARN if len(narrow) else OK,
+                   f"{len(narrow)} of {int(r.notna().sum())} -- withheld from scoring"
+                   + (f": {sorted(narrow)[:8]}" if len(narrow) else ""))
+        if r is not None:
+            neg = f.loc[r < 0, "ticker"]
+            record("rows", "no negative revenue", WARN if len(neg) else OK,
+                   f"{len(neg)} of {int(r.notna().sum())}"
+                   + (f": {sorted(neg)[:8]}" if len(neg) else ""))
+    except Exception as exc:                                     # noqa: BLE001
+        record("rows", "revenue is not a component (below net income, unexplained)",
+               WARN, repr(exc)[:80])
+
+
 GROUPS = {"key": check_key, "time": check_time, "value": check_value,
           "config": check_config, "claims": check_claims,
           "coverage": check_coverage, "currency": check_currency,
           "cross": check_cross, "combo": check_combo, "feeds": check_feeds,
-          "pages": check_pages, "screen": check_screen}
+          "pages": check_pages, "screen": check_screen, "rows": check_rows}
 
 
 def main() -> int:

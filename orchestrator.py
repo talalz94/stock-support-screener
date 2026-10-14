@@ -730,6 +730,40 @@ def _step_candidates(asof: str) -> tuple[int, str]:
     return n, f"{n} name(s) drawn on {p.name}"
 
 
+def _step_floor(asof: str) -> tuple[int, str]:
+    """The Floor-retest page (zones/floor.html): the SOFI pattern -- a big run, a
+    deep pullback, a multi-month floor, the close back at it. Same code path as
+    floorretest_study.py, whose measured result the page prints at the top. Zero
+    matches is a legitimate night, not an error: the page then says so."""
+    import floor_page
+    p, n = floor_page.build(asof)
+    return n, f"{n} name(s) at a floor after a big run, drawn on {p.name}"
+
+
+def _step_sectors(asof: str) -> tuple[int, str]:
+    """Sector + sub-industry readings (sector_score.py) and the Sectors page.
+
+    The sector SCORE is the one sector_study.py validated out of sample (rs21 +
+    breadth200: IC +0.142, t +4.13 over 55 unseen months). Sub-industries and
+    seasonality are context only -- seasonality measured NOT predictive. Rebuilds
+    the wide close matrix when it is older than the newest bar (~4 min)."""
+    import sector_score
+    import sectors_page
+    # THE SECTOR MAP WAS NEVER REFRESHED: last written 2026-08-07, so filers and
+    # CIK changes since then (XOM's new holding company) read "Other" -- 614 of
+    # 3,467 tradeable names on 2026-10-14. Rebuilt weekly here: the fact store's
+    # SICs plus SEC submissions for the rest (cached; ~2 min the first time).
+    import macro
+    _mf = config.SECTOR_MAP_FILE
+    if (not _mf.exists()) or (time.time() - _mf.stat().st_mtime) > 7 * 86400:
+        macro.build_sector_map(verbose=False)
+    per, groups = sector_score.write(asof)
+    p, n = sectors_page.build(asof)
+    top = groups[groups.level == "sector"].sort_values("score", ascending=False).head(3)
+    return n, (f"{n} group(s) on {p.name}; strongest sectors: "
+               + ", ".join(f"{g} {s:.0f}" for g, s in zip(top.group, top.score)))
+
+
 def _step_explore(asof: str) -> tuple[int, str]:
     import explore
     p = explore.build(verbose=False)
@@ -1353,6 +1387,25 @@ def _step_validate(asof: str) -> tuple[int, str]:
         parts.append(f"screen:ERR({type(exc).__name__})")
         note("screen_group", 0, 0, repr(exc)[:120])
 
+    # The `rows` group: does each DISPLAYED row agree with itself (P/E vs EPS,
+    # margin vs EPS, revenue vs net income)? Added 2026-10-14 after 88 rows
+    # contradicted themselves while every field-by-field check passed -- the
+    # audits compared each number with its source and never a row with itself.
+    try:
+        _t = time.time()
+        import validate as _V
+        _V._results.clear()
+        _V.check_rows(asof, False)
+        _rbad = [r for r in _V._results if r[2] == _V.FAIL]
+        problems += len(_rbad)
+        parts.append("rows:" + ("pass" if not _rbad else f"{len(_rbad)}FAIL"))
+        for _g, _n, _st, _d in _V._results:
+            note(f"rows.{_n}"[:48], int(_st == _V.OK), int(_st == _V.FAIL), _d)
+        _lap("rows", time.time() - _t)
+    except Exception as exc:                                     # noqa: BLE001
+        parts.append(f"rows:ERR({type(exc).__name__})")
+        note("rows_group", 0, 0, repr(exc)[:120])
+
     log(f"    [validate] timing: {', '.join(_laps)}")
     parts.append(f"[{time.time() - _t_started:.0f}s]")
     return problems, f"{head} -- " + "  ".join(parts)
@@ -1524,6 +1577,15 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("zones", "fundamental", "hype", "sentiment"), timeout=300,
          desc="the good-level candidates page: price + support level charts "
               "(a viewer for an unmeasured-edge screen, not a score)"),
+    Step("floor", _step_floor, config.CADENCE_DAILY,
+         depends_on=("bars", "fundamental", "hype", "sentiment"), timeout=900,
+         desc="the Floor-retest page: a big run, a deep pullback, a multi-month "
+              "floor, the close back at it (measured result printed on the page)"),
+    # Before `explore`, which joins the per-stock sector score from its file.
+    Step("sectors", _step_sectors, config.CADENCE_DAILY,
+         depends_on=("bars", "fundamental"), timeout=1800,
+         desc="sector score (validated out of sample) + sub-industry and seasonal "
+              "context, and the Sectors page"),
     # SESSION-INDEXED, because it RENDERS A SESSION.
     #
     # It was date-indexed, and on 2026-08-14 that meant: the night run built

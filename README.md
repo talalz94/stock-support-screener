@@ -113,6 +113,14 @@ report type has a folder with `latest.html` in it (dated copies beside it).
   strip above it is the "at the level" zone), the fundamental, hype and sentiment
   numbers beside it, and a sector dropdown. Click a row for a larger chart. **A screen
   with no measured edge, not a buy list**; the page says so at the top
+- `reports\zones\floor.html` — **Floor retest**: the SOFI pattern (a run of 2x or more, a
+  35-70% pullback, a floor tested 3+ times over 3+ months, the close back at it), drawn
+  with the floor line. Rare -- usually none or one on a day. Measured: +4.3pp at 40 days
+  (t +1.36, not proven) with the floor breaking in 32% of cases; near misses measured WORSE
+- `reports\sectors\latest.html` — **Sectors**: every sector and sub-industry against the
+  market (1/3/6/12-month, share above the 200-day average, highs minus lows), the
+  out-of-sample-validated sector score, and each group's stocks in a category today.
+  Seasonality shown as context only: measured NOT predictive
 - `reports\sentiment\latest.html`, `reports\fundamental\latest.html` — the two dashboards
 - `reports\stock\<TICKER>.html` — per-stock sheet: score radar, annual
   financials with sparklines and YoY shading, sector and TradingView link
@@ -216,10 +224,10 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **27 steps**, in this order: `universe, bars, macro, news, senti_cache,
+- **29 steps**, in this order: `universe, bars, macro, news, senti_cache,
   sentiment, bounce, zones, shortvol, hype, provider, sec_facts, sec_gap,
-  sec_edgar, fundamental, events, leaderboard, dip, combo, candidates, validate,
-  explore, snapshots, profiles, retention, dashboard, docs`. The SEC steps come before
+  sec_edgar, fundamental, events, leaderboard, dip, combo, candidates, floor,
+  sectors, validate, explore, snapshots, profiles, retention, dashboard, docs`. The SEC steps come before
   `fundamental` so a newly fetched filing is scored the same night; `sec_edgar`
   reads each new 10-Q/10-K/20-F/40-F straight from EDGAR, so a filing reaches the
   scores a night after it is filed instead of a quarter later. `bounce` and `zones` are deliberately
@@ -408,6 +416,13 @@ as bankruptcy text and asserts no metric moves.
 | `good_level.py` | the "good level" rule applied to the latest session -> `data/_good_level_<date>.csv`. A screen, **not a buy list** |
 | `rule_accuracy.py` | measures that rule: history, luck, and live days after the study |
 | `lowclimb_study.py` | measures "lower low, now climbing" over 245 non-overlapping dates since 2017: no edge, worse in tech. Builds `data/_lowclimb_panel.parquet` once; `--rebuild` |
+| `floorretest_study.py` | the SOFI pattern, defined and measured: event study 2017-2026, controls, near misses, floor-break rate; `current()` lists today's matches. `--rebuild`, `--current` |
+| `floor_page.py` | the Floor-retest page, `reports/zones/floor.html`; the `floor` step. `--selftest` |
+| `sectors.py` | sector and sub-industry groups (energy split into producers, services, refiners, pipelines, gas and electric utilities, coal...) and point-in-time equal-weight returns; caches `data/_wide_1d.parquet` |
+| `sector_study.py` | does sector/sub-industry momentum, breadth or quality predict the next 1-3 months? walk-forward composite |
+| `season_study.py` | does same-calendar-month history predict? sector, sub-industry, stock; energy calendar profiles |
+| `sector_score.py` | today's sector score (the validated composite) and context, per stock and per group, in `data/sectors/`. `--selftest` checks it equals the study |
+| `sectors_page.py` | the Sectors page, `reports/sectors/latest.html`; with `sector_score.py`, the `sectors` step |
 | `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
 | **`orchestrator.py`** | **THE scheduled entry point** — 27-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |

@@ -295,6 +295,8 @@ NAV = [
     ("bounce", "Bounce", "bounce/latest.html"),
     ("zones", "Zones", "zones/latest.html"),
     ("candidates", "Candidates", "zones/candidates.html"),
+    ("floor", "Floor retest", "zones/floor.html"),
+    ("sectors", "Sectors", "sectors/latest.html"),
     ("sentiment", "Sentiment", "sentiment/latest.html"),
     ("fundamental", "Fundamental", "fundamental/latest.html"),
     ("profiles", "Profiles", "stock/index.html"),

@@ -151,7 +151,15 @@ TAGS: dict[str, list[str]] = {
     # `RevenueFromContractWithCustomer...` (singular). MEASURED on 2025q1: 460
     # foreign filings carried 317,268 fact rows of which only **16.5%** matched
     # this map, which is why 588 universe names had a CIK and no facts.
+    # `RevenuesNetOfInterestExpense` is a bank's / broker's TOTAL net revenue (net
+    # interest income + noninterest income). Without it a bank-like filer fell back
+    # to its contract-revenue line, which is FEE income only: SOFI's "revenue" read
+    # $154M for Q2 2026 against $1,219M reported, revenue_ttm $610M below its own
+    # net income of $636M. Found 2026-10-14; 75 universe names (65 Financials) had
+    # revenue below net income. `revenue` is an AGGREGATE_MAX concept, so adding
+    # the total is enough -- the larger figure wins per period.
     "revenue": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues",
+                "RevenuesNetOfInterestExpense",
                 "SalesRevenueNet", "RevenueFromContractWithCustomerIncludingAssessedTax",
                 "SalesRevenueGoodsNet",
                 "Revenue", "RevenueFromContractsWithCustomers",      # IFRS
@@ -952,6 +960,9 @@ _READ_CACHE_MAX = 2
 # 40-F, 10-KT and S-1 all carry real statements and stay.
 _PROXY_FORM_RE = re.compile(r"^(DEF|DEFA|DEFM|DEFR|DEFC|PRE|PRER|PREM)\s*14[AC]",
                             re.I)
+# Annual reports (10-K, 10-K/A, 10-KT, 20-F, 40-F): where an ANNUAL revenue
+# figure should come from -- see `_latest`.
+_ANNUAL_FORM_RE = re.compile(r"^(10-K|20-F|40-F)", re.I)
 
 
 # Toggle so the filter's aggregate effect can be MEASURED rather than argued.
@@ -1610,13 +1621,24 @@ def history(ticker: str, freq: str = "A", periods: int = 20) -> pd.DataFrame:
     #
     # A revenue component cannot exceed the revenue total, which is why max is
     # safe here and why that constant stays deliberately small.
+    #
+    # Max PER FILING (`adsh` in the key): across filings the latest still wins
+    # below, so a restatement is not beaten by the original it replaced (AD,
+    # 2026-10-14 -- see `_ttm`).
     agg = raw["concept"].isin(AGGREGATE_MAX_CONCEPTS)
     if agg.any():
         big = (raw[agg].sort_values("value")
-               .drop_duplicates(subset=["concept", "ddate", "qtrs"], keep="last"))
+               .drop_duplicates(subset=["concept", "ddate", "qtrs", "adsh"], keep="last"))
         raw = pd.concat([raw[~agg], big], ignore_index=True)
-    raw = raw.sort_values("filed").drop_duplicates(
-        subset=["concept", "ddate"], keep="last")
+    # An annual revenue row from an annual report beats one from a 10-Q -- see
+    # `_latest` (FIX, JAKK). Revenue only, so every other concept is unchanged.
+    raw = raw.assign(_afm=raw["concept"].isin(AGGREGATE_MAX_CONCEPTS)
+                     & raw["qtrs"].eq(4)
+                     & (raw["form"].astype(str).str.match(_ANNUAL_FORM_RE)
+                        if "form" in raw.columns else False))
+    raw = (raw.sort_values(["_afm", "filed"], kind="mergesort")
+              .drop_duplicates(subset=["concept", "ddate"], keep="last")
+              .drop(columns="_afm"))
 
     wide = raw.pivot_table(index="ddate", columns="concept", values="value",
                            aggfunc="last")
@@ -1841,7 +1863,11 @@ def sector_map(write_file: bool = True, verbose: bool = True) -> pd.DataFrame:
     """
     import macro
 
-    qs = stored_quarters(include_cf=True)          # read path
+    # BULK quarters only: `part_path` is the bulk store, and a quarter that exists
+    # only in companyfacts has no bulk file to read (flagged 2026-10-12; it crashed
+    # nothing only because this had no caller). Companyfacts rows carry no SIC
+    # anyway -- `macro.build_sector_map` fills those from SEC submissions.
+    qs = [q for q in stored_quarters(include_cf=False) if part_path(q).exists()]
     if not qs:
         return pd.DataFrame(columns=["ticker", "cik", "sic", "sector", "sector_etf"])
 
@@ -2099,11 +2125,27 @@ def _latest(df: pd.DataFrame, keys: list[str]) -> pd.DataFrame:
     #
     # `_proxy` descending puts proxy rows FIRST, so a statement row lands last
     # and `.tail(1)` takes it.
-    d = d.sort_values(["ddate", "_proxy", "_pref", "_val", "filed"],
-                      ascending=[True, False, False, True, True],
+    #
+    # `filed` BEFORE `_val`: the largest alias wins WITHIN a filing, and a later
+    # filing (a restatement) wins across them -- otherwise an original beats its
+    # own restatement (AD's 2024 revenue restated $3,770M -> $103M after the
+    # wireless sale; see `_ttm`). Unchanged for other concepts, whose `_val` is 0.
+    #
+    # ...AND AN ANNUAL FIGURE COMES FROM AN ANNUAL REPORT (`_afm`, ahead of
+    # `filed`). Some 10-Qs carry a twelve-month revenue row for the prior year
+    # end that is NOT the year's revenue: FIX's Q1-2026 10-Q has $1,831M for
+    # 2025-12-31 against its 10-K's $9,102M, JAKK $113M against $571M. The
+    # cross-filing max used to hide them; latest-filing-first let them win
+    # (measured 2026-10-14, the same day). Revenue only, like `_val`.
+    afm = (d["qtrs"].eq(4) if "qtrs" in d.columns else False)
+    afm = afm & (d["form"].astype(str).str.match(_ANNUAL_FORM_RE)
+                 if "form" in d.columns else False)
+    d["_afm"] = is_max & afm
+    d = d.sort_values(["ddate", "_proxy", "_afm", "_pref", "filed", "_val"],
+                      ascending=[True, False, True, False, True, True],
                       kind="mergesort")
     return d.groupby(keys, observed=True).tail(1).drop(
-        columns=["_pref", "_val", "_proxy"], errors="ignore")
+        columns=["_pref", "_val", "_proxy", "_afm"], errors="ignore")
 
 
 def _q4_rows(q: pd.DataFrame, ann: pd.DataFrame) -> pd.DataFrame:
@@ -2221,11 +2263,28 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
         # higher-ranked tag.
         q1 = q1.assign(_proxy=q1["form"].astype(str).str.match(_PROXY_FORM_RE)
                        if "form" in q1.columns else False)
-        d = (q1.sort_values(["ddate", "_proxy", "rank", "filed"],
-                            ascending=[True, False, False, True],
+        # AGGREGATE_MAX applies HERE TOO, not only in `_latest`. Without it each
+        # quarter took its alias by list position, so a filer tagging both its
+        # fee line and its total got the fee line summed four times: SOFI's
+        # revenue_ttm read $610M (contract revenue) against $4,306M reported
+        # (RevenuesNetOfInterestExpense) -- found 2026-10-14. A component cannot
+        # exceed the total, so the larger figure per quarter is the total.
+        #
+        # BUT ONLY WITHIN ONE FILING: `filed` sorts BEFORE `_val`. With value
+        # first, the max ran ACROSS filings and an original beat its own
+        # restatement: AD restated 2025 for the wireless sale (Q1 $891M ->
+        # $27M, Q2 $916M -> $29M, filed a year later), the originals won, the
+        # derived Q4 = FY - Q1 - Q2 - Q3 came out -$1,691M and revenue_ttm
+        # -$1,538M (TDS alike). Introduced and caught the same day, 2026-10-14.
+        # For every other concept `_val` is 0, so the order is unchanged.
+        _mx = q1["concept"].isin(AGGREGATE_MAX_CONCEPTS)
+        q1 = q1.assign(_pref=q1["rank"].where(~_mx, 0),
+                       _val=pd.to_numeric(q1["value"], errors="coerce").where(_mx, 0.0))
+        d = (q1.sort_values(["ddate", "_proxy", "_pref", "filed", "_val"],
+                            ascending=[True, False, False, True, True],
                             kind="mergesort")
                .groupby(["ticker", "concept", "ddate"], observed=True).tail(1)
-               .drop(columns="_proxy", errors="ignore"))
+               .drop(columns=["_proxy", "_pref", "_val"], errors="ignore"))
 
         # COLLAPSE 52/53-WEEK NEAR-DUPLICATE PERIOD ENDS.
         #
@@ -2558,11 +2617,17 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
     cat.loc[_nonadd, "_prio"] = cat.loc[_nonadd, "_src"].map(
         {"annual": 0, "4q": 1, "roll": 2}).fillna(0).astype(int)
     # `_rank` DESCENDING so the preferred alias lands last and `.tail(1)`
-    # takes it, matching the convention in `_latest`.
-    cat = (cat.sort_values(["ddate", "_prio", "_rank"],
-                           ascending=[True, True, False], kind="mergesort")
+    # takes it, matching the convention in `_latest`. For AGGREGATE_MAX
+    # concepts the tie between same-day windows goes to the LARGER value
+    # instead (two roll-forwards of revenue, one per tag: SOFI's fee-line roll
+    # and its total-revenue roll both end 2026-06-30).
+    _mx = cat["concept"].isin(AGGREGATE_MAX_CONCEPTS)
+    cat["_rank"] = cat["_rank"].where(~_mx, 0)
+    cat["_val"] = pd.to_numeric(cat["value"], errors="coerce").where(_mx, 0.0)
+    cat = (cat.sort_values(["ddate", "_prio", "_rank", "_val"],
+                           ascending=[True, True, False, True], kind="mergesort")
               .groupby(["ticker", "concept"], observed=True).tail(1)
-              .drop(columns=["_prio", "_rank"], errors="ignore"))
+              .drop(columns=["_prio", "_rank", "_val"], errors="ignore"))
     if avg_out is not None:      # disjoint concepts, so no contest to resolve
         cat = pd.concat([cat, avg_out], ignore_index=True)
     if with_window:
@@ -2639,6 +2704,43 @@ def _selftest_alias_max() -> None:
     # A concept NOT in the max-set must still honour alias order (rank 0 wins),
     # or this fix would silently change every other concept too.
     assert got["Y"] == 50.0, f"non-max concepts must keep alias order, got {got['Y']}"
+
+    # THE MAX IS WITHIN A FILING, NEVER ACROSS FILINGS. AD restated 2024 for the
+    # wireless sale ($3,770M original -> $103M, filed a year later): the
+    # restatement must win, or a discontinued business stays in "revenue".
+    r = pd.DataFrame({
+        "ticker": ["AD"] * 3, "concept": ["revenue"] * 3,
+        "tag": ["RevenueFromContractWithCustomerExcludingAssessedTax", "Revenues", "Revenues"],
+        "rank": [0, 1, 1], "ddate": ["2024-12-31"] * 3,
+        "filed": ["2025-02-21", "2025-02-21", "2026-02-20"],
+        "value": [3_667e6, 3_770e6, 102.933e6]})
+    got = _latest(r, ["ticker", "concept"]).set_index("ticker")["value"]
+    assert got["AD"] == 102.933e6, f"an original beat its restatement: {got['AD']:,}"
+    assert _latest(r[r.filed == "2025-02-21"], ["ticker", "concept"])["value"].iloc[0] == 3_770e6, \
+        "within one filing the larger alias must still win"
+    # ...but a LATER 10-Q's twelve-month row is not a restatement of the year:
+    # FIX's Q1-2026 10-Q carries $1,831M for 2025-12-31 beside the 10-K's $9,102M.
+    fx = pd.DataFrame({
+        "ticker": ["FIX"] * 2, "concept": ["revenue"] * 2, "tag": ["Revenues"] * 2,
+        "rank": [1, 1], "ddate": ["2025-12-31"] * 2, "qtrs": [4, 4],
+        "filed": ["2026-02-19", "2026-04-23"], "form": ["10-K", "10-Q"],
+        "value": [9_101.6e6, 1_831.3e6]})
+    got = _latest(fx, ["ticker", "concept"])["value"].iloc[0]
+    assert got == 9_101.6e6, f"a 10-Q's twelve-month row beat the 10-K: {got:,}"
+
+    # Same rule in `_ttm`'s quarterly path, where it bit: the derived Q4 is
+    # FY - Q1 - Q2 - Q3, so ORIGINAL Q1/Q2 beside a RESTATED FY made it -$1,691M.
+    q = []
+    for d, orig, rest in (("2025-03-31", 891e6, 26.984e6), ("2025-06-30", 916e6, 28.529e6)):
+        q.append(("2025-05-02" if d < "2025-04" else "2025-08-11", d, 1, orig))
+        q.append(("2026-05-08" if d < "2025-04" else "2026-08-07", d, 1, rest))
+    q += [("2025-11-07", "2025-09-30", 1, 47.119e6), ("2026-02-20", "2025-12-31", 4, 162.961e6),
+          ("2026-05-08", "2026-03-31", 1, 52.012e6), ("2026-08-07", "2026-06-30", 1, 54.070e6)]
+    fl = pd.DataFrame(q, columns=["filed", "ddate", "qtrs", "value"]).assign(
+        ticker="AD", concept="revenue", tag="Revenues", rank=1, form="10-Q", cik=1)
+    t = _ttm(fl)
+    v = float(t.loc[t.concept == "revenue", "value"].iloc[0])
+    assert abs(v - 213.530e6) < 1e3, f"AD revenue_ttm {v:,.0f}, want 213,530,000 (restated legs)"
 
 
 def _selftest_merge_near_periods() -> None:
