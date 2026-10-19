@@ -59,6 +59,26 @@ NASDAQ_EXPECTED = {
 }
 
 _KILL = re.compile(config.NAME_KILL_PATTERN, re.I)
+_WI = re.compile(r"when.issued", re.I)
+
+
+def _name_kill_hit(sec: str, alpaca: str) -> str | None:
+    """The kill-pattern text that drops this security, or None to keep it.
+
+    "WHEN-ISSUED" COUNTS ONLY WHEN BOTH SOURCES SAY IT. Nasdaq's directory keeps
+    the label long after the distribution: on 2026-10-17 it still read "Sandisk
+    Corporation - Common Stock When-Issued" (spun from WDC, Feb 2025) and
+    "Constellation Energy Corporation - Common Stock When-Issued" (from Exelon,
+    Feb 2022) while Alpaca's names were current -- so both large caps had been
+    out of the universe ever since. Found 2026-10-20 by a top-gainers study that
+    could not find SNDK. A genuine when-issued line trades under its own symbol,
+    and Alpaca names it so too.
+    """
+    hit = _KILL.search(_WI.sub("", sec or ""))
+    if hit:
+        return hit.group(0)
+    wi = _WI.search(sec or "")
+    return wi.group(0) if wi and _WI.search(alpaca or "") else None
 
 
 def normalize(sym: str) -> str:
@@ -175,7 +195,9 @@ def build(verbose: bool = True) -> tuple[pd.DataFrame, dict, bool]:
     funnel["minus_test_issue"] = len(a)
 
     before = len(a)
-    a = a[~a["sec_name"].fillna("").str.contains(_KILL)].copy()
+    keep = [_name_kill_hit(s, n) is None
+            for s, n in zip(a["sec_name"].fillna(""), a["name"].fillna(""))]
+    a = a[keep].copy()
     funnel["minus_name_kill"] = len(a)
     funnel["_name_dropped"] = before - len(a)
 
@@ -402,8 +424,8 @@ def explain(symbols: list[str]) -> None:
         else:
             sec = str(r["name"])
             src = "alpaca (join miss -> FAIL OPEN, kept)"
-        hit = _KILL.search(sec)
-        checks.append(("name_filter", hit is None, hit.group(0) if hit else "clean"))
+        hit = _name_kill_hit(sec, str(r["name"]))
+        checks.append(("name_filter", hit is None, hit or "clean"))
 
         kept = all(ok for _, ok, _ in checks)
         print(f"    {t:8} {'KEPT' if kept else 'DROPPED':8} [{src}]  {sec[:52]}")
