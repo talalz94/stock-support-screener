@@ -44,6 +44,27 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-20 (small hours) — SANDISK AND CONSTELLATION ENERGY WERE NEVER IN THE UNIVERSE
+
+Found by a top-gainers study (scratchpad `gainers.py`) that could not find SNDK. Nasdaq's
+symbol directory still names SNDK "Sandisk Corporation - Common Stock When-Issued" (spun
+from WDC, Feb 2025) and CEG "Constellation Energy ... When-Issued" (from Exelon, Feb 2022);
+`config.NAME_KILL_PATTERN` drops "when.issued", so both large caps were filtered out since
+listing. `universe._name_kill_hit`: "when-issued" now drops a name only when Alpaca's name
+says it too (Alpaca's are current). `python universe.py --explain SNDK CEG` -> KEPT. Refresh
+added CEG, DCM, LCU, SNDK, SRTM; `bars.py --backfill` fetched their 10 years (28 tickers,
+63s). Their scores start with the 10-20 nightly run. Backup of the old registry:
+scratchpad `universe_pre20261020.parquet`.
+
+The week since 10-14 (run log): sessions 10-14/15/16 all scored, validate CLEAN rows:pass.
+`provider` tripped its large-cap bounds guard twice (one name's fcf/roe/roa/current/quick
+out of bounds) and passed on the retry; `sec_gap` failed once (companyfacts 316 of 478,
+SEC-side); `events` took 35,456s on 10-17 against a 466-977s norm while the stray `find`
+from 10-13 was still running (gone by 10-20). `profiles` is still over budget (24 min median).
+
+`sectors.load_wide()` rebuilt its 3-minute cache on EVERY call this morning -- bars end
+10-16 while the calendar's last closed session is 10-19, so it never looks fresh. Not fixed.
+
 ## State at 2026-10-14 — ROWS THAT CONTRADICTED THEMSELVES, BANK REVENUE, A STALE SECTOR MAP; A SOFI CATEGORY; A VALIDATED SECTOR SCORE; SEASONALITY MEASURED NOT PREDICTIVE
 
 Done unattended (user away ~06:40-16:30, asked to keep going and to resume itself after
@@ -3360,66 +3381,66 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-14 14:51 — do not edit by hand._
+_Generated 2026-10-19 05:00 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 11s | 7s | 11s | 2.0 min | 49 |
-| `bars` | daily | 1.6 min | 48s | 1.6 min | 10.0 min | 49 |
-| `macro` | daily | 1.5 min | 1.6 min | 1.6 min | 15.0 min | 49 |
-| `news` | daily | 6s | 5s | 6s | 10.0 min | 49 |
-| `senti_cache` | daily | 6s | 2s | 6s | 10.0 min | 49 |
-| `sentiment` | daily | 31s | 14s | 31s | 15.0 min | 50 |
-| `bounce` | daily | 71s | 38s | 71s | 15.0 min | 50 |
-| `zones` | daily | 3.4 min | 82s | 3.4 min | 30.0 min | 33 |
-| `shortvol` | daily | 8s | 4s | 8s | 10.0 min | 47 |
-| `hype` | daily | 2.7 min | 2.1 min | 2.7 min | 120.0 min | 50 |
-| `provider` | daily | 79.6 min | 65.1 min | 79.6 min | 120.0 min | 42 |
-| `sec_facts` | quarterly | 26s | 5s | 26s | 60.0 min | 12 |
-| `sec_gap` | weekly | 2.5 min | 5.2 min | 7.8 min | 20.0 min | 11 |
-| `sec_edgar` | daily | 51s | 12s | 51s | 30.0 min | 4 |
-| `fundamental` | daily | 11.5 min | 2.8 min | 11.5 min | 180.0 min | 53 |
-| `events` | weekly | 7.9 min | 10.3 min | 16.3 min | 30.0 min | 12 |
-| `leaderboard` | weekly | 29.1 min | 36.4 min | 90.2 min ⚠ | 90.0 min | 13 |
-| `dip` | daily | 54s | 14s | 54s | 15.0 min | 53 |
-| `combo` | daily | 55s | 13s | 55s | 15.0 min | 52 |
-| `candidates` | daily | 16s | 3s | 16s | 5.0 min | 9 |
-| `floor` | daily | 2.5 min | 2.1 min | 2.5 min | 15.0 min | 3 |
-| `sectors` | daily | 3.7 min | 2.8 min | 3.7 min | 30.0 min | 3 |
-| `validate` | daily | 18.7 min | 6.2 min | 18.7 min | 60.0 min | 39 |
-| `explore` | daily | 13s | 7s | 26s | 5.0 min | 59 |
-| `snapshots` | daily | 0s | 4s | 13s | 5.0 min | 72 |
-| `profiles` | daily | 89.3 min | 24.3 min | 89.3 min ⚠ | 15.0 min | 55 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 62 |
-| `dashboard` | daily | 1s | 0s | 2s | 2.0 min | 65 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 77 |
+| `universe` | daily | 11s | 7s | 11s | 2.0 min | 52 |
+| `bars` | daily | 2.2 min | 48s | 2.2 min | 10.0 min | 52 |
+| `macro` | daily | 79s | 1.6 min | 1.6 min | 15.0 min | 52 |
+| `news` | daily | 5s | 5s | 6s | 10.0 min | 52 |
+| `senti_cache` | daily | 8s | 2s | 8s | 10.0 min | 52 |
+| `sentiment` | daily | 46s | 14s | 46s | 15.0 min | 53 |
+| `bounce` | daily | 34s | 38s | 71s | 15.0 min | 53 |
+| `zones` | daily | 75s | 80s | 3.4 min | 30.0 min | 36 |
+| `shortvol` | daily | 4s | 4s | 8s | 10.0 min | 50 |
+| `hype` | daily | 1.5 min | 2.1 min | 2.7 min | 120.0 min | 53 |
+| `provider` | daily | 66.7 min | 65.0 min | 79.6 min | 120.0 min | 45 |
+| `sec_facts` | quarterly | 5s | 5s | 26s | 60.0 min | 13 |
+| `sec_gap` | weekly | 2.8 min | 4.6 min | 5.2 min | 20.0 min | 12 |
+| `sec_edgar` | daily | 3s | 14s | 30s | 30.0 min | 9 |
+| `fundamental` | daily | 2.4 min | 2.8 min | 11.5 min | 180.0 min | 56 |
+| `events` | weekly | 590.9 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 13 |
+| `leaderboard` | weekly | 49.1 min | 38.2 min | 90.2 min ⚠ | 90.0 min | 14 |
+| `dip` | daily | 14s | 15s | 54s | 15.0 min | 56 |
+| `combo` | daily | 20s | 15s | 55s | 15.0 min | 55 |
+| `candidates` | daily | 5s | 4s | 16s | 5.0 min | 12 |
+| `floor` | daily | 36s | 53s | 2.5 min | 15.0 min | 6 |
+| `sectors` | daily | 3.2 min | 3.5 min | 8.9 min | 30.0 min | 6 |
+| `validate` | daily | 7.2 min | 6.5 min | 33.8 min | 60.0 min | 42 |
+| `explore` | daily | 8s | 7s | 3.8 min | 5.0 min | 62 |
+| `snapshots` | daily | 0s | 4s | 1.8 min | 5.0 min | 77 |
+| `profiles` | daily | 42.2 min | 25.1 min | 89.3 min ⚠ | 15.0 min | 58 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 67 |
+| `dashboard` | daily | 0s | 0s | 2s | 2.0 min | 68 |
+| `docs` | daily | 0s | 0s | 1s | 5.0 min | 82 |
 
-**Daily total ≈ 111.2 min.** Weekly adds 51.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 111.7 min.** Weekly adds 53.4 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-14 14:51 — do not edit by hand._
+_Generated 2026-10-19 05:00 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 248.3 | 2016-09 → 2026-10 |
+| bars 1d | 122 | 248.6 | 2016-09 → 2026-10 |
 | bars 1h | 5 | 0.7 | 2026-06 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
-| news | 123 | 171.1 | 2016-08 → 2026-10 |
+| news | 123 | 171.4 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 11.9 | 2016-08 → 2026-10 |
-| scores | 122 | 312.2 | 2016-09 → 2026-10 |
+| scores | 122 | 316.1 | 2016-09 → 2026-10 |
 | fundamentals | 70 | 339.5 | 2009q2 → 2026q3 |
-| short volume | 75 | 56.4 | 2020-08 → 2026-10 |
-| flags | 52 | 4.4 | 2026-07-31 → 2026-10-13 |
-| rejects | 22 | 8.1 | 2026-09-14 → 2026-10-13 |
-| zones | 33 | 18.6 | 2026-08-27 → 2026-10-13 |
-| fundamentals (companyfacts) | 131 | 75.1 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 16 | 0.2 | 2015q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 37 | 174.8 | — |
+| short volume | 75 | 56.6 | 2020-08 → 2026-10 |
+| flags | 55 | 4.7 | 2026-07-31 → 2026-10-16 |
+| rejects | 20 | 7.4 | 2026-09-21 → 2026-10-16 |
+| zones | 36 | 20.3 | 2026-08-27 → 2026-10-16 |
+| fundamentals (companyfacts) | 131 | 75.2 | 1980q3 → 2028q3 |
+| fundamentals (EDGAR filings) | 18 | 0.2 | 2015q4 → 2026q3 |
+| loose (macro, universe, jobs, study) | 37 | 175.1 | — |
 
-**`data/` total ≈ 1,424 MB.** `reports/` is a further 91 MB across 308 pages.
+**`data/` total ≈ 1,430 MB.** `reports/` is a further 96 MB across 321 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3427,21 +3448,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-14 14:51 — do not edit by hand._
+_Generated 2026-10-19 05:00 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 378 | 2016-09-27 → 2026-10-13 |
-| `fundamental` | 61 | 235 | 2016-09-26 → 2026-10-13 |
-| `hype` | 20 | 353 | 2016-10-25 → 2026-10-13 |
-| `dip` | 10 | 280 | 2016-09-27 → 2026-10-13 |
-| `combo` | 15 | 235 | 2016-11-04 → 2026-10-13 |
+| `sentiment` | 26 | 381 | 2016-09-27 → 2026-10-16 |
+| `fundamental` | 61 | 238 | 2016-09-26 → 2026-10-16 |
+| `hype` | 20 | 356 | 2016-10-25 → 2026-10-16 |
+| `dip` | 10 | 283 | 2016-09-27 → 2026-10-16 |
+| `combo` | 15 | 238 | 2016-11-04 → 2026-10-16 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-14 14:51 — do not edit by hand._
+_Generated 2026-10-19 05:00 — do not edit by hand._
 
 1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
