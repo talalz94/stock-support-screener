@@ -44,6 +44,50 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-20 (evening) — BANKS GET A REAL REVENUE: NII + NONINTEREST INCOME
+
+Traditional banks tag no total revenue; they report net interest income and noninterest
+income. Our `revenue` was their fee line, which the component rule (10-14) withholds,
+so ~30 regional banks (FITB, HBAN, MTB, ZION...) had no fund_score at all.
+
+* `fundamentals.TAGS["nonint_income"] = ["NoninterestIncome"]`. `nii` is
+  `InterestIncomeExpenseNet`, which already belongs to `interest_exp` -- and the two alias
+  maps disagree on duplicates (history() keeps the FIRST concept, facts_asof the LAST), so
+  listing it twice would have silently moved it out of `interest_exp` in facts_asof.
+  `SHARED_TAGS` + `_add_shared_concepts` COPY its rows under `nii` in both maps instead.
+* `fund_metrics.derive`: where both halves exist over twelve months, their sum replaces a
+  stored revenue that is MISSING or below `BANK_TOTAL_SHARE` = 90% of it, before the
+  component check. Measured on the 251 filers with both halves: withheld fee lines sat at
+  0.00-0.25 of the sum (median 0.08, 53 names); filers tagging their own total at 0.93-1.01
+  (BNY 20,080M vs a sum of 21,367M, HDB, MYFW) -- kept, the filer's figure wins; nothing
+  between 0.78 and 0.93 (NAVI 0.45, ASB 0.69, ISTR 0.78 replaced). Same rule on the profile
+  pages' history table (`stock_profile._bank_revenue`) and in validate's rows WARN.
+* Data: bulk re-ingest `--backfill --years 5 --force --newest-first` (22 quarters 2021q3-
+  2026q3, 0 failed, 22.6 min); companyfacts refetched for the 307 FINANCIALS among the 623
+  `nii` filers already in that store (308 companies, 0 failed) -- the newer companyfacts copy
+  wins per partition and predated the tag; FITB had 4 `NoninterestIncome` rows since 2024
+  against SEC's 225. Not the ~150 non-financial `nii` filers: they report no noninterest
+  income, and a refetch would only have moved their other figures. EDGAR store rebuilt
+  (`edgar.py --since 2026-07-28`, 152 filings, 1 failed; old copy
+  `data/fundamentals_edgar_pre20261020`).
+* Effect (asof 10-19): `nonint_income_ttm` 8 -> 251 names. Scored revenue changed for 203:
+  198 had none and now do (145 had no revenue tag at all, 53 a withheld fee line), 5 larger
+  (ASB, ISTR, NAVI by the rule; CBU, NTRS by refreshed data); 0 lost. Every other TTM field:
+  4 names changed, all financials, no net-income move over 5%.
+* Hand-checked from the filed legs, equal to the pipeline: FITB NII 5,982 + 4,149 - 2,932 =
+  7,199M, noninterest 3,035 + 1,954 - 1,444 = 3,545M -> revenue 10,744M; HBAN 7,041 + 2,677 =
+  9,718M; MTB 7,084 + 2,877 = 9,961M. Pins FITB nii/nonint, MTB nonint (40/40).
+* Re-score of 10-19 (11 steps, 0 failed, validate CLEAN rows:pass): fund_score **2,789 ->
+  2,926** (+137: 130 banks, 3 REITs, 3 other financials, 1 broker; 0 lost) -- FITB 55.1,
+  HBAN 61.1, MTB 61.5, TFC 53.9 scored for the first time; ZION 80.6 on its value pillar
+  alone -> 71.8 with growth too. dip 549 -> 630, Candidates 76 -> 96. 66 already-scored
+  names moved >1 point, ALL financials -- fund_score ranks within sector and 137 peers
+  joined (48 moved >5). Rows WARN "revenue is a component": 61 -> **7** (AD, ATEX, CPT,
+  FVCB, HYPD, PURR, SITC; FVCB is a bank still missing one half). Revenue known for 3,044
+  names (was 2,916). `profiles` in the pipeline: 134s.
+* Read growth with care for acquirers: FITB rev_growth +24% (Comerica), HBAN +26%
+  (Veritex/Cadence) are reported totals including the acquired bank, not organic growth.
+
 ## State at 2026-10-20 (afternoon) — PROFILES 2,527s -> 170s, PAGES IDENTICAL
 
 Baseline: the 10-20 nightly `profiles` step, 96 pages, 2,527s (no stray process running;
@@ -3433,7 +3477,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-20 18:07 — do not edit by hand._
+_Generated 2026-10-20 19:17 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -3451,29 +3495,29 @@ _Generated 2026-10-20 18:07 — do not edit by hand._
 | `sec_facts` | quarterly | 5s | 5s | 26s | 60.0 min | 13 |
 | `sec_gap` | weekly | 2.8 min | 4.6 min | 5.2 min | 20.0 min | 12 |
 | `sec_edgar` | daily | 17s | 16s | 25s | 30.0 min | 10 |
-| `fundamental` | daily | 3.6 min | 2.8 min | 11.5 min | 180.0 min | 57 |
+| `fundamental` | daily | 3.7 min | 2.8 min | 3.9 min | 180.0 min | 58 |
 | `events` | weekly | 590.9 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 13 |
 | `leaderboard` | weekly | 49.1 min | 38.2 min | 90.2 min ⚠ | 90.0 min | 14 |
-| `dip` | daily | 30s | 15s | 54s | 15.0 min | 57 |
-| `combo` | daily | 28s | 15s | 55s | 15.0 min | 56 |
-| `candidates` | daily | 11s | 5s | 16s | 5.0 min | 13 |
-| `floor` | daily | 58s | 56s | 2.5 min | 15.0 min | 7 |
-| `sectors` | daily | 68s | 3.2 min | 8.9 min | 30.0 min | 7 |
-| `validate` | daily | 9.9 min | 6.5 min | 33.8 min | 60.0 min | 43 |
-| `explore` | daily | 10s | 8s | 3.8 min | 5.0 min | 64 |
+| `dip` | daily | 26s | 16s | 30s | 15.0 min | 58 |
+| `combo` | daily | 26s | 15s | 28s | 15.0 min | 57 |
+| `candidates` | daily | 6s | 6s | 11s | 5.0 min | 14 |
+| `floor` | daily | 45s | 53s | 58s | 15.0 min | 8 |
+| `sectors` | daily | 59s | 3.0 min | 8.9 min | 30.0 min | 8 |
+| `validate` | daily | 7.1 min | 6.7 min | 33.8 min | 60.0 min | 44 |
+| `explore` | daily | 9s | 8s | 3.8 min | 5.0 min | 65 |
 | `snapshots` | daily | 23s | 4s | 1.8 min | 5.0 min | 78 |
-| `profiles` | daily | 42.1 min | 25.2 min | 89.3 min ⚠ | 15.0 min | 59 |
+| `profiles` | daily | 2.2 min | 25.1 min | 42.2 min ⚠ | 15.0 min | 60 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 68 |
-| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 70 |
-| `docs` | daily | 0s | 0s | 0s | 5.0 min | 84 |
+| `dashboard` | daily | 0s | 0s | 1s | 2.0 min | 71 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 85 |
 
-**Daily total ≈ 111.8 min.** Weekly adds 53.4 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 111.6 min.** Weekly adds 53.4 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-20 18:07 — do not edit by hand._
+_Generated 2026-10-20 19:17 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -3483,16 +3527,16 @@ _Generated 2026-10-20 18:07 — do not edit by hand._
 | news | 123 | 171.5 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 11.9 | 2016-08 → 2026-10 |
 | scores | 122 | 317.4 | 2016-09 → 2026-10 |
-| fundamentals | 70 | 339.5 | 2009q2 → 2026q3 |
+| fundamentals | 70 | 341.7 | 2009q2 → 2026q3 |
 | short volume | 75 | 56.6 | 2020-08 → 2026-10 |
 | flags | 56 | 4.7 | 2026-07-31 → 2026-10-19 |
 | rejects | 21 | 7.8 | 2026-09-21 → 2026-10-19 |
 | zones | 37 | 20.9 | 2026-08-27 → 2026-10-19 |
-| fundamentals (companyfacts) | 131 | 75.2 | 1980q3 → 2028q3 |
+| fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
 | fundamentals (EDGAR filings) | 18 | 0.2 | 2015q4 → 2026q3 |
 | loose (macro, universe, jobs, study) | 37 | 175.1 | — |
 
-**`data/` total ≈ 1,433 MB.** `reports/` is a further 98 MB across 326 pages.
+**`data/` total ≈ 1,435 MB.** `reports/` is a further 98 MB across 326 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3500,7 +3544,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-20 18:07 — do not edit by hand._
+_Generated 2026-10-20 19:17 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -3514,7 +3558,7 @@ _Generated 2026-10-20 18:07 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-20 18:07 — do not edit by hand._
+_Generated 2026-10-20 19:17 — do not edit by hand._
 
 1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

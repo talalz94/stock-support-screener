@@ -1142,6 +1142,11 @@ def check_rows(asof: str, quick: bool) -> None:
             # income known and below revenue explains the excess as a
             # below-the-line gain or tax release, so that revenue is real.
             nan = pd.Series(np.nan, index=f.index)
+            # ...after the bank rule, as derive applies it: NII + noninterest
+            # income replaces a smaller stored revenue.
+            bank = f.get("nii_ttm", nan) + f.get("nonint_income_ttm", nan)
+            import fund_metrics as _FM
+            r = r.mask(bank.notna() & (bank > 0) & (r.isna() | (r < _FM.BANK_TOTAL_SHARE * bank)), bank)
             op, pt = f.get("opinc_ttm", nan), f.get("pretax_ttm", nan)
             ceil = op.where(op.notna(), pt)
             explained = ceil.notna() & (r >= ceil)

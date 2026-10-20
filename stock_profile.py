@@ -131,6 +131,23 @@ SPLIT_SUSPECT_GAP = 0.35     # fractional YoY divergence that trips the flag
 STALE_FILING_DAYS = {"Q": 200, "A": 500}
 
 
+def _bank_revenue(h: pd.DataFrame) -> pd.DataFrame:
+    """Revenue = net interest income + noninterest income where the stored figure
+    is missing or below 90% of it, per period -- the rule fund_metrics.derive scores with, so a bank's page and
+    its score show the same revenue rather than the page showing its fee line."""
+    if h is None or h.empty or not {"nii", "nonint_income"} <= set(h.columns):
+        return h
+    bank = (pd.to_numeric(h["nii"], errors="coerce")
+            + pd.to_numeric(h["nonint_income"], errors="coerce"))
+    rev = (pd.to_numeric(h["revenue"], errors="coerce") if "revenue" in h.columns
+           else pd.Series(np.nan, index=h.index))
+    out = h.copy()
+    import fund_metrics as FM
+    out["revenue"] = rev.mask(bank.notna() & (bank > 0)
+                              & (rev.isna() | (rev < FM.BANK_TOTAL_SHARE * bank)), bank)
+    return out
+
+
 def _safe_div(a, b):
     if a is None or b is None:
         return None
@@ -992,7 +1009,7 @@ def build(ticker: str, verbose: bool = True,
         for freq, periods in (("A", int(fin_opt.get("periods") or 0) or PERIODS_ALL),
                               ("Q", int(fin_opt.get("quarters") or 0) or PERIODS_ALL)):
             try:
-                h = FD.history(ticker, freq, periods)
+                h = _bank_revenue(FD.history(ticker, freq, periods))
             except Exception:                                    # noqa: BLE001
                 h = pd.DataFrame()
             tables[freq] = h

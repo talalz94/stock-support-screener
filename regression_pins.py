@@ -92,6 +92,15 @@ PINS: list[tuple[str, str, float, float, str]] = [
     ("SOFI", "net_income_ttm", 636_200_000, 0.002,
      "FY25 481.3M + H1-26 323.3M - H1-25 168.4M (same filings)"),
 
+    # --- TRADITIONAL BANKS: revenue = net interest income + noninterest income
+    # (fund_metrics.derive). Both halves pinned; legs from the filings (2026-10-20).
+    ("FITB", "nii_ttm", 7_199_000_000, 0.002,
+     "FY25 5,982M (10-K 2026-02-24) + H1-26 4,149M - H1-25 2,932M"),
+    ("FITB", "nonint_income_ttm", 3_545_000_000, 0.002,
+     "FY25 3,035M + H1-26 1,954M - H1-25 1,444M"),
+    ("MTB", "nonint_income_ttm", 2_877_000_000, 0.002,
+     "FY25 2,742M (10-K 2026-02-18) + H1-26 1,429M - H1-25 1,294M"),
+
     # --- A RESTATEMENT MUST BEAT ITS ORIGINAL (2026-10-14). AD restated 2025 for
     # the wireless sale; with the originals winning its Q4 derived to -$1,691M and
     # revenue_ttm read -$1,538M.
