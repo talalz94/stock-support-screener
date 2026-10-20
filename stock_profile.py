@@ -315,6 +315,10 @@ def peer_percentiles(module: str, session: str, sector: str | None) -> dict:
 _HIST_CACHE: dict = {}
 
 
+def _hist_start(asof: str) -> str:
+    return (pd.Timestamp(asof) - pd.DateOffset(years=6)).strftime("%Y-%m-%d")
+
+
 def prime_history(module: str, tickers: list[str], asof: str) -> None:
     """Read one module's history for a BATCH of tickers, once."""
     key = (module, asof)
@@ -322,11 +326,84 @@ def prime_history(module: str, tickers: list[str], asof: str) -> None:
         return
     try:
         import scores
-        start = (pd.Timestamp(asof) - pd.DateOffset(years=6)).strftime("%Y-%m-%d")
-        df = scores.read(module=module, start=start, end=asof, tickers=tickers)
+        df = scores.read(module=module, start=_hist_start(asof), end=asof, tickers=tickers)
         _HIST_CACHE[key] = df if df is not None else pd.DataFrame()
     except Exception:                                            # noqa: BLE001
         _HIST_CACHE[key] = pd.DataFrame()
+
+
+def prime_histories(modules: list[str], tickers: list[str], asof: str) -> None:
+    """`prime_history` for SEVERAL modules in ONE pass over the score store.
+
+    `scores.read` opens each month file whole -- every module, every column --
+    so priming five modules one by one read the same 72 files five times
+    (measured 2026-10-14: 748 parquet reads, 420s, for one cold page). One read
+    with no module filter, split afterwards, gives each module exactly the rows
+    and order `prime_history` would have: same month order, same row order.
+    """
+    todo = [m for m in modules if (m, asof) not in _HIST_CACHE]
+    if not todo:
+        return
+    try:
+        import scores
+        df = scores.read(start=_hist_start(asof), end=asof, tickers=tickers)
+    except Exception:                                            # noqa: BLE001
+        df = None
+    for m in todo:
+        if df is None:
+            _HIST_CACHE[(m, asof)] = pd.DataFrame()
+        elif df.empty:
+            _HIST_CACHE[(m, asof)] = df
+        else:
+            _HIST_CACHE[(m, asof)] = df[df["module"] == m].reset_index(drop=True)
+
+
+# PRICE BARS for a batch, read once. Each page used to read the bar store three
+# times for ONE ticker -- 400 days for the header, 5 years for the chart, the
+# gate's window for the support level -- and every read opens every month file
+# in range for all 5,000+ tickers. `store.read` is a pure filter plus a sort on
+# (ticker, date), so slicing one batch read returns the identical rows.
+_BAR_CACHE: dict = {}
+CHART_DAYS = int(1260 * 1.5)        # the chart's window, in calendar days
+
+
+def _support_start(asof: str) -> str:
+    import calendar_us
+    return calendar_us.session_offset(calendar_us.all_sessions(), asof,
+                                      config.IND_WARMUP + config.STRUCT_WIN + 5)
+
+
+def prime_bars(tickers: list[str], asof: str) -> None:
+    """Read every bar a batch of profile pages needs, in one pass."""
+    import store
+    import universe
+    start = min((pd.Timestamp(asof) - pd.DateOffset(days=CHART_DAYS)).strftime("%Y-%m-%d"),
+                (pd.Timestamp(asof) - pd.Timedelta(days=400)).strftime("%Y-%m-%d"),
+                _support_start(asof))
+    names = sorted({str(t).upper().strip() for t in tickers}
+                   | {universe.normalize(str(t).upper().strip()) for t in tickers})
+    try:
+        df = store.read("1d", start=start, end=asof, tickers=names)
+    except Exception:                                            # noqa: BLE001
+        _BAR_CACHE.clear()
+        return
+    _BAR_CACHE.clear()
+    _BAR_CACHE.update(asof=asof, start=start, tickers=set(names), df=df)
+
+
+def _bars(ticker: str, start: str, end: str, columns: list[str] | None = None) -> pd.DataFrame:
+    """`store.read("1d", start, end, [ticker], columns)`, from the batch cache when
+    it covers the request."""
+    import store
+    c = _BAR_CACHE
+    if c and c["asof"] == end and start >= c["start"] and ticker in c["tickers"]:
+        d = c["df"]
+        if not d.empty:
+            d = d[(d["ticker"] == ticker) & (d["date"] >= start) & (d["date"] <= end)]
+        if d.empty:
+            return pd.DataFrame(columns=columns or store.SCHEMA)
+        return (d[columns] if columns else d).reset_index(drop=True)
+    return store.read("1d", start=start, end=end, tickers=[ticker], columns=columns)
 
 
 def self_percentiles(module: str, ticker: str, asof: str) -> dict:
@@ -404,9 +481,19 @@ def latest_scores(ticker: str, asof: str) -> dict[str, dict]:
             sess = [s for s in scores.sessions_stored(mod) if s <= asof]
             if not sess:
                 continue
-            df = scores.read(module=mod, start=sess[-1], end=sess[-1],
-                             tickers=[ticker])
+            # The session's cross-section, read ONCE per (module, session) and
+            # shared with `peer_percentiles` -- instead of one whole month file
+            # per module for every page. Filtering it to the ticker gives the
+            # rows `scores.read(..., tickers=[ticker])` returns, in that order.
+            sk = (mod, sess[-1])
+            if sk not in _SESSION_CACHE:
+                _SESSION_CACHE[sk] = scores.read(module=mod, start=sess[-1],
+                                                 end=sess[-1])
+            df = _SESSION_CACHE[sk]
             if df is None or df.empty:
+                continue
+            df = df[df["ticker"] == ticker]
+            if df.empty:
                 continue
             vals = {}
             for _, r in df.iterrows():
@@ -421,10 +508,8 @@ def latest_scores(ticker: str, asof: str) -> dict[str, dict]:
 
 def price_series(ticker: str, asof: str, days: int = 400) -> pd.Series:
     try:
-        import store
         start = (pd.Timestamp(asof) - pd.Timedelta(days=days)).strftime("%Y-%m-%d")
-        px = store.read("1d", start=start, end=asof, tickers=[ticker],
-                        columns=["ticker", "date", "close"])
+        px = _bars(ticker, start, asof, ["ticker", "date", "close"])
         if px.empty:
             return pd.Series(dtype="float64")
         return px.sort_values("date").set_index("date")["close"]
@@ -611,15 +696,12 @@ def _support_level(ticker: str, asof: str) -> tuple[float | None, tuple | None]:
     a full gate trace, which would land in the middle of a build log.
     """
     try:
-        import calendar_us
-        import dataset
         import screen
         import universe
         tk = universe.normalize(ticker)
-        start = calendar_us.session_offset(
-            calendar_us.all_sessions(), asof,
-            config.IND_WARMUP + config.STRUCT_WIN + 5)
-        df = dataset.history(tk, "1d", start=start, end=asof)
+        # dataset.history is store.read(...).reset_index(drop=True) -- `_bars`
+        # returns exactly that, from the batch cache when it is primed.
+        df = _bars(tk, _support_start(asof), asof)
         if df.empty:
             return None, None
         mm = screen.screen_one(df, None, None, config)
@@ -643,12 +725,10 @@ def _block_chart(ticker: str, asof: str, opt: dict) -> str:
     toggle pattern the financials table already uses, works with scripting off,
     and the 5y pane is only ~15 KB of polyline.
     """
-    import store
-    start = (pd.Timestamp(asof) - pd.DateOffset(days=int(1260 * 1.5))) \
+    start = (pd.Timestamp(asof) - pd.DateOffset(days=CHART_DAYS)) \
         .strftime("%Y-%m-%d")
     try:
-        bars = store.read("1d", start=start, end=asof, tickers=[ticker],
-                          columns=["ticker", "date", "close", "volume"])
+        bars = _bars(ticker, start, asof, ["ticker", "date", "close", "volume"])
     except Exception:                                            # noqa: BLE001
         bars = pd.DataFrame()
     if bars.empty:

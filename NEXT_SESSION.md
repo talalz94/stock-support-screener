@@ -44,6 +44,43 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-20 (afternoon) — PROFILES 2,527s -> 170s, PAGES IDENTICAL
+
+Baseline: the 10-20 nightly `profiles` step, 96 pages, 2,527s (no stray process running;
+it was 1,192s on 10-11, so the step was over its 900s budget on its own). After: the SAME
+`orchestrator._step_profiles("2026-10-19")` run into a copy of those pages (so it picked the
+same 96 tickers): **170.3s**. All 97 files (96 pages + index) are identical to the nightly's
+except the two build timestamps on each page ("page built <b>..</b>", "Built ..").
+Method: scratchpad `prof_step.py` (wall clock, no profiler); diff masks only
+`(page built <b>|built )YYYY-MM-DD HH:MM(:SS)`, case-insensitive.
+
+What was slow, and the fix (each returns the rows the old code returned):
+1. **The fact-store prime never hit.** `_step_profiles` primed `prime_history(tk, 16, "Q")`
+   from when pages showed 16 quarters; `build()` now asks for every period
+   (`PERIODS_ALL` = 400), whose start is centuries back, so history()'s cache key was
+   always later than the start it wanted: every page re-read the store twice. Now primed
+   with `PERIODS_ALL, "A"`, which covers both tables.
+2. **Score history read once per module.** `scores.read` opens each month file whole, so
+   five modules read the same 72 files five times. `stock_profile.prime_histories` reads
+   once and splits by module.
+3. **Bars read three times per page for one ticker** (header 400d, chart 5y, support level).
+   `prime_bars` reads the batch once; `_bars` slices it (`store.read` is a pure filter +
+   sort, so a slice is the same rows).
+4. **`latest_scores` read a month file per module per page.** It now shares
+   `_SESSION_CACHE` with `peer_percentiles`.
+5. `fundamentals.currency_of`: the unit -> currency map per DISTINCT unit (43) instead of
+   per row (4.1M): 4.2s -> 1.1s per process, identical on every row and on NaN/None.
+
+The 10-14 cProfile of one cold page (527s) badly overstated Python-call-heavy costs -- the
+profiler's per-call overhead plus the stray `find` -- e.g. it put 48s on (5), which is 4.2s.
+Measure wall clock first; profile only to locate.
+
+**`provider` failed again at 15:07** on its large-cap cross-check (one of AAPL/MSFT/KO/JNJ/
+XOM had fcf, roe, roa, current and quick ratio out of bounds in ONE Finnhub response);
+re-fetched live at 15:55 all five were clean. Third time in five days, each cured by the
+retry 2h later, but each time every scoring step for the session waits. Open: re-check
+once after a short pause before failing (a real multiplier bug survives a re-check).
+
 ## State at 2026-10-20 (small hours) — SANDISK AND CONSTELLATION ENERGY WERE NEVER IN THE UNIVERSE
 
 Found by a top-gainers study (scratchpad `gainers.py`) that could not find SNDK. Nasdaq's
@@ -3381,24 +3418,24 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-19 05:00 — do not edit by hand._
+_Generated 2026-10-20 15:49 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 11s | 7s | 11s | 2.0 min | 52 |
-| `bars` | daily | 2.2 min | 48s | 2.2 min | 10.0 min | 52 |
-| `macro` | daily | 79s | 1.6 min | 1.6 min | 15.0 min | 52 |
-| `news` | daily | 5s | 5s | 6s | 10.0 min | 52 |
-| `senti_cache` | daily | 8s | 2s | 8s | 10.0 min | 52 |
-| `sentiment` | daily | 46s | 14s | 46s | 15.0 min | 53 |
-| `bounce` | daily | 34s | 38s | 71s | 15.0 min | 53 |
-| `zones` | daily | 75s | 80s | 3.4 min | 30.0 min | 36 |
-| `shortvol` | daily | 4s | 4s | 8s | 10.0 min | 50 |
-| `hype` | daily | 1.5 min | 2.1 min | 2.7 min | 120.0 min | 53 |
+| `universe` | daily | 496.3 min | 7s | 496.3 min ⚠ | 2.0 min | 53 |
+| `bars` | daily | 5.2 min | 49s | 5.2 min | 10.0 min | 53 |
+| `macro` | daily | 2.1 min | 1.6 min | 2.1 min | 15.0 min | 53 |
+| `news` | daily | 8s | 5s | 8s | 10.0 min | 53 |
+| `senti_cache` | daily | 4s | 2s | 8s | 10.0 min | 53 |
+| `sentiment` | daily | 31s | 14s | 46s | 15.0 min | 54 |
+| `bounce` | daily | 37s | 38s | 71s | 15.0 min | 54 |
+| `zones` | daily | 67s | 79s | 3.4 min | 30.0 min | 37 |
+| `shortvol` | daily | 4s | 4s | 8s | 10.0 min | 51 |
+| `hype` | daily | 1.5 min | 2.0 min | 2.7 min | 120.0 min | 54 |
 | `provider` | daily | 66.7 min | 65.0 min | 79.6 min | 120.0 min | 45 |
 | `sec_facts` | quarterly | 5s | 5s | 26s | 60.0 min | 13 |
 | `sec_gap` | weekly | 2.8 min | 4.6 min | 5.2 min | 20.0 min | 12 |
-| `sec_edgar` | daily | 3s | 14s | 30s | 30.0 min | 9 |
+| `sec_edgar` | daily | 17s | 16s | 25s | 30.0 min | 10 |
 | `fundamental` | daily | 2.4 min | 2.8 min | 11.5 min | 180.0 min | 56 |
 | `events` | weekly | 590.9 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 13 |
 | `leaderboard` | weekly | 49.1 min | 38.2 min | 90.2 min ⚠ | 90.0 min | 14 |
@@ -3410,37 +3447,37 @@ _Generated 2026-10-19 05:00 — do not edit by hand._
 | `validate` | daily | 7.2 min | 6.5 min | 33.8 min | 60.0 min | 42 |
 | `explore` | daily | 8s | 7s | 3.8 min | 5.0 min | 62 |
 | `snapshots` | daily | 0s | 4s | 1.8 min | 5.0 min | 77 |
-| `profiles` | daily | 42.2 min | 25.1 min | 89.3 min ⚠ | 15.0 min | 58 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 67 |
-| `dashboard` | daily | 0s | 0s | 2s | 2.0 min | 68 |
-| `docs` | daily | 0s | 0s | 1s | 5.0 min | 82 |
+| `profiles` | daily | 42.1 min | 25.2 min | 89.3 min ⚠ | 15.0 min | 59 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 68 |
+| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 69 |
+| `docs` | daily | 0s | 0s | 1s | 5.0 min | 83 |
 
-**Daily total ≈ 111.7 min.** Weekly adds 53.4 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 111.9 min.** Weekly adds 53.4 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-19 05:00 — do not edit by hand._
+_Generated 2026-10-20 15:49 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
 | bars 1d | 122 | 248.6 | 2016-09 → 2026-10 |
 | bars 1h | 5 | 0.7 | 2026-06 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
-| news | 123 | 171.4 | 2016-08 → 2026-10 |
+| news | 123 | 171.5 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 11.9 | 2016-08 → 2026-10 |
-| scores | 122 | 316.1 | 2016-09 → 2026-10 |
+| scores | 122 | 316.4 | 2016-09 → 2026-10 |
 | fundamentals | 70 | 339.5 | 2009q2 → 2026q3 |
 | short volume | 75 | 56.6 | 2020-08 → 2026-10 |
-| flags | 55 | 4.7 | 2026-07-31 → 2026-10-16 |
-| rejects | 20 | 7.4 | 2026-09-21 → 2026-10-16 |
-| zones | 36 | 20.3 | 2026-08-27 → 2026-10-16 |
+| flags | 56 | 4.7 | 2026-07-31 → 2026-10-19 |
+| rejects | 21 | 7.8 | 2026-09-21 → 2026-10-19 |
+| zones | 37 | 20.9 | 2026-08-27 → 2026-10-19 |
 | fundamentals (companyfacts) | 131 | 75.2 | 1980q3 → 2028q3 |
 | fundamentals (EDGAR filings) | 18 | 0.2 | 2015q4 → 2026q3 |
 | loose (macro, universe, jobs, study) | 37 | 175.1 | — |
 
-**`data/` total ≈ 1,430 MB.** `reports/` is a further 96 MB across 321 pages.
+**`data/` total ≈ 1,432 MB.** `reports/` is a further 98 MB across 325 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3448,13 +3485,13 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-19 05:00 — do not edit by hand._
+_Generated 2026-10-20 15:49 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 381 | 2016-09-27 → 2026-10-16 |
+| `sentiment` | 26 | 382 | 2016-09-27 → 2026-10-19 |
 | `fundamental` | 61 | 238 | 2016-09-26 → 2026-10-16 |
-| `hype` | 20 | 356 | 2016-10-25 → 2026-10-16 |
+| `hype` | 20 | 357 | 2016-10-25 → 2026-10-19 |
 | `dip` | 10 | 283 | 2016-09-27 → 2026-10-16 |
 | `combo` | 15 | 238 | 2016-11-04 → 2026-10-16 |
 <!-- /GENERATED:modules -->
@@ -3462,7 +3499,7 @@ _Generated 2026-10-19 05:00 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-19 05:00 — do not edit by hand._
+_Generated 2026-10-20 15:49 — do not edit by hand._
 
 1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

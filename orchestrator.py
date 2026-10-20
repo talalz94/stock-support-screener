@@ -845,17 +845,30 @@ def _step_profiles(asof: str) -> tuple[int, str]:
     # Prime the history cache ONCE for the whole batch. Without this each
     # profile re-scans every score partition -- measured 22s per ticker per
     # module, i.e. 45 min for 30 flags against a 900s budget.
-    for mod in config.SCORE_MODULES:
-        try:
-            stock_profile.prime_history(mod, tk, asof)
-        except Exception:                                    # noqa: BLE001
-            pass
+    # ONE pass for all modules: priming them one by one read every month file
+    # once per module (see stock_profile.prime_histories).
+    try:
+        stock_profile.prime_histories(list(config.SCORE_MODULES), tk, asof)
+    except Exception:                                        # noqa: BLE001
+        pass
+    # ...and the price bars, which every page otherwise read three times for one
+    # ticker (header, chart, support level) -- see stock_profile.prime_bars.
+    try:
+        stock_profile.prime_bars(tk, asof)
+    except Exception:                                        # noqa: BLE001
+        pass
     # And the fact store, which history() otherwise re-scans per ticker AND
     # twice per page (annual + quarterly for the toggle). Measured 44.7s for 6
     # tickers cold vs 10.9s prime + 0.16s warm.
+    #
+    # PRIMED WITH THE PAGE'S OWN WINDOW. This was `prime_history(tk, 16, "Q")`
+    # from when pages showed 16 quarters; since build() asks for every stored
+    # period (PERIODS_ALL), history()'s cache key was always LATER than the
+    # start it wanted, so every page missed and re-read the store twice -- the
+    # prime still cost its read and saved nothing. Found 2026-10-20.
     try:
         import fundamentals as _FD
-        _FD.prime_history(tk, 16, "Q")
+        _FD.prime_history(tk, stock_profile.PERIODS_ALL, "A")
     except Exception:                                        # noqa: BLE001
         pass
     ok, failed = 0, []
