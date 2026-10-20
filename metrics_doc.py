@@ -408,7 +408,7 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
                      "0-100, the stock's SECTOR, not the stock: average rank of the "
                      "sector's 1-month return vs the market and its share of stocks "
                      "above their 200-day average. Chosen on 2017-2022 and tested on "
-                     "2022-2026, which it had never seen: IC +0.142, t +4.13 over 55 "
+                     "2022-2026, which it had never seen: IC +0.141, t +4.10 over 55 "
                      "months (sector_study.py, 2026-10-14). Tilts the odds for a month; "
                      "it does not pick stocks. Details on the Sectors page."),
 }

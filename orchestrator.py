@@ -744,7 +744,7 @@ def _step_sectors(asof: str) -> tuple[int, str]:
     """Sector + sub-industry readings (sector_score.py) and the Sectors page.
 
     The sector SCORE is the one sector_study.py validated out of sample (rs21 +
-    breadth200: IC +0.142, t +4.13 over 55 unseen months). Sub-industries and
+    breadth200: IC +0.141, t +4.10 over 55 unseen months). Sub-industries and
     seasonality are context only -- seasonality measured NOT predictive. Rebuilds
     the wide close matrix when it is older than the newest bar (~4 min)."""
     import sector_score

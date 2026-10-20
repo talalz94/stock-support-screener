@@ -5,7 +5,7 @@ THE SCORE is the one sector_study.py validated out of sample: the average, acros
 sectors, of the percentile ranks of `rs21` (1-month return vs the universe) and
 `breadth200` (share of members above their 200-day average). Those two were chosen
 on 2017-09..2022-02 and then measured on 2022-03..2026-09, which they had never
-seen: IC +0.142, t +4.13 over 55 months (+0.106, t +2.95 before the sector map was
+seen: IC +0.141, t +4.10 over 55 months (+0.106, t +2.95 before the sector map was
 repaired the same day -- see NEXT_SESSION); the top third of sectors beat the bottom
 third by ~1pp a month over the full history. 0-100, higher = stronger.
 
