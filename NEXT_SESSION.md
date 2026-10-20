@@ -75,6 +75,14 @@ The 10-14 cProfile of one cold page (527s) badly overstated Python-call-heavy co
 profiler's per-call overhead plus the stray `find` -- e.g. it put 48s on (5), which is 4.2s.
 Measure wall clock first; profile only to locate.
 
+**`sectors` failed in the 16:39 retry (`KeyError('group')`) -- caused by my 04:07 backfill.**
+It wrote 10-19 bars for the five new names before the nightly fetched everyone else's;
+`sectors.load_wide()`'s cache, rebuilt at 04:10, ended on 10-19 with 3 tickers on that row
+and passed its date-only freshness check from then on, so every group fell below
+MIN_MEMBERS. `_bars_newer_than_cache()`: the cache is also stale when any bar partition is
+newer than it. Rebuilt (10-19: 5,373 tickers); `sectors`, `explore`, `dashboard`, `docs`
+re-run 18:07 -- Energy 100, Healthcare 88, Consumer Discretionary 85.
+
 **`provider` failed again at 15:07** on its large-cap cross-check (one of AAPL/MSFT/KO/JNJ/
 XOM had fcf, roe, roa, current and quick ratio out of bounds in ONE Finnhub response);
 re-fetched live at 15:55 all five were clean. Third time in five days, each cured by the
@@ -3418,7 +3426,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-20 15:49 — do not edit by hand._
+_Generated 2026-10-20 18:07 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -3432,33 +3440,33 @@ _Generated 2026-10-20 15:49 — do not edit by hand._
 | `zones` | daily | 67s | 79s | 3.4 min | 30.0 min | 37 |
 | `shortvol` | daily | 4s | 4s | 8s | 10.0 min | 51 |
 | `hype` | daily | 1.5 min | 2.0 min | 2.7 min | 120.0 min | 54 |
-| `provider` | daily | 66.7 min | 65.0 min | 79.6 min | 120.0 min | 45 |
+| `provider` | daily | 65.2 min | 65.1 min | 79.6 min | 120.0 min | 46 |
 | `sec_facts` | quarterly | 5s | 5s | 26s | 60.0 min | 13 |
 | `sec_gap` | weekly | 2.8 min | 4.6 min | 5.2 min | 20.0 min | 12 |
 | `sec_edgar` | daily | 17s | 16s | 25s | 30.0 min | 10 |
-| `fundamental` | daily | 2.4 min | 2.8 min | 11.5 min | 180.0 min | 56 |
+| `fundamental` | daily | 3.6 min | 2.8 min | 11.5 min | 180.0 min | 57 |
 | `events` | weekly | 590.9 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 13 |
 | `leaderboard` | weekly | 49.1 min | 38.2 min | 90.2 min ⚠ | 90.0 min | 14 |
-| `dip` | daily | 14s | 15s | 54s | 15.0 min | 56 |
-| `combo` | daily | 20s | 15s | 55s | 15.0 min | 55 |
-| `candidates` | daily | 5s | 4s | 16s | 5.0 min | 12 |
-| `floor` | daily | 36s | 53s | 2.5 min | 15.0 min | 6 |
-| `sectors` | daily | 3.2 min | 3.5 min | 8.9 min | 30.0 min | 6 |
-| `validate` | daily | 7.2 min | 6.5 min | 33.8 min | 60.0 min | 42 |
-| `explore` | daily | 8s | 7s | 3.8 min | 5.0 min | 62 |
-| `snapshots` | daily | 0s | 4s | 1.8 min | 5.0 min | 77 |
+| `dip` | daily | 30s | 15s | 54s | 15.0 min | 57 |
+| `combo` | daily | 28s | 15s | 55s | 15.0 min | 56 |
+| `candidates` | daily | 11s | 5s | 16s | 5.0 min | 13 |
+| `floor` | daily | 58s | 56s | 2.5 min | 15.0 min | 7 |
+| `sectors` | daily | 68s | 3.2 min | 8.9 min | 30.0 min | 7 |
+| `validate` | daily | 9.9 min | 6.5 min | 33.8 min | 60.0 min | 43 |
+| `explore` | daily | 10s | 8s | 3.8 min | 5.0 min | 64 |
+| `snapshots` | daily | 23s | 4s | 1.8 min | 5.0 min | 78 |
 | `profiles` | daily | 42.1 min | 25.2 min | 89.3 min ⚠ | 15.0 min | 59 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 68 |
-| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 69 |
-| `docs` | daily | 0s | 0s | 1s | 5.0 min | 83 |
+| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 70 |
+| `docs` | daily | 0s | 0s | 0s | 5.0 min | 84 |
 
-**Daily total ≈ 111.9 min.** Weekly adds 53.4 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 111.8 min.** Weekly adds 53.4 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-20 15:49 — do not edit by hand._
+_Generated 2026-10-20 18:07 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -3467,7 +3475,7 @@ _Generated 2026-10-20 15:49 — do not edit by hand._
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
 | news | 123 | 171.5 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 11.9 | 2016-08 → 2026-10 |
-| scores | 122 | 316.4 | 2016-09 → 2026-10 |
+| scores | 122 | 317.4 | 2016-09 → 2026-10 |
 | fundamentals | 70 | 339.5 | 2009q2 → 2026q3 |
 | short volume | 75 | 56.6 | 2020-08 → 2026-10 |
 | flags | 56 | 4.7 | 2026-07-31 → 2026-10-19 |
@@ -3477,7 +3485,7 @@ _Generated 2026-10-20 15:49 — do not edit by hand._
 | fundamentals (EDGAR filings) | 18 | 0.2 | 2015q4 → 2026q3 |
 | loose (macro, universe, jobs, study) | 37 | 175.1 | — |
 
-**`data/` total ≈ 1,432 MB.** `reports/` is a further 98 MB across 325 pages.
+**`data/` total ≈ 1,433 MB.** `reports/` is a further 98 MB across 326 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3485,21 +3493,21 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-20 15:49 — do not edit by hand._
+_Generated 2026-10-20 18:07 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
 | `sentiment` | 26 | 382 | 2016-09-27 → 2026-10-19 |
-| `fundamental` | 61 | 238 | 2016-09-26 → 2026-10-16 |
+| `fundamental` | 61 | 239 | 2016-09-26 → 2026-10-19 |
 | `hype` | 20 | 357 | 2016-10-25 → 2026-10-19 |
-| `dip` | 10 | 283 | 2016-09-27 → 2026-10-16 |
-| `combo` | 15 | 238 | 2016-11-04 → 2026-10-16 |
+| `dip` | 10 | 284 | 2016-09-27 → 2026-10-19 |
+| `combo` | 15 | 239 | 2016-11-04 → 2026-10-19 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-20 15:49 — do not edit by hand._
+_Generated 2026-10-20 18:07 — do not edit by hand._
 
 1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

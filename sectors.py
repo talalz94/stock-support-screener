@@ -134,8 +134,25 @@ def build_wide(verbose: bool = True) -> tuple[pd.DataFrame, pd.DataFrame]:
     return C, V
 
 
+def _bars_newer_than_cache() -> bool:
+    """True if any bar partition was written after the cache.
+
+    THE DATE ALONE DOES NOT PROVE THE CACHE CURRENT. On 2026-10-20 a backfill of
+    five newly listed names wrote their 10-19 bars before the nightly fetched
+    everyone else's; the cache rebuilt in between ended on 10-19 with THREE
+    tickers on that row, passed the date check from then on, and the `sectors`
+    step failed (every group below MIN_MEMBERS -> an empty table, KeyError).
+    """
+    import store
+    try:
+        newest = max(store.part_path(m, "1d").stat().st_mtime for m in store.months("1d"))
+    except (ValueError, OSError):
+        return True
+    return newest > WIDE.stat().st_mtime
+
+
 def load_wide(rebuild: bool = False) -> tuple[pd.DataFrame, pd.DataFrame]:
-    if not rebuild and WIDE.exists():
+    if not rebuild and WIDE.exists() and not _bars_newer_than_cache():
         w = pd.read_parquet(WIDE)
         if str(w.index.max()) >= calendar_us.last_closed_session():
             c = [x for x in w.columns if x.startswith("close|")]
