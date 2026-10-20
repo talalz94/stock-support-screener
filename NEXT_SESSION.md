@@ -83,6 +83,13 @@ MIN_MEMBERS. `_bars_newer_than_cache()`: the cache is also stale when any bar pa
 newer than it. Rebuilt (10-19: 5,373 tickers); `sectors`, `explore`, `dashboard`, `docs`
 re-run 18:07 -- Energy 100, Healthcare 88, Consumer Discretionary 85.
 
+The sector-score selftest then FAILED (live rs21 vs the study by 0.0004 on 2026-09-01):
+not a code fault -- SNDK and CEG now carry 10 years of history, so Technology and
+Utilities (breadth and returns) and every sector's return-vs-market (the market average)
+moved, while `_sector_panel_sector.parquet` predated them. `sector_study.py` re-run (186s):
+out-of-sample composite IC **+0.141, t +4.10** over 55 months (was +0.142, t +4.13);
+selftest OK; quotes updated (sector_score, metrics_doc, orchestrator).
+
 **`provider` failed again at 15:07** on its large-cap cross-check (one of AAPL/MSFT/KO/JNJ/
 XOM had fcf, roe, roa, current and quick ratio out of bounds in ONE Finnhub response);
 re-fetched live at 15:55 all five were clean. Third time in five days, each cured by the
