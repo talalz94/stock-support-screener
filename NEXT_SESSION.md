@@ -44,6 +44,49 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-21 (small hours) — THE `provider` FAILURES WERE NOT TRANSIENT: YAHOO'S JNJ ROW, MASKED BY ITS OWN CACHE
+
+The step failed 10-16 05:06, 10-17 09:03 and 10-20 15:07 on `_selftest_cross_scale`:
+`{'fcf': 1, 'roe': 1, 'roa': 1, 'current_ratio': 1, 'quick_ratio': 1}`, and each time
+fundamental/dip/combo/candidates/floor/sectors/validate waited for the 2-hourly retry.
+
+* **Now logged per ticker.** `_sane(row, src)` records (provider, ticker, field, value) while
+  a trace is open; the cross-check logs one line per drop to `_providers.log` (value, the
+  multiplier if one was applied, the bound, and what the OTHER provider has), and the
+  assertion now leads with `yahoo JNJ fcf=None roe=None ...`, inside the 140 chars the run
+  log keeps. The first live run with it named the cause straight away.
+* **The cause, measured 10-21 04:06-04:11:** Yahoo's JNJ row has None for all five fields on
+  **10 of 10** fresh fetches over 3 min (`mostRecentQuarter` 2026-09-27, reported 10-13);
+  Finnhub has roe 0.257, roa 0.106, current 1.089, quick 0.725. `_sane` counts None as a drop.
+  Not a multiplier: a wrong multiplier gives a number out of bounds, never a None.
+* **Why every retry "passed":** `fetch` reads Yahoo through the 20 h cache, and the failed
+  pass had cached JNJ's row with those fields already dropped. A default-TTL pass at 04:11
+  read that row and reported "16 shared field(s) agree ... 0 dropped". Each failure was a
+  first read more than 20 h after the previous pass (23.9 h, 25.6 h, 65.9 h), and each
+  retry pass came less than 20 h after a failure had cached the row (2.3 h, 12.2 h, 1.5 h).
+  The 10-20 15:55 "live re-fetch dropped nothing" probably went through that same cache
+  (unverified). The
+  drop check therefore only sees Yahoo once a day, on the first read after the cache expires.
+* **Re-check added anyway** (`_cross_scale_with_recheck`): on a scale or drop failure, wait
+  `CROSS_SCALE_RECHECK_WAIT` = 60 s and re-run ONCE, with Yahoo refetched (`ttl_hours=0`), so
+  it cannot pass the way those retries did. A second failure fails the step, and so does a
+  re-check that cannot reach a provider ("skipped" is not "agreed"). A rescue goes in the
+  run log as `[provider] cross-scale passed on a fresh re-check ...`. **It does not fix the
+  JNJ case**, because that gap persists past 60 s. Expect the next fresh read (the first
+  `provider` run more than 20 h after the last one, so likely 10-22 05:00) to fail on
+  `yahoo JNJ`, then pass on the cache at the 07:00 retry, unless Yahoo fills the row first.
+* Test: `_selftest_recheck` (offline, in `providers.selftest()`): clean -> no re-check;
+  bad then clean -> pass, re-check used ttl 0, log names `yahoo KO roe=None` and finnhub's
+  value; bad twice -> fail; bad then unreachable -> fail; Finnhub P/E x100 twice -> SCALE
+  MISMATCH, fail. Four deliberate breaks of the logic (re-check reading the cache, no
+  re-check, skip-as-pass, untraced drops) each fail it. Full `providers.py --selftest`
+  live: OK, 19 s. It writes nothing to `_providers.log`.
+* **Open decision (not done):** whether the cross-check should treat a value the provider
+  did not SEND (None/NaN) differently from one out of bounds. For example, log it and pass
+  when a field is absent on one ticker, but still fail when it is absent on all five, since
+  that is what a renamed Yahoo key looks like. This changes what the guard accepts, so it is
+  left for a decision.
+
 ## State at 2026-10-20 (evening) — BANKS GET A REAL REVENUE: NII + NONINTEREST INCOME
 
 Traditional banks tag no total revenue; they report net interest income and noninterest

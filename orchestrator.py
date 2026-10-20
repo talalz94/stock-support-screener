@@ -386,7 +386,13 @@ def _step_provider(asof: str) -> tuple[int, str]:
     #
     # So it runs FIRST and raises. A step that fails writes nothing; a step
     # that writes and then notices has already done the harm.
-    providers.selftest()
+    #
+    # A cross-scale failure is re-checked ONCE on fresh fetches before it
+    # raises (providers._cross_scale_with_recheck), so one bad provider
+    # response does not block seven steps until the 2-hourly retry. A rescue
+    # is logged here so the run log shows how often that happens.
+    for note in providers.selftest():
+        log(f"    [provider] {note}")
 
     got = providers.fetch_finnhub(uni, verbose=True)
     n = len(got)
