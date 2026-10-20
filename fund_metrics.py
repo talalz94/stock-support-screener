@@ -222,12 +222,35 @@ def _safe(num, den, cap: float = 1e6):
 # ===========================================================================
 # Derived building blocks
 # ===========================================================================
+# Below this share of NII + noninterest income, a stored bank revenue is a
+# component, not the total -- see `derive`.
+BANK_TOTAL_SHARE = 0.90
+
+
 def derive(f: pd.DataFrame) -> pd.DataFrame:
     """Concepts every metric needs but XBRL does not tag directly."""
     d = pd.DataFrame(index=f.index)
     d["ticker"] = f["ticker"].values if "ticker" in f.columns else np.nan
 
     rev = _d(f, "revenue_ttm").fillna(_d(f, "revenue"))
+    # A BANK'S REVENUE IS NET INTEREST INCOME PLUS NONINTEREST INCOME, the
+    # convention every bank reports against; it tags no total, so the stored
+    # `revenue` was its fee line. Where a filer reports BOTH halves over twelve
+    # months, their sum replaces a stored revenue that is missing or below 90% of
+    # it. TTM only, never a latest-quarter level, so both halves cover the same
+    # twelve months. Runs BEFORE the component check below, which a fee line
+    # used to fail.
+    #
+    # WHY 90%, measured 2026-10-19 on the 251 filers with both halves: the 53 fee
+    # lines that were being withheld sat at 0.00-0.25 of the sum (median 0.08);
+    # filers tagging their OWN total sat at 0.93-1.01 (BNY 20,080M against a sum
+    # of 21,367M, HDB 0.93) -- the halves are defined a little differently from a
+    # reported total, and the filer's own figure is the one to keep. Nothing fell
+    # between 0.78 and 0.93 (NAVI 0.45, ASB 0.69, ISTR 0.78 are replaced).
+    _nii = _d(f, "nii_ttm")
+    _nonint = _d(f, "nonint_income_ttm")
+    _bank = (_nii + _nonint).where(_nii.notna() & _nonint.notna())
+    rev = rev.mask(_bank.notna() & (_bank > 0) & (rev.isna() | (rev < BANK_TOTAL_SHARE * _bank)), _bank)
     cogs = _d(f, "cogs_ttm").fillna(_d(f, "cogs"))
     # AN IMPOSSIBLE REVENUE IS WITHHELD, NOT SCORED. Revenue below a POSITIVE net
     # income means the tag we hold is a component, not the total -- for a
@@ -964,6 +987,21 @@ def selftest(verbose: bool = True) -> None:
     roe = 100.0 / 400.0
     if abs(recon - roe) > 1e-6:
         fails.append(f"DuPont product {recon:.6f} != ROE {roe:.6f}")
+
+    # A BANK'S FEE LINE IS REPLACED BY NII + NONINTEREST INCOME, then passes the
+    # component check; without both halves it is still withheld; a larger stored
+    # total is kept.
+    bk = derive(_frame(revenue_ttm=[177.0, 177.0, 900.0, 950.0, 700.0],
+                       net_income_ttm=[711.0, 711.0, 100.0, 100.0, 100.0],
+                       nii_ttm=[2400.0, 2400.0, 500.0, 700.0, 700.0],
+                       nonint_income_ttm=[800.0, np.nan, 300.0, 300.0, 300.0],
+                       assets=[1000.0] * 5))
+    got = list(bk["revenue"])
+    if not (got[0] == 3200.0 and np.isnan(got[1]) and got[2] == 900.0
+            and got[3] == 950.0 and got[4] == 1000.0):
+        fails.append(f"bank revenue rule: {got}, want [3200, nan, 900, 950, 1000] "
+                     "(fee line replaced; one half only withheld; own total kept above "
+                     "and within 10%; below 90% replaced)")
 
     # A COMPONENT REVENUE IS WITHHELD; A REAL ONE BELOW NET INCOME IS NOT.
     # Shapes measured 2026-10-13: a bank's fee line (no operating or pre-tax

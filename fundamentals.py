@@ -212,6 +212,13 @@ TAGS: dict[str, list[str]] = {
     "tax": ["IncomeTaxExpenseBenefit",
             "IncomeTaxExpenseContinuingOperations"],                 # IFRS
     "interest_exp": ["InterestExpense", "InterestExpenseDebt", "InterestIncomeExpenseNet"],
+    # A TRADITIONAL BANK'S REVENUE = net interest income + noninterest income;
+    # it tags no total. `nonint_income` is the second half; the first, `nii`, is
+    # `InterestIncomeExpenseNet`, which already belongs to `interest_exp` above
+    # and is added to `nii` through SHARED_TAGS below. fund_metrics.derive sums
+    # the two (2026-10-20: ~30 regional banks had no fund_score because their
+    # stored "revenue" was the fee line and was withheld).
+    "nonint_income": ["NoninterestIncome"],
     "net_income": ["NetIncomeLoss", "ProfitLoss",
                    "NetIncomeLossAvailableToCommonStockholdersBasic"],
     "eps_diluted": ["EarningsPerShareDiluted", "EarningsPerShareBasicAndDiluted"],
@@ -268,6 +275,37 @@ TAGS: dict[str, list[str]] = {
 }
 
 WANTED = {t for alts in TAGS.values() for t in alts}
+
+# ONE TAG, TWO CONCEPTS -- the only such case, so it is explicit, not an alias.
+#
+# `InterestIncomeExpenseNet` is net interest income. For a bank it is the larger
+# half of revenue (`nii`); for the 147 non-financial filers that use it, it is
+# their net interest expense, and it has fed `interest_exp` all along. The alias
+# maps give each tag ONE concept -- and not even the same way round: history()
+# keeps the FIRST concept listing a tag, facts_asof the LAST -- so listing it
+# under `nii` too would have silently moved it out of `interest_exp` in
+# facts_asof. Its rows are COPIED under the extra concept instead, with the
+# alias rank given here.
+SHARED_TAGS: dict[str, tuple[tuple[str, int], ...]] = {
+    "InterestIncomeExpenseNet": (("nii", 0),),
+}
+
+
+def _add_shared_concepts(df: pd.DataFrame) -> pd.DataFrame:
+    """`df` plus a copy of each SHARED_TAGS row under each extra concept."""
+    if df.empty or "tag" not in df.columns or "concept" not in df.columns:
+        return df
+    extra = []
+    for tag, targets in SHARED_TAGS.items():
+        rows = df[df["tag"].astype(str) == tag]
+        if rows.empty:
+            continue
+        for concept, rank in targets:
+            r = rows.assign(concept=concept)
+            if "rank" in r.columns:
+                r = r.assign(rank=rank)
+            extra.append(r)
+    return pd.concat([df, *extra], ignore_index=True) if extra else df
 
 
 def log(m: str) -> None:
@@ -1604,6 +1642,7 @@ def history(ticker: str, freq: str = "A", periods: int = 20) -> pd.DataFrame:
             tag_to_concept.setdefault(t, concept)
     raw = raw.assign(concept=raw["tag"].map(tag_to_concept)).dropna(
         subset=["concept"])
+    raw = _add_shared_concepts(raw)
     if raw.empty:
         return pd.DataFrame()
 
@@ -1979,6 +2018,7 @@ def facts_asof(asof: str, tickers: list[str] | None = None,
     df["concept"] = df["tag"].map(lambda t: pref.get(t, (None, 99))[0])
     df["rank"] = df["tag"].map(lambda t: pref.get(t, (None, 99))[1])
     df = df[df["concept"].notna()]
+    df = _add_shared_concepts(df)
 
     # ONLY A STOCK CONCEPT IS AN INSTANT, whatever `qtrs` says.
     #
