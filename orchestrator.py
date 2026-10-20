@@ -389,8 +389,10 @@ def _step_provider(asof: str) -> tuple[int, str]:
     #
     # A cross-scale failure is re-checked ONCE on fresh fetches before it
     # raises (providers._cross_scale_with_recheck), so one bad provider
-    # response does not block seven steps until the 2-hourly retry. A rescue
-    # is logged here so the run log shows how often that happens.
+    # response does not block seven steps until the 2-hourly retry; a value a
+    # provider did not send is logged, not failed (a wrong multiplier leaves a
+    # number, never a None). Both are logged here, so the run log can count
+    # them.
     for note in providers.selftest():
         log(f"    [provider] {note}")
 

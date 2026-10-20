@@ -44,6 +44,41 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-21 (early morning) — THE PROVIDER CHECK TELLS "NOT SENT" FROM "OUT OF BOUNDS"
+
+This settles the open decision in the section below. `_cross_scale_once` now splits what
+`_sane` dropped into three cases:
+
+* **A number out of bounds fails, on any single ticker.** Unchanged. This is the multiplier
+  bug: a wrong multiplier always leaves a number (the 27.62 net margin), never a None. It is
+  still re-checked once on a fresh fetch before the step fails.
+* **A value the provider did not send (None/NaN) is logged and passes**, as long as that
+  provider sent the field for another of the five. The run log gets
+  `[provider] 5 value(s) not sent by the provider, passed ...: yahoo JNJ fcf=None roe=None ...`,
+  so the gap is visible on every fresh read, not silent.
+* **A field sent for NO ticker fails** (`field(s) not sent for ANY large cap: yahoo roe`),
+  because that is what a renamed Yahoo key looks like. "Sent" is read from the provider's
+  frame, so a row served from cache this pass counts. An unknown source counts as not sent.
+* **Live proof:** a fresh fetch at 04:06 failed under the old rule on the same five JNJ
+  fields. At 04:22 the same fetch passed: "16 shared field(s) agree on scale across
+  5 ticker(s), 0 out of bounds, 5 not sent". Full live `providers.py --selftest`: OK.
+* **Test**, renamed `_selftest_recheck` -> `_selftest_cross_scale_offline`:
+  * clean -> pass, no re-check;
+  * KO not sending five fields -> pass at once, with the note;
+  * roe not sent for any ticker -> fails twice;
+  * KO roe = 41 then clean -> pass on a ttl-0 re-check; twice -> fail; then
+    unreachable -> fail;
+  * Finnhub P/E x100 -> SCALE MISMATCH.
+
+  Five source mutations each fail it: the old rule, no all-tickers rule, one out-of-bounds
+  ticker tolerated, re-check from cache, and skip-as-pass.
+* **What it gives up:** a field missing on 1-4 of the five no longer stops the step, so the
+  comparison can shrink by that much, logged each time. The Finnhub side never had this
+  check: `_finnhub_one` keeps only numeric values, so a missing Finnhub key never reaches
+  `_sane`. That is unchanged.
+* **Expected 10-22 05:00**, the first fresh Yahoo read: pass, with a run-log note naming
+  JNJ for as long as Yahoo lacks its data.
+
 ## State at 2026-10-21 (small hours) — THE `provider` FAILURES WERE NOT TRANSIENT: YAHOO'S JNJ ROW, MASKED BY ITS OWN CACHE
 
 The step failed 10-16 05:06, 10-17 09:03 and 10-20 15:07 on `_selftest_cross_scale`:
@@ -81,11 +116,9 @@ fundamental/dip/combo/candidates/floor/sectors/validate waited for the 2-hourly 
   MISMATCH, fail. Four deliberate breaks of the logic (re-check reading the cache, no
   re-check, skip-as-pass, untraced drops) each fail it. Full `providers.py --selftest`
   live: OK, 19 s. It writes nothing to `_providers.log`.
-* **Open decision (not done):** whether the cross-check should treat a value the provider
-  did not SEND (None/NaN) differently from one out of bounds. For example, log it and pass
-  when a field is absent on one ticker, but still fail when it is absent on all five, since
-  that is what a renamed Yahoo key looks like. This changes what the guard accepts, so it is
-  left for a decision.
+* **Decided the same morning** (section above): a value the provider did not SEND
+  (None/NaN) is now told apart from one out of bounds, so the 10-22 failure expected
+  above should not happen.
 
 ## State at 2026-10-20 (evening) — BANKS GET A REAL REVENUE: NII + NONINTEREST INCOME
 
