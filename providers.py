@@ -223,8 +223,9 @@ def _sane(row: dict, src: str = "") -> dict:
     place and shows up in the drop tally.
 
     A None or NaN counts as a drop too. Yahoo rows carry every FIELDS key even
-    when Yahoo sent nothing for it, so "dropped" here can mean "absent" as well
-    as "out of bounds" -- which is why the trace keeps the raw value.
+    when Yahoo sent nothing for it, so "dropped" here can mean "not sent" as
+    well as "out of bounds" -- which is why the trace keeps the raw value, and
+    why the cross-scale check can tell the two apart.
     """
     for col, (lo, hi) in SANE.items():
         if col not in row:
@@ -1122,14 +1123,12 @@ def _cross_scale_with_recheck(tickers, key: str,
     of what the API sends, so it fails EVERY fetch, and fails the re-check too.
     A single bad response does not.
 
-    WHAT IT DOES NOT FIX, MEASURED 2026-10-21: the October failures (10-16,
-    -17, -20; `{'fcf': 1, 'roe': 1, 'roa': 1, 'current_ratio': 1,
-    'quick_ratio': 1}`) were NOT transient. Yahoo's JNJ row has had None for
-    all five on every fresh fetch since (10 of 10 over 3 min on 10-21;
-    mostRecentQuarter 2026-09-27, reported 10-13), while Finnhub has them.
-    Each 2-hourly retry "passed" only because `fetch` served the cached row
-    the failed pass had written, with those fields already dropped. A gap that
-    persists fails this re-check too, which is correct for a re-check.
+    THE OCTOBER FAILURES WERE NOT THIS. Measured 2026-10-21, they were Yahoo
+    not SENDING JNJ's fcf/roe/roa/current/quick, on every fresh fetch for days
+    after its Q3 report -- persistent, so a re-check failed too, and each
+    2-hourly retry "passed" only because `fetch` served the cached row the
+    failed pass had already stripped. That case is told apart in
+    `_cross_scale_once` instead: a value not sent is not a multiplier.
 
     Three things keep the re-check honest:
 
@@ -1141,11 +1140,12 @@ def _cross_scale_with_recheck(tickers, key: str,
         pass: "skipped" is not "agreed", so the first failure stands.
       * once. A second failure fails the step, whatever it names.
 
-    Returns (summary line, note); note is set only when the re-check rescued a
-    failure, so the run log can count how often that happens.
+    Returns (summary line, note). The note -- a rescue, or values a provider
+    did not send -- goes in the run log, so both can be counted.
     """
     try:
-        return _cross_scale_once(tickers, key)[1], None
+        _ran, msg, note = _cross_scale_once(tickers, key)
+        return msg, note
     except AssertionError as exc:
         first = exc
     _log(f"cross-scale FAILED: {first}")
@@ -1153,7 +1153,7 @@ def _cross_scale_with_recheck(tickers, key: str,
          f"multiplier fails again, a bad response does not")
     time.sleep(wait)
     try:
-        ran, msg = _cross_scale_once(tickers, key, ttl_hours=0)
+        ran, msg, absent = _cross_scale_once(tickers, key, ttl_hours=0)
     except AssertionError as again:
         raise AssertionError(f"{again} [failed twice, {wait:.0f}s apart; "
                              f"first failure in _providers.log]") from first
@@ -1163,16 +1163,28 @@ def _cross_scale_with_recheck(tickers, key: str,
     note = (f"cross-scale passed on a fresh re-check {wait:.0f}s after a "
             f"transient failure: {first}")
     _log(note)
+    if absent:
+        note += f"; {absent}"
     return f"{msg} (on re-check)", note
 
 
-def _cross_scale_once(tickers, key: str,
-                      ttl_hours: float = TTL_HOURS) -> tuple[bool, str]:
+def _by_ticker(drops) -> str:
+    """Trace entries as `yahoo JNJ fcf=None roe=None; finnhub AAPL roe=137.2`."""
+    by: dict[str, list[str]] = {}
+    for src, t, col, v in drops:
+        by.setdefault(f"{src} {t}", []).append(f"{col}={_fmt_val(v)}")
+    return "; ".join(f"{k} " + " ".join(v) for k, v in by.items())
+
+
+def _cross_scale_once(tickers, key: str, ttl_hours: float = TTL_HOURS
+                      ) -> tuple[bool, str, str | None]:
     """One pass of the cross-scale comparison.
 
-    Returns (True, summary) if it compared and passed, (False, reason) if a
-    provider was unreachable so nothing was compared. Raises AssertionError on
-    a scale mismatch or a dropped field, after logging the per-ticker values.
+    Returns (True, summary, note) if it compared and passed -- the note names
+    any value a provider did not send, else None -- or (False, reason, None)
+    if a provider was unreachable so nothing was compared. Raises
+    AssertionError on a scale mismatch, an out-of-bounds value, or a field not
+    sent for any ticker, after logging the per-ticker values.
     """
     # A DROPPED FIELD MUST FAIL TOO, not quietly shrink the comparison.
     #
@@ -1181,19 +1193,34 @@ def _cross_scale_once(tickers, key: str,
     # value reached the store), the field vanished from BOTH sides of the
     # comparison, and this test cheerfully reported "15 shared fields agree".
     # Safe data, useless test. These are large, liquid, well-behaved filers; a
-    # single dropped value on them is a bug in the table, not a strange company.
+    # single OUT-OF-BOUNDS value on them is a bug in the table, not a strange
+    # company.
+    #
+    # BUT `_sane` DROPS TWO DIFFERENT THINGS, and only one is a multiplier. It
+    # also drops a value the provider never sent (None), because Yahoo rows
+    # carry every FIELDS key. A wrong multiplier always leaves a NUMBER -- the
+    # 27.62 above -- so a None cannot come from the table. Counting it as one
+    # failed the step on 2026-10-16, -17 and -20 because Yahoo sent nothing
+    # for JNJ's fcf/roe/roa/current/quick after its Q3 report. So:
+    #
+    #   * a NUMBER out of bounds fails, on any single ticker -- that is the bug;
+    #   * a value NOT SENT is logged and passes, as long as the same provider
+    #     sent that field for some other ticker here;
+    #   * a field NOT SENT FOR ANY ticker fails. A renamed provider key looks
+    #     exactly like that, and would otherwise shrink the comparison in
+    #     silence -- the failure this whole check exists to prevent.
     global _DROP_TRACE
     _DROP_TRACE = []
     try:
         fh_rows = [r for r in (_finnhub_one(t, key) for t in tickers) if r]
         if not fh_rows:
-            return False, "finnhub unreachable -- cross-scale skipped"
+            return False, "finnhub unreachable -- cross-scale skipped", None
         yh = fetch(list(tickers), ttl_hours=ttl_hours, verbose=False)
         drops = list(_DROP_TRACE)
     finally:
         _DROP_TRACE = None
     if yh.empty:
-        return False, "yahoo unreachable -- cross-scale skipped"
+        return False, "yahoo unreachable -- cross-scale skipped", None
     fh = pd.DataFrame(fh_rows).set_index("ticker")
     yh = yh.set_index("ticker")
 
@@ -1214,39 +1241,75 @@ def _cross_scale_once(tickers, key: str,
                 _log(f"  scale {c} {t}: finnhub {x:.4g} / yahoo {y:.4g}")
     assert not bad, "SCALE MISMATCH between providers -- " + "; ".join(bad)
 
-    if drops:
-        by: dict[str, list[str]] = {}
-        for src, t, col, v in drops:
-            by.setdefault(f"{src} {t}", []).append(f"{col}={_fmt_val(v)}")
-            other_src, other = (("yahoo", yh) if src == "finnhub"
-                                else ("finnhub", fh))
-            ov = (_fmt_val(other.at[t, col])
-                  if t in other.index and col in other.columns else "no such field")
+    frames = {"finnhub": fh, "yahoo": yh}
+
+    def sent_somewhere(src: str, col: str) -> bool:
+        # Read from the provider's FRAME, so a row this pass served from cache
+        # counts. An unknown source counts as "nowhere": fail, don't guess.
+        f = frames.get(src)
+        return (f is not None and col in f.columns
+                and bool(pd.to_numeric(f[col], errors="coerce").notna().any()))
+
+    out_of_bounds = [d for d in drops if _num(d[3]) is not None]
+    not_sent = [d for d in drops if _num(d[3]) is None]
+    nowhere = sorted({(src, col) for src, _t, col, _v in not_sent
+                      if not sent_somewhere(src, col)})
+    for src, t, col, v in drops:
+        other_src, other = (("yahoo", yh) if src == "finnhub"
+                            else ("finnhub", fh))
+        ov = (_fmt_val(other.at[t, col])
+              if t in other.index and col in other.columns else "no such field")
+        if _num(v) is None:
+            kind = ("NOT SENT FOR ANY TICKER" if (src, col) in nowhere
+                    else "not sent")
+            how = ""
+        else:
+            kind = "OUT OF BOUNDS"
             mult = (_FH_MULT if src == "finnhub" else YAHOO_SCALE).get(col, 1.0)
-            how = (f" after x{mult:g}" if mult != 1.0 and _num(v) is not None
-                   else "")
-            _log(f"  dropped on a large cap: {src} {t} {col}={_fmt_val(v)}"
-                 f"{how} (bound {SANE[col]}); {other_src} has {ov}")
-        # The ticker detail goes FIRST: the run log keeps only the first 140
-        # characters of the exception, and the counts alone were undiagnosable.
-        raise AssertionError(
+            how = (f" after x{mult:g}" if mult != 1.0 else "") \
+                + f" (bound {SANE[col]})"
+        _log(f"  {kind} on a large cap: {src} {t} {col}={_fmt_val(v)}{how}; "
+             f"{other_src} has {ov}")
+
+    # The ticker detail goes FIRST: the run log keeps only the first 140
+    # characters of the exception, and the counts alone were undiagnosable.
+    problems = []
+    if out_of_bounds:
+        problems.append(
             f"field(s) dropped as out-of-bounds on large caps: "
-            f"{'; '.join(f'{k} ' + ' '.join(v) for k, v in by.items())} -- "
-            f"a wrong multiplier makes a value fail its bound and DISAPPEAR, "
-            f"which shrinks this comparison instead of failing it")
+            f"{_by_ticker(out_of_bounds)} -- a wrong multiplier makes a value "
+            f"fail its bound and DISAPPEAR, which shrinks this comparison "
+            f"instead of failing it")
+    if nowhere:
+        problems.append(
+            f"field(s) not sent for ANY large cap: "
+            f"{', '.join(f'{s} {c}' for s, c in nowhere)} -- a renamed provider "
+            f"key looks like this, and would shrink this comparison in silence")
+    if problems:
+        raise AssertionError(" | ".join(problems))
 
-    return True, (f"{checked} shared field(s) agree on scale "
-                  f"across {len(fh)} ticker(s), 0 dropped")
+    note = (f"{len(not_sent)} value(s) not sent by the provider, passed (each "
+            f"field has a value on another large cap): {_by_ticker(not_sent)}"
+            if not_sent else None)
+    return True, (f"{checked} shared field(s) agree on scale across "
+                  f"{len(fh)} ticker(s), 0 out of bounds, "
+                  f"{len(not_sent)} not sent"), note
 
 
-def _selftest_recheck() -> None:
-    """One bad response is re-checked away; two in a row still fail the step.
+def _selftest_cross_scale_offline() -> None:
+    """The cross-scale check's RULES: what fails, what passes, what re-checks.
 
     Offline: both providers are replaced by canned rows that go through `_sane`
-    exactly as live ones do, so this tests the re-check logic, not the units --
-    the live passes below do that. The bad response is the one seen on
-    2026-10-16/17/20: one Yahoo row with fcf, roe, roa and both liquidity
-    ratios missing.
+    exactly as live ones do, so this tests the logic, not the units -- the
+    live passes below do that. Yahoo modes, one per pass:
+
+      ok       every value sent and in bounds
+      gap      KO sends None for fcf/roe/roa/current/quick -- what Yahoo did
+               for JNJ from 2026-10-16 -> passes at once, with a note
+      renamed  roe None on EVERY ticker -> fails, re-checked or not
+      oob      KO roe = 41, a percent where a fraction belongs -> fails on one
+               ticker; a fresh re-check that comes back ok passes
+      down     Yahoo unreachable
     """
     tickers = ("AAPL", "MSFT", "KO", "JNJ", "XOM")
     base = {"pe": 30.0, "roe": 0.4, "roa": 0.1, "gross_margin": 0.45,
@@ -1257,7 +1320,7 @@ def _selftest_recheck() -> None:
     ttls: list[float] = []
 
     def scenario(yahoo, fh_pe=(1.0, 1.0)):
-        """yahoo: per pass 'ok', 'bad' or 'down'. fh_pe: finnhub P/E scale per
+        """yahoo: one mode per pass (see above). fh_pe: finnhub P/E scale per
         pass. A third pass would IndexError, which is the point: once only."""
         logged.clear()
         ttls.clear()
@@ -1276,10 +1339,14 @@ def _selftest_recheck() -> None:
             for t in tks:
                 r = {"ticker": t, "fetched": pd.Timestamp.now(), **base,
                      "fcf": 1e10}
-                if mode == "bad" and t == "KO":
+                if mode == "gap" and t == "KO":
                     for c in ("fcf", "roe", "roa", "current_ratio",
                               "quick_ratio"):
                         r[c] = None
+                if mode == "renamed":
+                    r["roe"] = None
+                if mode == "oob" and t == "KO":
+                    r["roe"] = 41.0
                 rows.append(_sane(r, "yahoo"))
             return pd.DataFrame(rows)
 
@@ -1300,20 +1367,41 @@ def _selftest_recheck() -> None:
         assert ttls == [TTL_HOURS] and note is None, (
             "a clean pass must not re-check", ttls, note)
 
-        msg, note = scenario(["bad", "ok"])
+        # A value NOT SENT on one ticker: passes on the first pass, logged.
+        msg, note = scenario(["gap"])
+        assert ttls == [TTL_HOURS], (
+            f"a value not sent on one ticker is not a multiplier; it must "
+            f"pass without a re-check: {ttls}")
+        assert "5 not sent" in msg, msg
+        assert note and note.endswith(
+            "yahoo KO fcf=None roe=None roa=None current_ratio=None "
+            "quick_ratio=None"), note
+        assert any("not sent on a large cap: yahoo KO roe=None" in m
+                   and "finnhub has 0.4" in m for m in logged), (
+            f"the log must name ticker, value and the other side: {logged}")
+
+        # A field not sent for ANY ticker -- a renamed key -- still fails.
+        err = fails(["renamed", "renamed"])
+        assert err.startswith("field(s) not sent for ANY large cap: yahoo "
+                              "roe"), err
+        assert "failed twice" in err, err
+
+        # A NUMBER out of bounds on ONE ticker fails; one bad response is
+        # re-checked away, on a FRESH fetch.
+        msg, note = scenario(["oob", "ok"])
         assert ttls == [TTL_HOURS, 0], (
             f"the re-check must REFETCH (ttl 0), not re-read the cached row "
             f"the failed pass already shrank: {ttls}")
-        assert note and "yahoo KO" in note, note
-        assert any("yahoo KO roe=None" in m and "finnhub has 0.4" in m
-                   for m in logged), f"drop log must name ticker + values: {logged}"
+        assert note and "yahoo KO roe=41" in note, note
+        assert any("OUT OF BOUNDS on a large cap: yahoo KO roe=41" in m
+                   and "finnhub has 0.4" in m for m in logged), logged
 
-        err = fails(["bad", "bad"])
+        err = fails(["oob", "oob"])
         assert err.startswith("field(s) dropped as out-of-bounds on large "
-                              "caps: yahoo KO fcf=None roe=None"), err
+                              "caps: yahoo KO roe=41"), err
         assert "failed twice" in err, err
 
-        err = fails(["bad", "down"])
+        err = fails(["oob", "down"])
         assert "so this failure stands" in err, (
             f"an unreachable re-check must not pass a failure: {err}")
 
@@ -1325,8 +1413,9 @@ def _selftest_recheck() -> None:
         g["_finnhub_one"], g["fetch"], g["_log"] = saved[:3]
         _DROPPED.clear()
         _DROPPED.update(saved[3])
-    print("  [providers] cross-scale re-check: one bad response passes, "
-          "two fail, an unreachable re-check fails")
+    print("  [providers] cross-scale rules: a value not sent on one ticker "
+          "passes, a field sent for none fails, out-of-bounds fails unless a "
+          "fresh re-check clears it")
 
 
 def _selftest_identity(ticker: str = "AAPL") -> None:
@@ -1359,14 +1448,16 @@ def _selftest_identity(ticker: str = "AAPL") -> None:
 
 def selftest() -> list[str]:
     """Raises on any failure. Returns notes worth a line in the run log -- a
-    cross-scale failure that a fresh re-check showed was transient."""
+    cross-scale failure a fresh re-check cleared, or values a provider did
+    not send."""
     _selftest_declared()
-    _selftest_recheck()
+    _selftest_cross_scale_offline()
     _selftest_units()
     _selftest_identity()
     notes = [n for n in (_selftest_cross_scale(),) if n]
     if _DROPPED:
-        print(f"  [providers] values dropped as out-of-bounds: {_DROPPED}")
+        print(f"  [providers] values dropped (out of bounds or not sent): "
+              f"{_DROPPED}")
     print("providers selftest OK")
     return notes
 
