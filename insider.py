@@ -50,6 +50,7 @@ import numpy as np
 import pandas as pd
 
 import config
+import store_lock
 
 ROOT = config.DATA / "insider"
 DS_DIR = ROOT / "trades"
@@ -62,6 +63,10 @@ FIRST_QUARTER = "2006q1"
 FORMS = ("4", "4/A")
 WORKERS = 4
 FAIL_CEILING = 0.25          # share of EDGAR fetches that may fail before the run fails
+# ONE WRITER AT A TIME (store_lock.py): the House store lost rows to a nightly step and a
+# manual backfill merging at once; trades_edgar/ + _ledger.parquet have the same shape.
+WAIT_NIGHTLY = 60            # the nightly step waits this long, then reports SKIPPED
+WAIT_CLI = 4 * 3600          # a manual run waits for the nightly instead
 
 COLS = ["accession", "form", "filing_date", "period", "issuer_cik", "issuer_name", "issuer_symbol",
         "owner_cik", "owner_name", "n_owners", "owner_ciks", "is_director", "is_officer", "is_ten_pct",
@@ -319,7 +324,19 @@ def stored_dataset_quarters() -> list[str]:
     return sorted(p.stem for p in DS_DIR.glob("*.parquet")) if DS_DIR.exists() else []
 
 
-def backfill(start: str = FIRST_QUARTER, force: bool = False, verbose: bool = True) -> dict:
+def _label(what: str) -> str:
+    import os
+    return f"{os.path.basename(sys.argv[0] or 'python')}: insider {what}"
+
+
+def backfill(start: str = FIRST_QUARTER, force: bool = False, verbose: bool = True,
+             wait_s: float = 0.0) -> dict:
+    """`_backfill` under the store's writer lock (store_lock.StoreBusy after `wait_s`)."""
+    with store_lock.writer(ROOT, _label(f"backfill from {start}"), wait_s=wait_s, log=log):
+        return _backfill(start, force, verbose)
+
+
+def _backfill(start: str = FIRST_QUARTER, force: bool = False, verbose: bool = True) -> dict:
     DS_DIR.mkdir(parents=True, exist_ok=True)
     have = set(stored_dataset_quarters())
     done, missing, rows = [], [], 0
@@ -377,7 +394,14 @@ def _fetch_one(item: dict) -> tuple[dict, pd.DataFrame | None, str | None]:
         return item, None, repr(exc)[:200]
 
 
-def ingest_edgar(since: date | None = None, until: date | None = None, verbose: bool = True) -> dict:
+def ingest_edgar(since: date | None = None, until: date | None = None, verbose: bool = True,
+                 wait_s: float = 0.0) -> dict:
+    """`_ingest_edgar` under the store's writer lock."""
+    with store_lock.writer(ROOT, _label("EDGAR ingest"), wait_s=wait_s, log=log):
+        return _ingest_edgar(since, until, verbose)
+
+
+def _ingest_edgar(since: date | None = None, until: date | None = None, verbose: bool = True) -> dict:
     """Form 4 / 4/A filed on [since, until] and not yet in the ledger -> trades_edgar."""
     import edgar
     since = since or _first_uncovered_day()
@@ -442,10 +466,12 @@ def ingest_edgar(since: date | None = None, until: date | None = None, verbose: 
     return res
 
 
-def update(verbose: bool = True) -> dict:
-    """Nightly: post any newly published quarter, then EDGAR from the first uncovered day."""
-    bf = backfill(start=_quarter_of(_first_uncovered_day().isoformat()), verbose=verbose)
-    ed = ingest_edgar(verbose=verbose)
+def update(verbose: bool = True, wait_s: float = 0.0) -> dict:
+    """Nightly: post any newly published quarter, then EDGAR from the first uncovered day.
+    ONE lock for both halves, so nothing writes between them."""
+    with store_lock.writer(ROOT, _label("update"), wait_s=wait_s, log=log):
+        bf = backfill(start=_quarter_of(_first_uncovered_day().isoformat()), verbose=verbose)
+        ed = ingest_edgar(verbose=verbose)
     return {"new_quarters": bf["quarters"], **ed}
 
 
@@ -700,12 +726,12 @@ def main() -> int:
     if a.selftest:
         return selftest()
     if a.backfill:
-        print(backfill(a.start, a.force))
+        print(backfill(a.start, a.force, wait_s=WAIT_CLI))
     if a.update:
         if a.since:
-            print(ingest_edgar(since=date.fromisoformat(a.since)))
+            print(ingest_edgar(since=date.fromisoformat(a.since), wait_s=WAIT_CLI))
         else:
-            print(update())
+            print(update(wait_s=WAIT_CLI))
     if a.check:
         print(check())
     return 0

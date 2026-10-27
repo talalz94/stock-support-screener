@@ -101,6 +101,9 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 - **A step that failed twice today is BLOCKED, not skipped**
   (`ORCH_MAX_ERRORS_PER_DAY`), because dependents accept `skipped` as satisfied.
 - **The 05:00 trigger repeats every 2h for 12h**, so a killed run resumes.
+- **One writer per store** (`store_lock.py`, 2026-10-27): the insider and House stores
+  each have a `.write.lock`; a nightly step that finds a manual run holding it waits 60 s,
+  then records `skipped` (via `StepSkipped`, so the watermark stays and a retry runs it).
 - **`_pid_alive`, the cap and the repeat exist because the machine's power settings
   are not ours to control.** Asking for `powercfg ... standby-timeout-ac 0` was
   tried and does not hold: it read 5 hours on 08-24 and 1 hour on 10-07.

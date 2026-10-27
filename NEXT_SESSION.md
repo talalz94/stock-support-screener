@@ -162,6 +162,22 @@ study was stopped while it held the lock and rerun afterwards. Page audit: 357 p
 Selftests: insider_page, insider_signals, scores (insider), candidates (badge field),
 floor, stock_profile (markers + insider block), metrics_doc, ui, insider, congress.
 
+**One writer at a time, `store_lock.py`** (asked for after 18:49 tonight: a scheduled
+`congress` retry -- 437 reports re-read, 1,032 s -- ran WHILE a manual `congress.py
+--backfill` wrote the same trades.parquet / _ledger.parquet; every write is tmp+replace so
+nothing broke, but each merged into the copy it had read and the last writer won; a full
+--reparse later rebuilt the store, 6,979 reports / 41,019 trades). Every writer in
+`insider.py` (backfill, ingest_edgar, update) and `congress.py` (ingest, reparse, update)
+now holds `<store>/.write.lock` = {pid, started, label}: O_EXCL create, re-entrant in one
+process, a gone holder (dead pid, or a pid reused after a restart -- the orchestrator's
+`_pid_alive`, now `store_lock.pid_alive`, one copy) is taken over and logged. The nightly
+`insider` / `congress` steps wait 60 s, then raise the new `orchestrator.StepSkipped`:
+recorded as `skipped` with the holder named, and since only ok/slow rows move a watermark,
+the next 2-hourly retry runs it. A manual CLI run waits up to 4 h for the nightly instead.
+Checked live: a second process held data/congress/.write.lock and `_step_congress` waited
+60 s and skipped, naming it, with the store untouched. `python store_lock.py --selftest`
+(re-entry, stale takeover, a live holder in another process, debris).
+
 **Found on the way, NOT fixed (follow-ups):**
 * PAM's market cap reads $6.94T in the fundamental store: an ADR's price times the
   ORDINARY share count (25 shares per ADR). Every page that shows mktcap shows it.

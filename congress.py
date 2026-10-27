@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import os
 import re
 import sys
 import time
@@ -55,6 +56,12 @@ import numpy as np
 import pandas as pd
 
 import config
+import store_lock
+
+# ONE WRITER AT A TIME (store_lock.py): a scheduled `congress` step and a manual
+# --backfill once merged into the same trades.parquet at once, and the last writer won.
+WAIT_NIGHTLY = 60            # the nightly step waits this long, then reports SKIPPED
+WAIT_CLI = 4 * 3600          # a manual run waits for the nightly instead
 
 ROOT = config.DATA / "congress"
 IDX = ROOT / "index"
@@ -397,7 +404,18 @@ def _merge(new_rows: list[dict], led_rows: list[dict]) -> None:
         _save(led, LEDGER)
 
 
-def ingest(years: list[int], refresh_index: bool = True, verbose: bool = True) -> dict:
+def _label(what: str) -> str:
+    return f"{os.path.basename(sys.argv[0] or 'python')}: congress {what}"
+
+
+def ingest(years: list[int], refresh_index: bool = True, verbose: bool = True, wait_s: float = 0.0) -> dict:
+    """`_ingest` under the store's writer lock (store_lock.StoreBusy after `wait_s`)."""
+    with store_lock.writer(ROOT, _label(f"ingest {years[0]}..{years[-1]}" if years else "ingest"),
+                           wait_s=wait_s, log=log):
+        return _ingest(years, refresh_index, verbose)
+
+
+def _ingest(years: list[int], refresh_index: bool = True, verbose: bool = True) -> dict:
     """Every PTR the Clerk lists for `years` that the ledger has not read. PDFs are
     fetched a few at a time (the server is slow, not busy), parsed locally, and the store
     is saved after each year, so an interrupted backfill loses at most one year's parse
@@ -448,8 +466,13 @@ def ingest(years: list[int], refresh_index: bool = True, verbose: bool = True) -
     return tot
 
 
-def reparse(verbose: bool = True) -> dict:
-    """Re-read every stored PDF (after a parser change) -- no downloads."""
+def reparse(verbose: bool = True, wait_s: float = 0.0) -> dict:
+    """Re-read every stored PDF (after a parser change) -- no downloads. Under the lock."""
+    with store_lock.writer(ROOT, _label("reparse"), wait_s=wait_s, log=log):
+        return _reparse(verbose)
+
+
+def _reparse(verbose: bool = True) -> dict:
     led = _ledger()
     rows, lr = [], []
     for y in sorted(led.year.astype(int).unique()):
@@ -471,11 +494,12 @@ def reparse(verbose: bool = True) -> dict:
     return {"reports": len(lr), "trades": len(df)}
 
 
-def update(verbose: bool = True) -> dict:
+def update(verbose: bool = True, wait_s: float = 0.0) -> dict:
     """Nightly: this year's index (and last year's in January), new PTRs only."""
     y = date.today().year
     years = [y - 1, y] if date.today().month == 1 else [y]
-    return ingest(years, refresh_index=True, verbose=verbose)
+    with store_lock.writer(ROOT, _label("update"), wait_s=wait_s, log=log):
+        return ingest(years, refresh_index=True, verbose=verbose)
 
 
 def read() -> pd.DataFrame:
@@ -581,11 +605,11 @@ def main() -> int:
     if a.selftest:
         return selftest()
     if a.backfill:
-        print(ingest(list(range(a.start, date.today().year + 1))))
+        print(ingest(list(range(a.start, date.today().year + 1)), wait_s=WAIT_CLI))
     if a.update:
-        print(update())
+        print(update(wait_s=WAIT_CLI))
     if a.reparse:
-        print(reparse())
+        print(reparse(wait_s=WAIT_CLI))
     return 0
 
 

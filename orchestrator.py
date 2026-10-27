@@ -69,7 +69,13 @@ import store                                                     # noqa: E402
 
 STATUS_OK = "ok"
 STATUS_ERROR = "error"
-STATUS_SKIPPED = "skipped"       # cadence says not due
+STATUS_SKIPPED = "skipped"       # cadence says not due -- or the step said StepSkipped
+
+
+class StepSkipped(Exception):
+    """Raised by a step that could not do its work for a reason that is not a failure --
+    a manual run holds its store's writer lock. Recorded as `skipped` with the reason;
+    a skipped row does not advance the watermark, so the next retry tries again."""
 STATUS_BLOCKED = "blocked"       # a dependency did not succeed
 STATUS_SLOW = "slow"             # succeeded, but over its timeout budget
 STATUS_RUNNING = "running"       # written on entry; overwritten on exit
@@ -1065,7 +1071,11 @@ def _step_insider(asof: str) -> tuple[int, str]:
     rest of the night runs as before. See insider.py.
     """
     import insider
-    res = insider.update(verbose=False)
+    import store_lock
+    try:
+        res = insider.update(verbose=False, wait_s=insider.WAIT_NIGHTLY)
+    except store_lock.StoreBusy as exc:
+        raise StepSkipped(f"skipped: a manual run holds the insider store's writer lock -- {exc.holder()}")
     q = res.get("new_quarters") or []
     detail = (f"{res.get('filings', 0):,} new Form 4 filing(s) over {res.get('days', 0)} index day(s), "
               f"{res.get('rows', 0):,} trade(s), {res.get('failed', 0)} failed")
@@ -1084,7 +1094,11 @@ def _step_congress(asof: str) -> tuple[int, str]:
     read. NOTHING DEPENDS ON THIS STEP. See congress.py.
     """
     import congress
-    res = congress.update(verbose=False)
+    import store_lock
+    try:
+        res = congress.update(verbose=False, wait_s=congress.WAIT_NIGHTLY)
+    except store_lock.StoreBusy as exc:
+        raise StepSkipped(f"skipped: a manual run holds the House store's writer lock -- {exc.holder()}")
     return int(res.get("trades", 0) or 0), (f"{res.get('reports', 0)} new House report(s), "
                                             f"{res.get('trades', 0)} trade(s), {res.get('failed', 0)} failed")
 
@@ -1798,25 +1812,9 @@ def _pid_alive(pid: int | None, started: str | None = None) -> bool | None:
     machine twice at 05:38 and 05:41, mid-run). A process that began AFTER the
     lock was written cannot be the process that wrote it.
     """
-    if not pid:
-        return None
-    try:
-        import psutil
-        if not psutil.pid_exists(int(pid)):
-            return False
-        if started:
-            try:
-                t_lock = datetime.fromisoformat(started).timestamp()
-                t_proc = psutil.Process(int(pid)).create_time()
-                if t_proc > t_lock + 60:          # created after the lock: reused id
-                    return False
-            except (ValueError, psutil.Error):
-                pass                              # cannot tell -> trust pid_exists
-        return True
-    except ImportError:
-        return None
-    except Exception:                                            # noqa: BLE001
-        return None
+    # ONE copy of this logic: the store writer locks (store_lock.py) need the same test.
+    import store_lock
+    return store_lock.pid_alive(pid, started)
 
 
 def acquire_lock(force: bool = False, wait_min: float = 0.0,
@@ -2039,6 +2037,19 @@ def run(only: list[str] | None = None, force: bool = False) -> int:
                     "detail": detail, "error": None, "traceback": None})
             if step.name == "bounce":
                 _explode_daily_run_timings(run_id, asof)
+        except StepSkipped as exc:
+            # Not a failure and not done: recorded as skipped WITH the reason, and the
+            # watermark does not move (only ok/slow rows count), so a later retry runs it.
+            dur = time.time() - s
+            results[step.name] = STATUS_SKIPPED
+            skipped += 1
+            log(f"  [{step.name}] {exc}")
+            record({"run_id": run_id, "step": step.name, "cadence": step.cadence,
+                    "watermark": asof if step.session_indexed else str(date.today()),
+                    "started": started.isoformat(timespec="seconds"),
+                    "ended": datetime.now().isoformat(timespec="seconds"),
+                    "duration_s": round(dur, 1), "status": STATUS_SKIPPED,
+                    "rows": None, "detail": str(exc)[:400], "error": None, "traceback": None})
         except Exception as exc:                                 # noqa: BLE001
             dur = time.time() - s
             results[step.name] = STATUS_ERROR
