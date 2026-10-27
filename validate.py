@@ -1165,11 +1165,61 @@ def check_rows(asof: str, quick: bool) -> None:
                WARN, repr(exc)[:80])
 
 
+def check_insider(asof: str, quick: bool = False) -> None:
+    """Insider (Form 4) and House trade stores: WARN-ONLY health checks.
+
+    These are outside data with known quirks (filers type totals into the price field,
+    paper PTRs cannot be read), so nothing here FAILs the night; each line is a count
+    to read. A store that has stopped growing is the one thing worth noticing quickly.
+    """
+    from datetime import date as _date
+    try:
+        import insider as INS
+        start = (pd.Timestamp(asof) - pd.Timedelta(days=120)).strftime("%Y-%m-%d")
+        r = INS.read(start=start, codes=("P", "S"))
+        if r.empty:
+            record("insider", "Form 4 store has recent filings", WARN, f"none since {start}")
+        else:
+            last = str(r.filing_date.max())
+            lag = (pd.Timestamp(asof) - pd.Timestamp(last)).days
+            record("insider", "Form 4 store is current", WARN if lag > 5 else OK,
+                   f"latest filing {last} ({lag} day(s) before {asof})")
+            p = INS.purchases(r)
+            bad = int((~INS.price_ok(p, r)).sum()) if len(p) else 0
+            record("insider", "purchase prices believable", WARN if bad else OK,
+                   f"{bad} of {len(p)} purchases since {start} fail the peer/cap test (left out of signals)")
+            fb = int((r.filing_date < r.trans_date).sum())
+            record("insider", "no trade dated after its filing", WARN if fb else OK, f"{fb} of {len(r)}")
+            um = int(p.ticker.isna().sum()) if len(p) else 0
+            record("insider", "purchases mapped to a ticker", OK,
+                   f"{len(p) - um} of {len(p)} mapped; the rest are companies outside the SEC ticker map")
+        led = INS._ledger()
+        nf = int((led.status == "failed").sum()) if len(led) else 0
+        record("insider", "EDGAR Form 4 fetches", WARN if nf else OK, f"{nf} filing(s) still failing (retried nightly)")
+    except Exception as exc:                                     # noqa: BLE001
+        record("insider", "insider store readable", WARN, repr(exc)[:100])
+    try:
+        import congress as CG
+        led = CG._ledger()
+        y = _date.today().year
+        cur = led[led.year.astype(int) == y] if len(led) else led
+        if len(cur):
+            st = cur.status.value_counts().to_dict()
+            record("insider", "House PTRs this year", WARN if st.get("failed", 0) else OK,
+                   f"{len(cur)} report(s): " + ", ".join(f"{k} {v}" for k, v in sorted(st.items()))
+                   + " (scanned = paper filing, not readable)")
+        else:
+            record("insider", "House PTRs this year", WARN, "no reports read for the current year")
+    except Exception as exc:                                     # noqa: BLE001
+        record("insider", "House store readable", WARN, repr(exc)[:100])
+
+
 GROUPS = {"key": check_key, "time": check_time, "value": check_value,
           "config": check_config, "claims": check_claims,
           "coverage": check_coverage, "currency": check_currency,
           "cross": check_cross, "combo": check_combo, "feeds": check_feeds,
-          "pages": check_pages, "screen": check_screen, "rows": check_rows}
+          "pages": check_pages, "screen": check_screen, "rows": check_rows,
+          "insider": check_insider}
 
 
 def main() -> int:

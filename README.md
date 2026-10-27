@@ -224,10 +224,12 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **29 steps**, in this order: `universe, bars, macro, news, senti_cache,
+- **31 steps**, in this order: `universe, bars, macro, news, senti_cache,
   sentiment, bounce, zones, shortvol, hype, provider, sec_facts, sec_gap,
-  sec_edgar, fundamental, events, leaderboard, dip, combo, candidates, floor,
-  sectors, validate, explore, snapshots, profiles, retention, dashboard, docs`. The SEC steps come before
+  sec_edgar, insider, congress, fundamental, events, leaderboard, dip, combo, candidates, floor,
+  sectors, validate, explore, snapshots, profiles, retention, dashboard, docs`. `insider` and
+  `congress` (insider and House trades) are independent: nothing depends on them, so a failure
+  there stops nothing else. The SEC steps come before
   `fundamental` so a newly fetched filing is scored the same night; `sec_edgar`
   reads each new 10-Q/10-K/20-F/40-F straight from EDGAR, so a filing reaches the
   scores a night after it is filed instead of a quarter later. `bounce` and `zones` are deliberately
@@ -423,6 +425,11 @@ as bankruptcy text and asserts no metric moves.
 | `season_study.py` | does same-calendar-month history predict? sector, sub-industry, stock; energy calendar profiles |
 | `sector_score.py` | today's sector score (the validated composite) and context, per stock and per group, in `data/sectors/`. `--selftest` checks it equals the study |
 | `sectors_page.py` | the Sectors page, `reports/sectors/latest.html`; with `sector_score.py`, the `sectors` step |
+| `insider.py` | corporate insider trades (SEC Form 4) in `data/insider/`: SEC's quarterly datasets from 2006q1, then each new Form 4 from EDGAR's daily index; directors' and officers' open-market purchases (`purchases`), believable prices (`price_ok`); the `insider` step. `--backfill`, `--update`, `--check`, `--selftest` |
+| `congress.py` | House members' trades from Periodic Transaction Reports (PDFs) in `data/congress/`; paper filings counted, not read; no Senate (its site refuses automated access); the `congress` step. `--backfill`, `--update`, `--reparse`, `--selftest` |
+| `event_returns.py` | the shared event-study measurement: entry the session after an event, excess vs the same-day liquidity fifth, t across quarters, one episode per ticker per window |
+| `insider_study.py` / `congress_study.py` | do insider / House purchases predict returns? 20 and 9 declared signals at 20/40/60 sessions; `data/_insider_study_summary.json`, `data/_congress_study_summary.json` |
+| `watchlist_track.py` | tracks a saved watchlist from its entry date (the "Gainers at support" list), statuses fixed in the module, per-session history |
 | `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
 | **`orchestrator.py`** | **THE scheduled entry point** — 27-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |

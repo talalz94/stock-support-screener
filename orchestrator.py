@@ -1012,6 +1012,39 @@ def _step_sec_gap(asof: str) -> tuple[int, str]:
     return n, detail
 
 
+def _step_insider(asof: str) -> tuple[int, str]:
+    """Corporate insider trades (SEC Form 4) into data/insider/.
+
+    A newly posted quarterly dataset if SEC has one, then every Form 4 filed on EDGAR
+    since the last posted quarter that the ledger has not read yet (a failed filing is
+    retried each night until it clears). NOTHING DEPENDS ON THIS STEP: if it fails, the
+    rest of the night runs as before. See insider.py.
+    """
+    import insider
+    res = insider.update(verbose=False)
+    q = res.get("new_quarters") or []
+    detail = (f"{res.get('filings', 0):,} new Form 4 filing(s) over {res.get('days', 0)} index day(s), "
+              f"{res.get('rows', 0):,} trade(s), {res.get('failed', 0)} failed")
+    if q:
+        detail += f"; quarterly dataset(s) posted: {', '.join(q)}"
+    if res.get("missing_days"):
+        detail += f"; index unavailable for {len(res['missing_days'])} day(s)"
+    return int(res.get("rows", 0) or 0), detail
+
+
+def _step_congress(asof: str) -> tuple[int, str]:
+    """House members' trades (Periodic Transaction Reports) into data/congress/.
+
+    This year's Clerk index, then each new PTR's PDF. House only: the Senate's site
+    refuses automated access. Paper filings are scanned images and are counted, not
+    read. NOTHING DEPENDS ON THIS STEP. See congress.py.
+    """
+    import congress
+    res = congress.update(verbose=False)
+    return int(res.get("trades", 0) or 0), (f"{res.get('reports', 0)} new House report(s), "
+                                            f"{res.get('trades', 0)} trade(s), {res.get('failed', 0)} failed")
+
+
 def _step_sec_edgar(asof: str) -> tuple[int, str]:
     """New 10-Q/10-K/20-F/40-F filings, per filing, straight from EDGAR.
 
@@ -1427,6 +1460,22 @@ def _step_validate(asof: str) -> tuple[int, str]:
         parts.append(f"rows:ERR({type(exc).__name__})")
         note("rows_group", 0, 0, repr(exc)[:120])
 
+    # The `insider` group: Form 4 and House trade stores. WARN-only -- outside data
+    # with known quirks -- so it adds no problems; it reports a count of warnings.
+    try:
+        _t = time.time()
+        import validate as _V
+        _V._results.clear()
+        _V.check_insider(asof, False)
+        _iw = [r for r in _V._results if r[2] == _V.WARN]
+        parts.append("insider:" + ("pass" if not _iw else f"{len(_iw)}warn"))
+        for _g, _n, _st, _d in _V._results:
+            note(f"insider.{_n}"[:48], int(_st == _V.OK), 0, _d)
+        _lap("insider", time.time() - _t)
+    except Exception as exc:                                     # noqa: BLE001
+        parts.append(f"insider:ERR({type(exc).__name__})")
+        note("insider_group", 0, 0, repr(exc)[:120])
+
     log(f"    [validate] timing: {', '.join(_laps)}")
     parts.append(f"[{time.time() - _t_started:.0f}s]")
     return problems, f"{head} -- " + "  ".join(parts)
@@ -1557,6 +1606,17 @@ REGISTRY: tuple[Step, ...] = (
          session_indexed=False,
          desc="EDGAR per-filing XBRL for new 10-Q/10-K/20-F/40-F, scored the "
               "night after filing instead of a quarter later"),
+    # Insider and congressional trades. Independent by design: nothing lists them in
+    # depends_on, so a failure here (SEC or the House Clerk unreachable) stops nothing.
+    # ~600 Form 4s a night at the SEC pace is 2-4 min; a few House PDFs, seconds.
+    Step("insider", _step_insider, config.CADENCE_DAILY, timeout=1800,
+         session_indexed=False,
+         desc="corporate insider trades (SEC Form 4): new quarterly dataset if posted, "
+              "then each new Form 4 from EDGAR"),
+    Step("congress", _step_congress, config.CADENCE_DAILY, timeout=1800,
+         session_indexed=False,
+         desc="House members' trades from new Periodic Transaction Reports (Senate: no "
+              "automated access)"),
     # DAILY, NOT WEEKLY, NOW THAT THE PROVIDER SWEEP IS DAILY.
     #
     # It was weekly because it is filing-driven -- fundamentals genuinely only
