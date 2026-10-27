@@ -120,6 +120,76 @@ fundamental/dip/combo/candidates/floor/sectors/validate waited for the 2-hourly 
   (None/NaN) is now told apart from one out of bounds, so the 10-22 failure expected
   above should not happen.
 
+## State at 2026-10-27 (evening) — INSIDER AND HOUSE TRADES: OUR OWN STORE, AND WHAT THEY PREDICT
+
+The user asked for a free, self-maintained version of a paid "insider buying" scanner
+(Ross's Insiders IQ: corporate insiders + politicians, filters for cluster size, $ value,
+role, market cap, rarity and each insider's track record). Phase 1 (data + automation)
+and phase 2 (does it predict?) are done; pages and scoring (phase 3) wait on these results.
+
+**Data (phase 1).**
+* `insider.py` -- SEC Form 4. History: SEC's quarterly Insider Transactions Data Sets,
+  2006q1-2026q3, 83 zips, **7,224,299 trades** in 18.5 min (`--backfill`); the file URL
+  moved from `structureddata` to `datastandardsinnovation` in 2026, both tried. Nightly:
+  EDGAR daily index -> each new Form 4's full submission (one request, ~6 KB) -> the same
+  normalizer; 2026-10-01..26: 8,155 filings, 0 failed, 12,746 trades, 27.7 min (a normal
+  night is ~600 filings). Personal fields (addresses, e-mail, phone) are never read in.
+  One primary owner per filing (a director over her trust), `n_owners`/`owner_ciks` kept.
+* `purchases()`: code P, acquired, price > 0, DIRECTORS AND OFFICERS only (10%-only
+  holders, "Other" relationships and entities out -- an insurer's "$2e14 purchase" of
+  closed-end fund DNP was the case). `price_ok()`: NOT against our bars -- they are
+  split-adjusted, so 14% of checked purchases looked out of range, 400 of 467 by a plain
+  split ratio, the rest serial reverse-splitters (WHLR adjusted close 4.6e10). Against
+  PEERS: the company's other insider trades within +-15 days, 0.5-2x, plus caps (filing >
+  $500M, price > $10,000 without peers). 3,766 purchases dropped (typos like "$40M per
+  share", 1,000,000x off). Store health: 2% no price, 1.4% duplicate rows, 255 trades
+  dated after their filing, 6.8% filed 30+ days late. 50% of purchases map to a CURRENT
+  ticker: the rest are companies since delisted -- the survivorship gap, stated below.
+* `congress.py` -- House PTRs: the Clerk's yearly index ZIP + one PDF per report, kept on
+  disk (`--reparse` re-reads without downloading). THE SENATE IS NOT HERE: efdsearch
+  answers HTTP 403 to an honest, declared user agent, and getting past it would mean
+  defeating bot protection. PAPER filings are scanned images, counted not read: 41% of
+  2016's PTRs, 18% of 2020's, 12% of 2026's. TWO LAYOUTS: 2016-17 extract as one run-on
+  line ("FILINg STATUS:", no [ST] codes, "03/7/2016"); later reports line by line with
+  codes. Detected per report; the old one needed an owner-code boundary rule because the
+  generic camel join split surnames ("McExampleJTAnadarko"). The Clerk's server takes 4-6s
+  a PDF: 4 workers, ~1 request/s overall. `kind` keeps what the filer's description says
+  it was (dividend reinvestment, gift/donation, option exercise, rebalancing, transfer).
+  Use: 5 U.S.C. 13107(c) bars commercial use; data stays in data/, never committed.
+* Nightly steps `insider` and `congress` after `sec_edgar` (31 steps); NOTHING depends on
+  them. validate group `insider` is WARN-only (outside data): store current, prices
+  believable, trades dated after filing, unmapped, EDGAR failures, House coverage.
+
+**Insider study (phase 2), `insider_study.py`, 2016-09..2026-09, current-universe tickers.**
+Definitions fixed first (in the module). Event = (ticker, FILING date); entry the next
+session's close; benchmark = same-day stocks in the same liquidity fifth; one episode per
+ticker per 60 sessions; t across 41 calendar quarters. 61,350 buy-days, 173,618 sell-days.
+60 tests, ~3 expected at |t| >= 2 by chance; 10 reached it:
+
+    test (60 sessions unless noted)        episodes  mean pp  median pp  beat peers  t      t 1st / 2nd half
+    any purchase >= $10K                      14,196    +0.68     -0.79      47.8%   1.71   -0.09 / 3.70
+    Ross: 2+ buyers, $250K+, not largest       2,967    +0.95     -1.30      46.6%   1.49    0.76 / 1.43
+    2+ / 3+ buyers in 30 days               5,809/2,984 +0.80/+1.15 -1.19/-0.99  ~47%  0.68/1.41
+    >= $250K / >= $1M in 30 days            6,569/2,889 +0.62/+0.20 -0.83/-1.56  ~47%  0.40/0.49
+    SMALL (bottom 2 liquidity fifths)          6,869    +1.35     -1.11      47.3%   3.69    1.67 / 3.58  (20d 3.04, 40d 2.37)
+    first buy in 2+ years (rare)               9,115    +1.05     -0.47      48.7%   2.54    1.42 / 2.11  (+ at 20d, 40d)
+    CEO or CFO bought                          5,315    +0.91     -1.33      46.7%   2.24    1.49 / 1.73
+    buyer with a good track record             3,588    +1.34     -0.40      48.5%   2.60    0.57 / 3.21  (20/40d 1st half NEGATIVE)
+    unplanned purchases, 2023+                 5,193    +1.37     -0.56      48.6%   2.81    (14 quarters only)
+    routine buyer (40 sessions)                  364    -1.78     -2.00      44.2%  -2.48
+    opportunistic buyer                        1,718    -0.24     -1.14      46.3%  -0.78    (CMP's split does NOT replicate here)
+    3+ sellers, $1M+, unplanned (SELLING)     16,155    +0.65     -0.35      49.0%   2.11    3.48 / -0.26  (not bearish)
+
+READ IT PLAINLY: in our data insider buying is a FAT-TAIL bet, not a typical-stock edge.
+Every median is negative and fewer than half beat their same-size peers; the positive
+means come from a minority of big winners. The cleanest effects: SMALL companies (stable
+in both halves) and RARE buying (positive at every horizon, both halves) -- the two
+things Ross and the literature stress. Clusters, dollar size, Ross's own screen,
+beaten-down and the 10b5-1 split are not significant. Bias: only names still in our bar
+store (half of all purchases are in companies since delisted, often failures), so these
+results are FLATTERED; small-cap spreads and costs are not modelled.
+Phase 3 candidate score: small x rare (x CEO/CFO), validated walk-forward before use.
+
 ## State at 2026-10-27 — A WATCHLIST TRACKED DAILY: "GAINERS AT SUPPORT" FROM 10-23
 
 The user asked for stocks, by sector, that were often among the market's biggest daily
