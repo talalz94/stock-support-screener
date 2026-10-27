@@ -77,6 +77,10 @@ DEFAULT_METRICS = [
     # the plain one so the study's verdict is readable on the page.
     "sent_mean_30d", "sent_decay_30d", "sent_age", "news_count_30d",
     "dip_score", "dip_gate", "drawdown",
+    # Insider and House buying (scores/insider.py, 2026-10-27): the walk-forward
+    # score and the two filters measured to matter, then the plain readings.
+    "insider_score", "small_buy_30d", "rare_buy_30d", "buyers_30d", "value_30d",
+    "house_big_buy_60d",
 ]
 
 # Metrics where LOW is conventionally better -- used only to colour the cell,
@@ -238,6 +242,8 @@ border:1px solid var(--line);border-radius:9px;position:sticky;top:46px;z-index:
   user-select:none;font-size:13px}
 .tk .star:hover{color:var(--warn)}
 .tk .star.on{color:var(--warn)}
+.insb{margin-left:5px;padding:0 5px;border-radius:9px;font-size:10px;font-weight:600;
+  background:var(--blkbg);color:var(--blk)}
 .watchtog{display:inline-flex;align-items:center;gap:4px;font-size:12px;
   color:var(--muted);cursor:pointer}
 .watchn{color:var(--warn)}
@@ -330,7 +336,8 @@ def _rail_html(cols: list[str], strat_cov: dict | None) -> str:
 def render(cols: list[str], rows: list, prov: dict, asof: str,
            sessions: list[str] | None = None,
            dropped: list[str] | None = None,
-           strat_cov: dict | None = None) -> str:
+           strat_cov: dict | None = None,
+           badges: dict | None = None) -> str:
     navbar = ui.nav("explore", 1,
                     ui.session_picker(asof, sessions or [],
                                       "{d}.html",
@@ -341,6 +348,12 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
                        if sd.is_dir() else [])
     lower = json.dumps(sorted(LOWER_BETTER))
     integerish = json.dumps(sorted(INTEGERISH))
+    badge_js = json.dumps(badges or {}, separators=(",", ":")).replace("<", "\\u003c")
+    try:
+        import insider_signals as _SIG
+        badge_help = _SIG.BADGE_HELP
+    except Exception:                                            # noqa: BLE001
+        badge_help = ""
     src = " &middot; ".join(f"{k} @ {v}" for k, v in prov.items() if v) or "none"
     sectors = sorted({s for s in (_s(r[2]) for r in rows) if s})
     sec_opts = "".join(f'<option value="{s}">{s}</option>' for s in sectors)
@@ -408,6 +421,7 @@ in both directions &mdash; never 0. Sorting absent values as zero would put
 every unscored company at the top of an ascending P/E screen, which is the most
 misleading way to show "we don't know". Colour marks direction only for metrics
 where low is conventionally better; sorting itself is always literal.
+<br><b>insider</b> after a ticker = {ui.esc(badge_help)}
 <br>Rows render on demand, so sorting stays instant across the full universe.
 </div>
 </div>
@@ -415,6 +429,7 @@ where low is conventionally better; sorting itself is always literal.
 const DATA = {data};
 const LOWER = new Set({lower});
 const INTEGERISH = new Set({integerish});
+const BADGE = {badge_js};
 const COLS = DATA.cols, ROWS = DATA.rows;
 const NCOL = 4;                      // ticker, name, sector, exchange
 let view = ROWS.slice(), sortI = null, sortAsc = false, painted = 0;
@@ -583,6 +598,7 @@ function rowHTML(r){{
         + ' title="watchlist -- these names are verified against filings every'
         + ' night, not sampled">' + (WATCH.has(tk) ? '★' : '☆')
         + '</span>' + cell
+        + (BADGE[tk] ? '<span class="insb" title="' + BADGE[tk] + '">insider</span>' : '')
         + '<a class="tv" href="' + tvLink(tk, r[3]) + '" target="_blank"'
         + ' rel="noopener" title="TradingView">&#9741;</a></td>'
         + '<td class="sec">' + (r[2] || '') + '</td>';
@@ -814,11 +830,16 @@ def build(metrics: list[str] | None = None, verbose: bool = True,
         print(f"    [explore] strategies unavailable: {exc!r}")
 
     cols, rows, dropped = _payload(wide, metrics)
+    try:
+        import insider_signals as SIG
+        badges = SIG.badges(asof)
+    except Exception:                                            # noqa: BLE001
+        badges = {}
     config.REPORTS_EXPLORE.mkdir(parents=True, exist_ok=True)
     out = OUT if session is None else \
         config.REPORTS_EXPLORE / f"{session}.html"
     out.write_text(render(cols, rows, prov, asof, available_sessions(),
-                          dropped=dropped, strat_cov=strat_cov),
+                          dropped=dropped, strat_cov=strat_cov, badges=badges),
                    encoding="utf-8")
     if verbose:
         print(f"  explore: {out}  ({len(rows):,} tickers x {len(cols)} metrics, "

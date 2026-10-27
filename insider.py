@@ -464,11 +464,18 @@ def _ticker_map() -> dict[int, list[str]]:
     return {c: sorted(v, key=lambda t: (t not in uni, t)) for c, v in out.items()}
 
 
-def read(start: str | None = None, end: str | None = None, codes: tuple[str, ...] | None = None) -> pd.DataFrame:
+_READ_NEEDS = ("accession", "filing_date", "src", "issuer_cik", "issuer_symbol")
+
+
+def read(start: str | None = None, end: str | None = None, codes: tuple[str, ...] | None = None,
+         columns: list[str] | None = None) -> pd.DataFrame:
     """Every stored trade filed in [start, end], one copy per accession, with `ticker`.
 
     `codes` keeps only those transaction codes ("P", "S"...), applied per quarter as it
-    is read: the full store is 7.2 million rows, most of them grants and exercises."""
+    is read: the full store is 7.2 million rows, most of them grants and exercises.
+    `columns` reads only those (plus the few this function needs itself) -- a peer-price
+    read of every sale since 2016 is 900K rows, and most columns are text."""
+    cols = None if columns is None else list(dict.fromkeys(list(columns) + list(_READ_NEEDS)))
     parts = []
     for d, src in ((DS_DIR, "dataset"), (ED_DIR, "edgar")):
         if not d.exists():
@@ -479,10 +486,11 @@ def read(start: str | None = None, end: str | None = None, codes: tuple[str, ...
                 continue
             if end and q > _quarter_of(end):
                 continue
-            part = pd.read_parquet(p, filters=[("trans_code", "in", list(codes))] if codes else None)
+            part = pd.read_parquet(p, columns=cols,
+                                   filters=[("trans_code", "in", list(codes))] if codes else None)
             parts.append(part)
     if not parts:
-        return pd.DataFrame(columns=COLS + ["ticker"])
+        return pd.DataFrame(columns=(cols or COLS) + ["ticker"])
     df = pd.concat(parts, ignore_index=True)
     if start:
         df = df[df.filing_date >= start]
@@ -542,29 +550,57 @@ def price_ok(rows: pd.DataFrame, peers: pd.DataFrame) -> pd.Series:
     "total typed into the price field" error; the few genuine four-figure-plus prices
     are kept when the filer's peers agree).
     """
-    pr = peers[(peers.price > 0) & peers.trans_date.notna()]
-    pr = (pr.assign(d=pd.to_datetime(pr.trans_date, errors="coerce"))
-            .groupby(["issuer_cik", "accession"], as_index=False).agg(d=("d", "median"), px=("price", "median"))
-            .sort_values(["issuer_cik", "d"]))
-    by = {k: (g.d.values, g.px.values, g.accession.values) for k, g in pr.groupby("issuer_cik")}
-    ratio = []
-    win = np.timedelta64(PEER_DAYS, "D")
-    for c, acc, d, px in zip(rows.issuer_cik, rows.accession, pd.to_datetime(rows.trans_date, errors="coerce"), rows.price):
-        arr = by.get(c)
-        if arr is None or pd.isna(d) or not px > 0:
-            ratio.append(np.nan)
-            continue
-        dd, pp, aa = arr
-        d64 = np.datetime64(d)
-        lo, hi = np.searchsorted(dd, d64 - win), np.searchsorted(dd, d64 + win, side="right")
-        other = pp[lo:hi][aa[lo:hi] != acc]
-        ratio.append(px / np.median(other) if len(other) >= 2 else np.nan)
-    ratio = pd.Series(ratio, index=rows.index)
+    ratio = pd.Series(_peer_ratio(rows, peers), index=rows.index)
     filing_value = rows.groupby("accession").value.transform("sum")
     ok = ratio.isna() | ratio.between(*PEER_BAND)
     ok &= ~(filing_value > MAX_VALUE)
     ok &= ~((rows.price > 1e4) & ratio.isna())
     return ok
+
+
+def _peer_ratio(rows: pd.DataFrame, peers: pd.DataFrame) -> np.ndarray:
+    """Each row's price over the median of its company's OTHER filings' prices within
+    +-PEER_DAYS (each filing one median price at its median trade date); NaN with
+    fewer than two such filings. Dates are integer days and accessions integer codes,
+    so the per-row work is two array slices -- the pandas-per-row version took 162s
+    for the 828K purchases since 2006 (2026-10-27)."""
+    pr = peers[(peers.price > 0) & peers.trans_date.notna()]
+    pr = (pr.assign(d=pd.to_datetime(pr.trans_date, errors="coerce"))
+            .groupby(["issuer_cik", "accession"], as_index=False).agg(d=("d", "median"), px=("price", "median"))
+            .dropna(subset=["d"]))
+    pr["d"] = pr.d.values.astype("datetime64[ns]").astype("int64") / 86_400e9      # days, fractional
+    codes = pd.Index(pd.concat([pr.accession, rows.accession]).unique())
+    pr["a"] = codes.get_indexer(pr.accession)
+    pr = pr.sort_values(["issuer_cik", "d"], kind="mergesort")
+    out = np.full(len(rows), np.nan)
+    rd = pd.to_datetime(rows.trans_date, errors="coerce").values.astype("datetime64[ns]")
+    ok_d = ~np.isnat(rd)
+    rdays = np.where(ok_d, rd.astype("int64") / 86_400e9, np.nan)
+    ra = codes.get_indexer(rows.accession)
+    rpx = rows.price.to_numpy(dtype="float64", na_value=np.nan)
+    rc = rows.issuer_cik.to_numpy()
+    # Row positions per issuer, once.
+    row_groups = pd.Series(np.arange(len(rows))).groupby(rc).indices
+    for c, g in pr.groupby("issuer_cik", sort=False):
+        idx = row_groups.get(c)
+        if idx is None:
+            continue
+        dd, pp, aa = g.d.to_numpy(), g.px.to_numpy(), g.a.to_numpy()
+        x = rdays[idx]
+        good = np.isfinite(x) & (rpx[idx] > 0)
+        if not good.any():
+            continue
+        idx, x = idx[good], x[good]
+        lo = np.searchsorted(dd, x - PEER_DAYS, side="left")
+        hi = np.searchsorted(dd, x + PEER_DAYS, side="right")
+        for k in range(len(idx)):
+            l, h = lo[k], hi[k]
+            if h - l < 2:
+                continue
+            seg = pp[l:h][aa[l:h] != ra[idx[k]]]
+            if len(seg) >= 2:
+                out[idx[k]] = rpx[idx[k]] / np.median(seg)
+    return out
 
 
 # ============================================================ checks

@@ -726,8 +726,10 @@ BREADTH_MIN_TICKERS = 500             # below this the breadth reading is not re
 # Score modules
 # ===========================================================================
 # ORDER MATTERS: `dip` reads fundamental/sentiment/hype, and `combo` reads all
-# four, so each must appear after everything it consumes.
-SCORE_MODULES = ("sentiment", "fundamental", "hype", "dip", "combo")
+# the others, so each must appear after everything it consumes. `insider`
+# (2026-10-27) reads only the Form 4 / House stores; combo admits its metrics only
+# through the factor study, like every other module's.
+SCORE_MODULES = ("sentiment", "fundamental", "hype", "dip", "insider", "combo")
 SCORE_KEEP_YEARS = HISTORY_YEARS
 
 # ===========================================================================

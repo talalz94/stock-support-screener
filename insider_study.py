@@ -64,7 +64,9 @@ def history_features(buys: pd.DataFrame) -> pd.DataFrame:
     f["own_chg"] = (f.shares / (f.shares_after - f.shares)).where(f.shares_after > f.shares)
     # Routine / opportunistic: months of purchase per (owner, issuer, year).
     f["y"], f["m"] = d.dt.year, d.dt.month
-    months = f.groupby(["owner_cik", "issuer_cik", "y"]).m.agg(set)
+    # A plain dict: `.get` on a MultiIndex Series cost ~0.7 ms a lookup, 10 minutes over
+    # every purchase since 2006 (measured 2026-10-27, insider_signals).
+    months = f.groupby(["owner_cik", "issuer_cik", "y"]).m.agg(set).to_dict()
     cls = []
     for o, i, y, m in zip(f.owner_cik, f.issuer_cik, f.y, f.m):
         yrs = [months.get((o, i, y - k)) for k in (1, 2, 3)]
@@ -85,14 +87,18 @@ def track_records(f: pd.DataFrame, panel: ER.Panel) -> pd.Series:
     by = {}
     for o, end, x in zip(m.owner_cik, m.end, m.excess_60):
         by.setdefault(o, []).append((end, x))
-    for o in by:
-        by[o].sort()
+    # Per owner: ends sorted, and a running sum, so "the mean of everything that had
+    # ended before D" is one bisect and one division -- a fund with thousands of
+    # purchases made the list-slice version quadratic.
+    idx = {}
+    for o, lst in by.items():
+        lst.sort()
+        idx[o] = ([e for e, _ in lst], np.cumsum([x for _, x in lst]))
     out = []
     for o, d in zip(f.owner_cik, f.filing_date):
-        lst = by.get(o, [])
-        k = bisect.bisect_left(lst, (d,))
-        past = [x for _, x in lst[:k]]
-        out.append(np.mean(past) if len(past) >= 2 else np.nan)
+        ends, cs = idx.get(o, ((), ()))
+        k = bisect.bisect_left(ends, d)
+        out.append(cs[k - 1] / k if k >= 2 else np.nan)
     return pd.Series(out, index=f.index)
 
 

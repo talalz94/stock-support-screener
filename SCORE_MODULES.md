@@ -62,7 +62,7 @@ backtest just quietly improves.
 
 ### orchestrator owns the schedule
 
-Thirty-one registry steps in fixed execution order (`python orchestrator.py
+Thirty-three registry steps in fixed execution order (`python orchestrator.py
 --dry-run` prints it), replacing three independent schedules. Each writes a row to `data/_jobs.parquet`
 (`run_id | step | cadence | watermark | started | ended | duration_s | status |
 rows | detail | error | traceback`), which is the only thing the master
@@ -74,10 +74,10 @@ failed — not the same thing as failing), `skipped` (cadence says not due), and
 a wall clock**, so a laptop closed for a week catches up on resume and one
 closed for a quarter falls back to `ORCH_MAX_CATCHUP_SESSIONS`.
 
-Cadences: 27 daily (`universe, bars, macro, news, senti_cache, sentiment,
-bounce, zones, shortvol, hype, provider, sec_edgar, insider, congress, fundamental, dip, combo,
-candidates, floor, sectors, validate, explore, snapshots, profiles, retention,
-dashboard, docs`); `sec_gap, events,
+Cadences: 29 daily (`universe, bars, macro, news, senti_cache, sentiment,
+bounce, zones, shortvol, hype, provider, sec_edgar, insider, congress, fundamental, dip,
+insider_score, combo, candidates, floor, insider_pages, sectors, validate, explore, snapshots,
+profiles, retention, dashboard, docs`); `sec_gap, events,
 leaderboard` weekly; `sec_facts` quarterly, and its dueness is derived from
 which quarters are missing on disk rather than from a calendar.
 
@@ -120,6 +120,8 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 | `reports/sentiment/latest.html` | `senti_screen` | sentiment dashboard |
 | `reports/fundamental/latest.html` | `fund_screen` | fundamental dashboard |
 | `reports/stock/<TICKER>.html` | `stock_profile.py` | per-stock sheet |
+| `reports/insider/latest.html` | `insider_page.py` | insider purchases, each filter's measured result beside it |
+| `reports/insider/house.html` | `insider_page.py` | House members' trades (local only: 5 U.S.C. 13107(c)) |
 
 Before this there were 74 files in one flat directory under four naming
 conventions — `explore_<date>` lowercase beside `Pattern_<date>`,
@@ -508,6 +510,34 @@ level) and `rule_accuracy.py` measures it: hit rate 54-55% against 50-52% for an
 stock, **no demonstrated excess return** (+0.14pp at 20 bars, t = +0.3), fewer big
 losers and fewer big winners. Every historical number is flattered by survivorship
 (only 0.9% of history belongs to names that later vanished).
+
+## Module 7: insider (added 2026-10-27)
+
+"Who is buying with their own money": company directors and officers (SEC Form 4,
+`insider.py`) and House members (PTRs, `congress.py`). Measured as EVENTS first
+(`insider_study.py`, `congress_study.py`), then turned into per-stock readings.
+
+**One derivation, `insider_signals.py`.** Every page, badge and score reads
+`data/insider/_derived.parquet`: one row per purchase filing since 2006 with the study's
+own features (believable price, rarity, point-in-time buyer track record, its own
+60-session result). Rebuilt by the `insider_score` step when the Form 4 store is newer
+(~5 min). Population `who`: "dno" (directors/officers, the measured set) or "other"
+(funds, 10%-only holders -- shown on request, never in a signal).
+
+**The score module emits only what was measured**: `buyers_30d`, `value_30d`,
+`rare_buy_30d`, `small_buy_30d`, `ceo_cfo_buy_30d`, `house_buy_60d`,
+`house_big_buy_60d`, and `insider_score` -- the count of {small, rare}, emitted only
+while `insider_score_wf.py`'s walk-forward reads PASS (chosen on 2016-09..2021-06 among
+32 rules, tested on 2021-07..). Insider metrics are BLANK, not 0, for a company with no
+Form 4 of any kind in 3 years (a foreign private issuer files none). Combo admits an
+insider metric only through the factor study, theme `insider`.
+
+**Pages**: Insiders (`insider_page.py`), House trades, a profile block (markers on the
+chart, monthly $ bought/sold, trade table with SEC links, each buyer's record, House
+trades) and the "insider buying at support" badge on Candidates, Floor retest and Explore
+(a rare or small-company insider buy, or a $50K+ House purchase, at an AT/NEAR Zones
+level -- each part measured, the combination NOT). Numbers live in `NEXT_SESSION.md`
+and are rendered on the pages from the result files.
 
 ## Viewing and exploring
 

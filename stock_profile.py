@@ -753,6 +753,7 @@ def _block_chart(ticker: str, asof: str, opt: dict) -> str:
     bars = bars.sort_values("date")
 
     level, band = _support_level(ticker, asof)
+    marks = insider_markers(ticker, asof)
     default = str(opt.get("window") or CHART_DEFAULT).upper()
     if default not in {n for n, _s, _b in CHART_WINDOWS}:
         default = CHART_DEFAULT
@@ -764,7 +765,8 @@ def _block_chart(ticker: str, asof: str, opt: dict) -> str:
         panes += (f'<div class="ch-pane" data-win="{name}"{hide}>'
                   + ui.price_chart(sub["date"].tolist(), sub["close"].tolist(),
                                    sub["volume"].tolist(), level=level,
-                                   base=band, label=f"{ticker} {name}")
+                                   base=band, label=f"{ticker} {name}",
+                                   markers=marks)
                   + "</div>")
         on = "on" if name == default else ""
         unit = {"D": "daily", "W": "weekly", "M": "monthly"}[how]
@@ -773,10 +775,263 @@ def _block_chart(ticker: str, asof: str, opt: dict) -> str:
 
     lvl_txt = (f'support <b>{level:,.2f}</b>' if level is not None
                else '<span class="muted">no support level found by the gate</span>')
+    legend = ("" if not marks else
+              ' &middot; <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,1 9,9 1,9" '
+              'class="pmk-buy"/></svg> insider buy <svg width="10" height="10" viewBox="0 0 10 10">'
+              '<polygon points="1,1 9,1 5,9" class="pmk-sell"/></svg> insider sale '
+              '<svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,0 10,5 5,10 0,5" '
+              'class="pmk-house"/></svg> House buy (at the filing date; hover for details)')
     return ('<div class="pcbar"><div class="toggle" id="winToggle">'
             f'{btns}</div><span class="note" style="margin:0">{lvl_txt} '
             '&mdash; the level and base band come from the bounce gate itself, '
-            'not from a separate calculation</span></div>' + panes)
+            f'not from a separate calculation{legend}</span></div>' + panes)
+
+
+# ============================================================ insider + House trades
+INSIDER_ROWS = 40              # filings in the trade table (newest first)
+INSIDER_MONTHS = 24            # months in the $ bought / sold strip
+_OWNER_WORD = {"self": "member", "SP": "spouse", "JT": "joint", "DC": "child"}
+
+
+def prime_insider(asof: str) -> None:
+    """ONE read of the insider derived table, five years of sales, the House store and
+    every buyer's record, for the whole batch -- without it each page re-reads them."""
+    try:
+        import insider_signals as SIG
+        SIG.prime(asof)
+    except Exception:                                            # noqa: BLE001
+        pass
+
+
+def _insider_rows(ticker: str, asof: str):
+    import insider_signals as SIG
+    d = SIG.derived()
+    buys = d[(d.ticker == ticker) & (d.who == "dno") & (d.filing_date <= asof)]
+    sells = SIG.sales(asof)
+    sells = sells[(sells.ticker == ticker) & (sells.filing_date <= asof)]
+    h = SIG.house()
+    h = h[(h.ticker == ticker) & (h.filing_date <= asof)]
+    return buys, sells, h
+
+
+def _usd(v, dash: str = "&ndash;") -> str:
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return dash
+    if not np.isfinite(v):
+        return dash
+    a = abs(v)
+    return (f"${v / 1e9:.2f}B" if a >= 1e9 else f"${v / 1e6:.2f}M" if a >= 1e6
+            else f"${v / 1e3:.0f}K" if a >= 1e3 else f"${v:.0f}")
+
+
+def _t(v) -> str:
+    """A text cell that can never read 'nan' or 'None'."""
+    if v is None or (isinstance(v, float) and not np.isfinite(v)):
+        return ""
+    s = str(v).strip()
+    return "" if s.lower() in ("nan", "nat", "none", "<na>") else s
+
+
+def insider_markers(ticker: str, asof: str) -> list[tuple[str, str, str]]:
+    """(filing date, kind, tooltip) for the price chart. The FILING date: the day the
+    public could know, which is the date every study measured from."""
+    try:
+        buys, sells, h = _insider_rows(ticker, asof)
+    except Exception:                                            # noqa: BLE001
+        return []
+    out = [(r.filing_date, "buy", f"filed {r.filing_date}: {_t(r.role)} bought {_usd(r.value, '-')}")
+           for r in buys.itertuples(index=False)]
+    out += [(r.filing_date, "sell", f"filed {r.filing_date}: {_t(r.role)} sold {_usd(r.value, '-')}"
+             + (" (10b5-1 plan)" if r.planned == 1 else "")) for r in sells.itertuples(index=False)]
+    hb = h[(h.asset_type == "ST") & (h.ttype == "P") & (h.kind == "trade")]
+    out += [(r.filing_date, "house", f"filed {r.filing_date}: House member bought "
+             f"${(r.amount_lo or 0):,.0f}-{(r.amount_hi or 0):,.0f}") for r in hb.itertuples(index=False)]
+    return out
+
+
+def _monthly_strip(buys: pd.DataFrame, sells: pd.DataFrame, asof: str) -> str:
+    """$ bought (up, green) and $ sold (down, red) per month, square-root scaled so a
+    $50K month is visible beside a $50M one; counts and exact sums in each tooltip."""
+    months = [str(p) for p in pd.period_range(end=pd.Period(asof, "M"), periods=INSIDER_MONTHS, freq="M")]
+
+    def agg(df: pd.DataFrame) -> pd.DataFrame:
+        if df.empty:
+            return pd.DataFrame({"v": 0.0, "n": 0, "pl": 0.0}, index=months)
+        m = df.filing_date.str[:7]
+        g = df.groupby(m).agg(v=("value", "sum"), n=("owner_cik", "nunique"))
+        pl = df[df.planned == 1]
+        g["pl"] = pl.groupby(pl.filing_date.str[:7]).value.sum()
+        return g.reindex(months).fillna(0)
+    b, s = agg(buys), agg(sells)
+    top = max(float(b.v.max()), float(s.v.max()), 1.0)
+    w, h, padl = 980, 130, 52
+    mid = h / 2
+    bw = (w - padl - 8) / len(months)
+    parts = [f'<svg viewBox="0 0 {w} {h + 16}" class="pchart" role="img" '
+             'aria-label="insider dollars bought and sold per month">',
+             f'<line x1="{padl}" y1="{mid}" x2="{w - 8}" y2="{mid}" class="pgrid"/>',
+             f'<text x="{padl - 6}" y="12" class="pax" text-anchor="end">{_usd(top, "")}</text>',
+             f'<text x="{padl - 6}" y="{mid + 3}" class="pax" text-anchor="end">0</text>',
+             f'<text x="{padl - 6}" y="{h - 2}" class="pax" text-anchor="end">{_usd(top, "")}</text>']
+    for i, mo in enumerate(months):
+        x = padl + i * bw + bw * 0.15
+        tip = (f"{mo}: bought {_usd(b.v.iloc[i], '-')} by {int(b.n.iloc[i])}; sold {_usd(s.v.iloc[i], '-')} "
+               f"by {int(s.n.iloc[i])}" + (f" ({_usd(s.pl.iloc[i], '-')} under 10b5-1 plans)" if s.pl.iloc[i] > 0 else ""))
+        for val, up, cls in ((b.v.iloc[i], True, "pmk-buy"), (s.v.iloc[i], False, "pmk-sell")):
+            if val <= 0:
+                continue
+            bh = max((val / top) ** 0.5 * (mid - 6), 1.5)
+            y = mid - bh if up else mid
+            parts.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bw * 0.7:.1f}" height="{bh:.1f}" class="{cls}">'
+                         f'<title>{ui.esc(tip)}</title></rect>')
+        if i % 3 == 0 or i == len(months) - 1:
+            parts.append(f'<text x="{x + bw * 0.35:.1f}" y="{h + 12}" class="pax" text-anchor="middle">{mo}</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _link(url: str | None, text: str) -> str:
+    return (f'<a href="{ui.esc(url)}" target="_blank" rel="noopener">{text}</a>' if url else "&ndash;")
+
+
+def _block_insider(ticker: str, asof: str) -> str:
+    """Insider buying and selling, House trades, each buyer's record -- and what the
+    studies measured, read from their files (never typed here)."""
+    import insider_signals as SIG
+    try:
+        buys, sells, h = _insider_rows(ticker, asof)
+    except Exception as exc:                                     # noqa: BLE001
+        return f'<div class="note">insider data unavailable: {ui.esc(type(exc).__name__)}</div>'
+    tr = SIG.tracks(asof)
+    chips = []
+    pt = SIG.per_ticker(asof, 30)
+    pt = pt[pt.ticker == ticker]
+    import scores
+    scores.load_all()
+    try:
+        from scores.insider import covered
+        is_cov = bool(covered(asof, [ticker]))
+    except Exception:                                            # noqa: BLE001
+        is_cov = True
+    if len(pt):
+        r = pt.iloc[0]
+        chips.append(ui.chip("insider buying, 30 days", f"{int(r.buyers)} buyer(s), {_usd(r.value, '-')}"))
+        if bool(r.rare):
+            chips.append(ui.chip("rare buyer (first in 2+ years)", "yes", "note"))
+        if bool(r.small):
+            chips.append(ui.chip("small company (bottom 2 liquidity fifths)", "yes", "note"))
+    elif is_cov:
+        chips.append(ui.chip("insider buying, 30 days", "none"))
+    else:
+        chips.append(ui.chip("Form 4", "this company files none (e.g. a foreign private issuer)"))
+    try:
+        r = scores.get("insider").compute(asof, [ticker])
+        v = r[r.metric == "insider_score"].value
+        if len(v):
+            chips.append(ui.chip("insider score (small + rare, 30 days)", f"{int(v.iloc[0])} of 2"))
+    except Exception:                                            # noqa: BLE001
+        pass
+    if (SIG.house_buys(asof, 60, big_only=True).ticker == ticker).any():
+        chips.append(ui.chip("House $50K+ purchase, 60 days", "yes", "note"))
+    bd = SIG.badges(asof).get(ticker)
+    if bd:
+        chips.append(ui.chip(SIG.BADGE, bd, "note"))
+    ev = SIG.evidence()
+
+    def t_of(name: str, test: str) -> str:
+        s = ev.get(name)
+        r = s["by"].get((test, 60)) if s else None
+        return f"t {r['t']:+.1f}" if r and r.get("t") is not None and np.isfinite(r["t"]) else "not measured"
+    note = ('<div class="note">Measured over 60 sessions after the filing, against same-liquidity stocks: any '
+            f'director/officer purchase {t_of("insider", "any purchase >= $10K")}; SMALL companies '
+            f'{t_of("insider", "small (bottom 2 liquidity fifths)")}; RARE buyers '
+            f'{t_of("insider", "first buy in 2+ years (rare)")}; House purchases of $50,001+ '
+            f'{t_of("house", "purchase >= $50,001")}; and SELLING, which is not a mirror image: clustered '
+            f'unplanned insider selling (3+ sellers, $1M+) {t_of("insider", "3+ sellers, $1M+, unplanned (selling)")}, '
+            f'House sales of $15,001+ {t_of("house", "sale >= $15,001 (selling)")} (a positive t = the stocks did '
+            'BETTER than peers). Most medians are negative: a fat-tail bet. Details on the '
+            '<a href="../insider/latest.html">Insiders</a> and <a href="../insider/house.html">House trades</a> '
+            f'pages. Insider = a director or officer; sales shown for {SIG.SALE_YEARS} years; markers sit at the '
+            'FILING date. A research view, not advice.</div>')
+
+    if buys.empty and sells.empty and h.empty:
+        return ('<div class="chips">' + "".join(chips) + '</div><div class="note">No open-market purchases or '
+                'sales by directors or officers on record, and no House trades.</div>' + note)
+
+    cols = ["filing_date", "trans_first", "owner_name", "role", "side", "value", "shares", "price",
+            "planned", "rare", "owner_cik", "issuer_cik", "accession"]
+    t = pd.concat([buys.assign(side="buy")[cols], sells.assign(side="sell", rare=False)[cols]])
+    t = t.sort_values("filing_date", ascending=False).head(INSIDER_ROWS).join(tr, on="owner_cik")
+    rows = []
+    for r in t.itertuples(index=False):
+        # A record is about BUYING: shown on purchase rows only, so a seller's row does
+        # not read as a verdict on the sale.
+        rec = ("" if r.side != "buy" else "&ndash;" if pd.isna(r.track_now)
+               else f"{r.track_now * 100:+.1f}pp ({int(r.track_n)})")
+        px = "&ndash;" if pd.isna(r.price) else f"{r.price:,.2f}"
+        side = f'<span class="{"pos" if r.side == "buy" else "neg"}">{r.side}</span>'
+        rows.append(f'<tr><td class="lab">{r.filing_date}</td><td class="lab">{ui.esc(_t(r.trans_first))}</td>'
+                    f'<td class="lab">{ui.esc(_t(r.owner_name))}</td><td class="lab">{ui.esc(_t(r.role))}</td>'
+                    f'<td class="lab">{side}</td><td>{_usd(r.value)}</td><td>{int(r.shares):,}</td><td>{px}</td>'
+                    f'<td class="lab">{"plan" if r.planned == 1 else ""}</td>'
+                    f'<td class="lab">{"rare" if r.rare else ""}</td><td>{rec}</td>'
+                    f'<td class="lab">{_link(SIG.form4_url(r.issuer_cik, r.accession), "SEC")}</td></tr>')
+    rec_tip = ("mean 60-session excess vs same-liquidity peers of this person&#39;s earlier purchases (any "
+               "company) whose 60 sessions have ended; (n) = how many")
+    table = ('<div class="scroll"><table class="instab"><thead><tr><th class="lab">filed</th><th class="lab">traded</th>'
+             '<th class="lab">who</th><th class="lab">role</th><th class="lab">side</th><th>$ value</th><th>shares</th>'
+             '<th>price</th><th class="lab">10b5-1</th><th class="lab">rare</th>'
+             f'<th title="{rec_tip}">buyer record</th><th class="lab">Form 4</th></tr></thead><tbody>'
+             + "".join(rows) + "</tbody></table></div>")
+    if len(buys) + len(sells) > INSIDER_ROWS:
+        table += f'<div class="note">newest {INSIDER_ROWS} of {len(buys) + len(sells):,} filings shown.</div>'
+
+    by = (buys.sort_values("filing_date").groupby("owner_cik")
+              .agg(name=("owner_name", "last"), role=("role", "last"), last=("filing_date", "max"),
+                   n=("filing_date", "size"), spent=("value", "sum"))
+              .join(tr).sort_values("last", ascending=False).head(12))
+    brows = "".join(
+        f'<tr><td class="lab">{ui.esc(_t(r.name))}</td><td class="lab">{ui.esc(_t(r.role))}</td>'
+        f'<td class="lab">{r.last}</td><td>{int(r.n)}</td><td>{_usd(r.spent)}</td>'
+        f'<td>{"&ndash;" if pd.isna(r.track_now) else f"{r.track_now * 100:+.1f}pp"}</td>'
+        f'<td>{0 if pd.isna(r.track_n) else int(r.track_n)}</td></tr>' for r in by.itertuples())
+    buyers = ("" if by.empty else
+              '<h3 style="margin-top:14px">Buyers and their records</h3><div class="scroll"><table class="instab">'
+              '<thead><tr><th class="lab">buyer</th><th class="lab">role</th><th class="lab">last bought</th>'
+              f'<th>purchases here</th><th>$ here</th><th title="{rec_tip}">record</th><th>measured buys</th></tr>'
+              f'</thead><tbody>{brows}</tbody></table></div>')
+
+    house = ""
+    if len(h):
+        hrows = []
+        for r in h.sort_values("filing_date", ascending=False).head(25).itertuples(index=False):
+            big = (r.asset_type == "ST" and r.ttype == "P" and r.kind == "trade"
+                   and (r.amount_lo or 0) >= SIG.HOUSE_BIG)
+            lag = "&ndash;" if pd.isna(r.lag_days) else str(int(r.lag_days))
+            hrows.append(f'<tr{" class=" + chr(34) + "big" + chr(34) if big else ""}>'
+                         f'<td class="lab">{r.filing_date}</td><td class="lab">{ui.esc(_t(r.trans_date))}</td>'
+                         f'<td>{lag}</td><td class="lab">{ui.esc(_t(r.member))}</td>'
+                         f'<td class="lab">{_OWNER_WORD.get(r.owner, ui.esc(_t(r.owner)))}</td>'
+                         f'<td class="lab">{ui.esc(_t(r.asset_type))} {ui.esc(_t(r.ttype))}</td>'
+                         f'<td>${(r.amount_lo or 0):,.0f} &ndash; ${(r.amount_hi or 0):,.0f}</td>'
+                         f'<td class="lab">{"" if r.kind == "trade" else ui.esc(_t(r.kind))}</td>'
+                         f'<td class="lab">{_link(SIG.ptr_url(r.year, r.doc_id), "PTR")}</td></tr>')
+        house = ('<h3 style="margin-top:14px">House members&#39; trades</h3><div class="scroll"><table class="instab">'
+                 '<thead><tr><th class="lab">filed</th><th class="lab">traded</th><th>lag d</th>'
+                 '<th class="lab">member</th><th class="lab">owner</th><th class="lab">type</th><th>amount</th>'
+                 '<th class="lab">kind</th><th class="lab">report</th></tr></thead><tbody>'
+                 + "".join(hrows) + "</tbody></table></div>"
+                 + (f'<div class="note">newest 25 of {len(h):,}; green = a $50,001+ stock purchase.</div>'
+                    if len(h) > 25 else '<div class="note">green = a $50,001+ stock purchase.</div>'))
+    css = ('<style>.instab{font-size:12px}.instab td,.instab th{padding:4px 8px}'
+           '.instab .pos{color:var(--pos);font-weight:600}.instab .neg{color:var(--neg);font-weight:600}'
+           '.instab tr.big td{background:var(--posbg)}</style>')
+    return (css + '<div class="chips">' + "".join(chips) + "</div>"
+            + '<div class="note" style="margin:6px 0 4px">directors&#39; and officers&#39; dollars per month, last '
+            f'{INSIDER_MONTHS} months: bought above the line, sold below (square-root scale; hover for counts)</div>'
+            + _monthly_strip(buys, sells, asof) + table + buyers + house + note)
 
 
 def _block_radar(t, m, sc, px, opt) -> str:
@@ -1058,6 +1313,8 @@ def build(ticker: str, verbose: bool = True,
                          'quarterly only &mdash; the fact store is quarterly, '
                          'anything finer would be interpolation</span></div>'
                          + panes)
+        elif key == "insider":
+            parts.append("<h2>Insider and House trades</h2>" + _block_insider(ticker, asof))
         elif key == "fundamentals":
             parts.append("<h2>Fundamental metrics</h2>" + _metric_card(
                 "", sc.get("fundamental") or {}, opt.get("metrics", []),
@@ -1527,6 +1784,26 @@ def selftest(verbose: bool = True) -> None:
             assert "QoQ" not in html, "annual table must not claim QoQ"
         checked += 1
 
+    # THE INSIDER BLOCK. Markers land on the first bar on/after their date and never
+    # outside the window; the block renders no literal nan/None, links every filing
+    # it can to SEC, and says "none" rather than drawing an empty table.
+    svg = ui.price_chart(["2026-01-02", "2026-01-09", "2026-01-16"], [10, 11, 12],
+                         markers=[("2026-01-05", "buy", "a"), ("2026-01-06", "buy", "b"),
+                                  ("2026-01-16", "sell", "c"), ("2025-12-01", "house", "x"),
+                                  ("2026-02-01", "buy", "y")])
+    assert svg.count('class="pmk-buy"') == 1 and "a; b" in svg, "two buys in one week = one mark"
+    assert svg.count('class="pmk-sell"') == 1 and "pmk-house" not in svg, "out-of-window marks drawn"
+    asof = calendar_us.last_closed_session()
+    import insider_signals as SIG
+    pt = SIG.per_ticker(asof, 30)
+    with_buys = pt.sort_values("value", ascending=False).ticker.head(1).tolist()
+    nb = 0
+    for tk in with_buys + ["SPY"]:
+        html = _block_insider(tk, asof)
+        assert not re.search(r">\s*(nan|None|NaT)\s*<", html), f"{tk}: insider block renders nan/None"
+        if tk in with_buys:
+            assert "sec.gov/Archives/edgar/data/" in html and "pmk-buy" in html, f"{tk}: no SEC link or bars"
+            nb += 1
     if verbose:
         print(f"  [stock_profile] {checked} financial table(s) aligned, "
-              f"QoQ/YoY labelled per frequency")
+              f"QoQ/YoY labelled per frequency; insider block checked on {nb} buyer + 1 non-filer")

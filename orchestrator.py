@@ -691,6 +691,44 @@ def _step_dip(asof: str) -> tuple[int, str]:
     return n, f"{n:,} scored of {gated:,} that passed the quality gate"
 
 
+def _step_insider_score(asof: str) -> tuple[int, str]:
+    """Score module 6: insider and House buying per stock (scores/insider.py).
+
+    First refreshes the derived purchase table (insider_signals.build, ~5 min) when the
+    Form 4 store is newer than it -- every page, badge and score reads that one table.
+    Runs BEFORE combo, which may admit an insider metric only through the factor study.
+    Nothing lists this step in depends_on: if it fails, combo runs on the other modules
+    and the pages fall back to the last derived table.
+    """
+    import bars
+    import insider_signals as SIG
+    import scores
+    import scores.insider                                        # noqa: F401
+    stale = SIG.is_stale()
+    SIG.derived(rebuild_if_stale=True)
+    uni = bars.tradeable_universe(asof)
+    rows = scores.get("insider").compute(asof, uni)
+    if rows.empty:
+        raise RuntimeError("insider produced no rows")
+    scores.write(rows, session=asof, module="insider")
+    w = rows.pivot_table(index="ticker", columns="metric", values="value", aggfunc="first")
+    n = int(w["buyers_30d"].notna().sum()) if "buyers_30d" in w else 0
+    buying = int((w.get("buyers_30d", 0) > 0).sum()) if "buyers_30d" in w else 0
+    sc = (f"; insider_score 2 for {int((w['insider_score'] == 2).sum())}" if "insider_score" in w
+          else "; no combined score (walk-forward not PASS)")
+    return n, (f"{n:,} name(s) with Form 4 coverage, {buying} with director/officer buying in 30 days"
+               f"{sc}{'; derived table rebuilt' if stale else ''}")
+
+
+def _step_insider_pages(asof: str) -> tuple[int, str]:
+    """The Insiders page (insider/latest.html) and the House trades page (house.html).
+    Each prints the measured result of its filters from the study files. The House
+    page is local by law (5 U.S.C. 13107(c)): reports/ is never published."""
+    import insider_page
+    n, m = insider_page.build(asof)
+    return n, f"{n:,} insider purchase filing(s) in 90 days; {m:,} House trade(s) in 365 days"
+
+
 def _step_combo(asof: str) -> tuple[int, str]:
     """Score module 5. Runs LAST of the score modules: it reads all four.
 
@@ -857,6 +895,12 @@ def _step_profiles(asof: str) -> tuple[int, str]:
     # once per module (see stock_profile.prime_histories).
     try:
         stock_profile.prime_histories(list(config.SCORE_MODULES), tk, asof)
+    except Exception:                                        # noqa: BLE001
+        pass
+    # ...and the insider block's data (derived purchases, five years of sales, the
+    # House store, every buyer's record): one read for the batch, not one per page.
+    try:
+        stock_profile.prime_insider(asof)
     except Exception:                                        # noqa: BLE001
         pass
     # ...and the price bars, which every page otherwise read three times for one
@@ -1647,6 +1691,13 @@ REGISTRY: tuple[Step, ...] = (
     Step("dip", _with_backfill("dip", _step_dip), config.CADENCE_DAILY,
          depends_on=("fundamental", "sentiment", "hype"), timeout=900,
          desc="quality gate + depressed price; the dip thesis (UNMEASURED)"),
+    # Insider + House buying (scores/insider.py). Before combo, which reads every
+    # module; after nothing it needs but bars -- the Form 4 / House stores are read
+    # as they stand, so a failed `insider` ingest only means one night less fresh.
+    Step("insider_score", _with_backfill("insider", _step_insider_score), config.CADENCE_DAILY,
+         depends_on=("bars",), timeout=1800,
+         desc="insider + House buying per stock (score module 6); refreshes the derived "
+              "purchase table every page reads"),
     # `combo` reads all four other modules, so it follows dip, and `explore`
     # follows it so the table shows the same session's combined scores.
     Step("combo", _with_backfill("combo", _step_combo), config.CADENCE_DAILY,
@@ -1662,6 +1713,11 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("bars", "fundamental", "hype", "sentiment"), timeout=900,
          desc="the Floor-retest page: a big run, a deep pullback, a multi-month "
               "floor, the close back at it (measured result printed on the page)"),
+    # After zones and fundamental (support status, market cap, fund score per row).
+    Step("insider_pages", _step_insider_pages, config.CADENCE_DAILY,
+         depends_on=("zones", "fundamental"), timeout=900,
+         desc="the Insiders and House trades pages, each filter's measured result "
+              "printed beside it"),
     # Before `explore`, which joins the per-stock sector score from its file.
     Step("sectors", _step_sectors, config.CADENCE_DAILY,
          depends_on=("bars", "fundamental"), timeout=1800,

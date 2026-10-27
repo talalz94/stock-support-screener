@@ -34,6 +34,7 @@ class Panel:
         C, V = S.load_wide()
         self.C = C
         self.dates = list(C.index)
+        self._dates = np.asarray(self.dates)
         self.pos = {d: i for i, d in enumerate(self.dates)}
         dv = (C * V).rolling(20, min_periods=15).mean()
         elig = (C >= MIN_PX) & (dv >= MIN_DV)
@@ -50,13 +51,18 @@ class Panel:
 
     def entry(self, day: str) -> str | None:
         """The first session strictly after `day`."""
-        i = int(np.searchsorted(self.dates, day, side="right"))
+        i = int(np.searchsorted(self._dates, day, side="right"))
         return self.dates[i] if i < len(self.dates) else None
 
     def measure(self, ev: pd.DataFrame, date_col: str = "event_date") -> pd.DataFrame:
         """ev[ticker, <date_col>] -> + entry, bucket, pct_hi, and excess_<h> / ret_<h> per horizon."""
         ev = ev.copy()
-        ev["entry"] = [self.entry(d) for d in ev[date_col]]
+        # Vectorised `entry`: per row it converted the 2,500-date list to an array, which
+        # was most of a 650K-event measurement (2026-10-27).
+        i = np.searchsorted(self._dates, ev[date_col].astype(str).to_numpy(), side="right")
+        ok_i = i < len(self.dates)
+        ev["entry"] = np.where(ok_i, self._dates[np.minimum(i, len(self.dates) - 1)], None)
+        ev.loc[ev[date_col].isna(), "entry"] = None
         ok = ev.entry.notna() & ev.ticker.isin(self.C.columns)
         ev = ev[ok].copy()
         cols = {t: i for i, t in enumerate(self.C.columns)}

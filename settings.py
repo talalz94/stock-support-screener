@@ -45,7 +45,7 @@ PROFILE_FILE = config.DATA / "_profile.json"
 DEFAULT_PROFILE: dict[str, Any] = {
     "schema": SCHEMA_VERSION,
     "name": "default",
-    "order": ["header", "chart", "radar", "scores", "financials", "growth",
+    "order": ["header", "chart", "radar", "scores", "insider", "financials", "growth",
               "fundamentals", "sentiment", "hype", "levels"],
     "blocks": {
         "header": {"enabled": True,
@@ -107,6 +107,9 @@ DEFAULT_PROFILE: dict[str, Any] = {
                  "metrics": ["hype_score", "premium_score", "attention_score",
                              "ps_ratio", "extension_pct"]},
         "levels": {"enabled": True, "limit": 1},
+        # Directors' and officers' purchases and sales, House trades, each buyer's
+        # record, and the measured result of each (insider_signals, 2026-10-27).
+        "insider": {"enabled": True},
     },
 }
 

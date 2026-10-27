@@ -68,6 +68,9 @@ DASHBOARDS = [
      "47 metrics over four pillars, from the SEC fact store", None, None),
     ("Stock profiles", "stock/index.html",
      "Per-stock sheet: score radar, financials, QoQ/YoY trends", None, None),
+    ("Insiders", "insider/latest.html",
+     "Directors&rsquo; and officers&rsquo; purchases, each filter&rsquo;s measured result beside it",
+     "insider/house.html", "House trades"),
 ]
 
 # Stores summarised on the page. `label, path, glob`.
