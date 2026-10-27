@@ -120,9 +120,12 @@ COMPOSITE = frozenset({
     # profitability metric twice and then call the result independent evidence.
     # The unthemed-metric warning in `selftest` is what surfaced this.
     "th_profitability", "th_valuation", "th_safety", "th_growth",
-    "th_efficiency", "th_sentiment", "th_attention",
+    "th_efficiency", "th_sentiment", "th_attention", "th_insider",
     "combo_h1_cov", "combo_h20_cov", "combo_h60_cov",
     "combo_h1_n", "combo_h20_n", "combo_h60_n",
+    # The walk-forward insider score is a count of two insider metrics that can
+    # each enter on their own measurement (scores/insider.py).
+    "insider_score",
 })
 
 # Excluded for a REASON, not for a weak t-stat. Each entry is a metric that
@@ -148,6 +151,14 @@ EXCLUDED = {
     "news_coverage":
         "what fraction of the window the news store covers. Measures our "
         "fetching, not the company.",
+    "house_buy_60d":
+        "a SIZE proxy, the days_since_filing case again (measured 2026-10-27). It "
+        "cleared the bar (t +2.96 at h=20) but House members buy big companies: the "
+        "median cap of a stock they bought is ~17x the universe median, Spearman "
+        "+0.23 with mktcap, and its t lives in the large tercile. Against SAME-SIZE "
+        "peers (congress_study.py, liquidity fifths) the average member purchase "
+        "reads t +1.28 -- nothing. house_big_buy_60d stays admissible: its event "
+        "study beat same-size peers in both halves.",
 }
 
 # What each metric is ABOUT. Weight is assigned per theme, so that a theme with
@@ -194,6 +205,11 @@ THEMES = {
                       # beside extension_pct. Measured t=+2.18 at h=1 on 344
                       # dates, refused as unthemed until 2026-10-12.
                       "above_200dma"},
+    # Who is buying the stock with their own money: company insiders (Form 4) and
+    # House members (PTRs). Added 2026-10-27 with scores/insider.py; a metric here
+    # still enters only on its own study cell, like every other.
+    "insider":       {"buyers_30d", "value_30d", "rare_buy_30d", "small_buy_30d",
+                      "ceo_cfo_buy_30d", "house_buy_60d", "house_big_buy_60d"},
 }
 
 _THEME_OF = {m: th for th, ms in THEMES.items() for m in ms}

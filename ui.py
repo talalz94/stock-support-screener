@@ -204,6 +204,10 @@ border:1px solid var(--line);border-radius:9px}
 .plevtxt{fill:var(--accent);font-size:10.5px;font-weight:600}
 .pbase{fill:var(--accent);opacity:.09}
 .pcbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:9px}
+/* Trade markers (stock_profile's insider block): who bought or sold, on the line. */
+.pmk-buy{fill:var(--pos)}
+.pmk-sell{fill:var(--neg)}
+.pmk-house{fill:var(--blk)}
 table{width:100%;border-collapse:collapse;font-size:12.5px;
 background:var(--panel);border:1px solid var(--line);border-radius:8px;
 overflow:hidden}
@@ -296,6 +300,8 @@ NAV = [
     ("zones", "Zones", "zones/latest.html"),
     ("candidates", "Candidates", "zones/candidates.html"),
     ("floor", "Floor retest", "zones/floor.html"),
+    ("insider", "Insiders", "insider/latest.html"),
+    ("house", "House trades", "insider/house.html"),
     ("sectors", "Sectors", "sectors/latest.html"),
     ("sentiment", "Sentiment", "sentiment/latest.html"),
     ("fundamental", "Fundamental", "fundamental/latest.html"),
@@ -652,7 +658,8 @@ def nice_ticks(lo: float, hi: float, target: int = 5,
 
 
 def price_chart(dates, closes, volumes=None, level=None, base=None,
-                w: int = 980, h: int = 270, label: str = "") -> str:
+                w: int = 980, h: int = 270, label: str = "",
+                markers=None) -> str:
     """Close line + volume + the support level, as one inline SVG.
 
     HAND-BUILT because every page here must open from `file://` with no network,
@@ -668,6 +675,12 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
     `preserveAspectRatio` is left at its default and the SVG is width:100% with
     height:auto, so it scales down to a phone without the labels colliding --
     unlike `sparkline`, which stretches on purpose.
+
+    `markers`: optional (date, kind, title) with kind "buy", "sell" or "house" --
+    insider purchases (green, under the line), sales (red, over it) and House
+    purchases (purple). Each lands on the first bar ON OR AFTER its date (a weekly
+    or monthly bar holds the dates inside it); several on one bar become one mark
+    whose tooltip lists them. Outside the window: not drawn.
     """
     import numpy as np
     import pandas as pd
@@ -746,6 +759,26 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
     poly = " ".join(f"{X(i):.1f},{Y(v):.1f}" for i, v in enumerate(cs))
     cls = "pline up" if cs[-1] >= cs[0] else "pline down"
     out.append(f'<polyline points="{poly}" class="{cls}"/>')
+
+    if markers:
+        import bisect
+        groups: dict[tuple[int, str], list[str]] = {}
+        for d, kind, title in markers:
+            d = str(d)[:10]
+            if d < ds[0][:10] or d > ds[-1][:10]:
+                continue
+            i = min(bisect.bisect_left([x[:10] for x in ds], d), n - 1)
+            groups.setdefault((i, kind), []).append(str(title))
+        for (i, kind), titles in sorted(groups.items()):
+            x, y = X(i), Y(cs[i])
+            if kind == "sell":
+                pts_ = f"{x - 4.5:.1f},{y - 12:.1f} {x + 4.5:.1f},{y - 12:.1f} {x:.1f},{y - 4:.1f}"
+            elif kind == "house":
+                pts_ = f"{x:.1f},{y + 5:.1f} {x + 4.5:.1f},{y + 10:.1f} {x:.1f},{y + 15:.1f} {x - 4.5:.1f},{y + 10:.1f}"
+            else:
+                pts_ = f"{x:.1f},{y + 4:.1f} {x + 4.5:.1f},{y + 12:.1f} {x - 4.5:.1f},{y + 12:.1f}"
+            tip = esc("; ".join(titles[:6]) + (f"; +{len(titles) - 6} more" if len(titles) > 6 else ""))
+            out.append(f'<polygon points="{pts_}" class="pmk-{esc(kind)}"><title>{tip}</title></polygon>')
 
     # date axis. Three labels six months apart was unreadable; this puts one
     # roughly every 160px and drops the format down to the useful part -- a

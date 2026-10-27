@@ -68,6 +68,16 @@ COLS = [
 ]
 IDX = {c[0]: i for i, c in enumerate(COLS)}
 N_FLAG = len(COLS)             # extra field after the columns: 1 = non-USD reporter
+N_BADGE = N_FLAG + 1           # and after it: the "insider buying at support" reason, "" when none
+
+
+def _badges(asof: str) -> dict[str, str]:
+    """ticker -> reason (insider_signals.badges). A failure costs the badge, never the page."""
+    try:
+        import insider_signals as SIG
+        return SIG.badges(asof)
+    except Exception:                                            # noqa: BLE001
+        return {}
 
 
 def _num(v, nd: int = 5):
@@ -160,6 +170,7 @@ def payload(asof: str) -> dict:
         raise RuntimeError("; ".join(hard))
 
     rows = []
+    badges = _badges(asof)
     for r in sel.itertuples(index=False):
         d = r._asdict()
         sent = _num(d.get("sent_rank"))
@@ -174,6 +185,7 @@ def payload(asof: str) -> dict:
             _num(d.get("news_count_30d"), 0),
             _num(d.get("mktcap"), 0), _num(d.get("dollar_vol_20"), 0),
             1 if _num(d.get("reports_usd")) == 0 else 0,
+            badges.get(_txt(d["ticker"]), ""),
         ])
     return {"asof": asof, "rows": rows, "dates": ses, "series": series,
             "dropped": dropped, "n_universe": int(trusted["ticker"].nunique())}
@@ -216,6 +228,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system
 .cdb{font-size:11px;padding:1px 6px;border-radius:999px;border:1px solid var(--line)}
 .cdb-AT{color:var(--pos);color:color-mix(in srgb,var(--pos) 80%,var(--ink));border-color:var(--pos)}  /* 4.48:1 on a hovered row without the mix */
 .cdm{color:var(--muted)}
+.cdins{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--blkbg);color:var(--blk)}
 .cddet td{background:var(--panel);padding:10px 14px;white-space:normal}
 .cddet .cdfacts{margin:6px 0 0;font-size:12.5px;max-width:860px}
 .cddet a{color:var(--ink);text-decoration:underline}
@@ -244,6 +257,7 @@ they lose more than 20% in 40 days 3.9% of the time against 9.9% for the pool &m
 against 11.7%. Fewer disasters <i>and</i> fewer jackpots.</div>
 <div><b>Hype is a warning, sentiment is blank for about half.</b> Names that broke their level had <i>more</i>
 attention, not less, and news sentiment showed no reliable signal. Both are shown for context only.</div>
+<div><b>insider</b> after a ticker = @@BADGE_HELP@@</div>
 <div><b>History is flattered:</b> only 0.9% of it belongs to stocks that later vanished. I cannot see earnings
 dates or news here &mdash; check both before acting.</div>
 </div>
@@ -255,6 +269,7 @@ dates or news here &mdash; check both before acting.</div>
   <button class="cdchip" data-b="AT">AT a level<span class="n" id="cdn_AT"></span></button>
   <button class="cdchip" data-b="NEAR">NEAR<span class="n" id="cdn_NEAR"></span></button>
   <button class="cdchip" id="cdliq">liquid only (&ge; $10M/day)</button>
+  <button class="cdchip" id="cdins" title="@@BADGE_HELP@@">insider buying at support<span class="n" id="cdn_ins"></span></button>
   <button class="cdchip" id="cdclr">clear</button>
 </div>
 
@@ -265,7 +280,7 @@ dates or news here &mdash; check both before acting.</div>
 (function(){
 var R=@@ROWS@@, DATES=@@DATES@@, S=@@SERIES@@, K=@@KINDS@@, BAND_AT=@@BAND_AT@@, FLAG=@@FLAG@@;
 var $=function(s){return document.getElementById(s)};
-var sec='all', band='all', liq=false, q='', sc=3, sd=1, open={};
+var sec='all', band='all', liq=false, ins=false, q='', sc=3, sd=1, open={}, BADGE=FLAG+1;
 function fmt(v,k){
   if(v==null) return '&ndash;';
   switch(k){
@@ -306,6 +321,7 @@ function ok(r){
   if(sec!=='all'&&r[1]!==sec) return false;
   if(band!=='all'&&r[5]!==band) return false;
   if(liq&&!(r[18]>=1e7)) return false;
+  if(ins&&!r[BADGE]) return false;
   if(q&&r[0].toLowerCase().indexOf(q)<0) return false;
   return true;
 }
@@ -331,7 +347,7 @@ function render(){
   });
   var h='';
   for(var i=0;i<m.length;i++){
-    var r=m[i], t=r[0], tick='<b>'+t+'</b>'+(r[FLAG]===1?'<span class="cdm" title="reports in a non-USD currency"> &dagger;</span>':'')+(r[18]!=null&&r[18]<1e7?'<span class="cdm" title="under $10M/day traded"> *</span>':'');
+    var r=m[i], t=r[0], tick='<b>'+t+'</b>'+(r[FLAG]===1?'<span class="cdm" title="reports in a non-USD currency"> &dagger;</span>':'')+(r[18]!=null&&r[18]<1e7?'<span class="cdm" title="under $10M/day traded"> *</span>':'')+(r[BADGE]?'<span class="cdins" title="'+r[BADGE]+'">insider</span>':'');
     h+='<tr class="cdr'+(open[t]?' open':'')+'" data-t="'+t+'"><td>'+chart(t,150,40,false,r[4])+'</td><td>'+tick+'</td><td>'+(r[1]||'&ndash;')+'</td>';
     for(var j=2;j<K.length;j++){
       var b=(j==5)?'<span class="cdb cdb-'+r[5]+'">'+r[5]+'</span>':fmt(r[j],K[j]);
@@ -351,14 +367,16 @@ function render(){
   $('cdn_all').textContent=R.length;
   $('cdn_AT').textContent=R.filter(function(r){return r[5]==='AT'}).length;
   $('cdn_NEAR').textContent=R.filter(function(r){return r[5]==='NEAR'}).length;
+  $('cdn_ins').textContent=R.filter(function(r){return r[BADGE]}).length;
 })();
 $('cdq').addEventListener('input',function(e){q=e.target.value.trim().toLowerCase();render();});
 $('cds').addEventListener('change',function(e){sec=e.target.value;render();});
 document.querySelectorAll('.cdchip[data-b]').forEach(function(b){b.addEventListener('click',function(){
   band=b.dataset.b; document.querySelectorAll('.cdchip[data-b]').forEach(function(o){o.classList.toggle('on',o===b);}); render();});});
 $('cdliq').addEventListener('click',function(){liq=!liq;this.classList.toggle('on',liq);render();});
+$('cdins').addEventListener('click',function(){ins=!ins;this.classList.toggle('on',ins);render();});
 $('cdclr').addEventListener('click',function(){
-  sec='all';band='all';liq=false;q='';$('cdq').value='';$('cds').value='all';$('cdliq').classList.remove('on');
+  sec='all';band='all';liq=false;ins=false;q='';$('cdq').value='';$('cds').value='all';$('cdliq').classList.remove('on');$('cdins').classList.remove('on');
   document.querySelectorAll('.cdchip[data-b]').forEach(function(o){o.classList.toggle('on',o.dataset.b==='all');});render();});
 $('cdbody').addEventListener('click',function(e){
   if(e.target.closest('a')) return;
@@ -372,6 +390,14 @@ render();
 })();
 </script></body></html>
 """
+
+
+def _badge_help() -> str:
+    try:
+        import insider_signals as SIG
+        return SIG.BADGE_HELP
+    except Exception:                                            # noqa: BLE001
+        return "insider data unavailable"
 
 
 def build(asof: str | None = None) -> tuple[Path, int]:
@@ -394,7 +420,8 @@ def build(asof: str | None = None) -> tuple[Path, int]:
             .replace("@@UNIVERSE@@", f"{p['n_universe']:,}").replace("@@HEADS@@", heads)
             .replace("@@ROWS@@", js(rows)).replace("@@DATES@@", js(dates))
             .replace("@@SERIES@@", js(series)).replace("@@KINDS@@", js(kinds))
-            .replace("@@BAND_AT@@", str(Z.BAND_AT)).replace("@@FLAG@@", str(N_FLAG)))
+            .replace("@@BAND_AT@@", str(Z.BAND_AT)).replace("@@FLAG@@", str(N_FLAG))
+            .replace("@@BADGE_HELP@@", ui.esc(_badge_help())))
     config.REPORTS_ZONES.mkdir(parents=True, exist_ok=True)
     out = config.REPORTS_ZONES / "candidates.html"
     out.write_text(html, encoding="utf-8")
@@ -412,7 +439,8 @@ def selftest(asof: str | None = None) -> int:
     assert [IDX[k] for k in ("sector", "dist", "level", "band", "touches", "broke", "pct_hi", "fund",
                              "intcov", "fscore", "roic", "pe", "hype", "sent", "news", "vol")] \
         == [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18], "page script indexes are stale"
-    assert all(len(r) == N_FLAG + 1 for r in rows), "row width disagrees with the column list"
+    assert all(len(r) == N_BADGE + 1 for r in rows), "row width disagrees with the column list"
+    assert all(isinstance(r[N_BADGE], str) for r in rows), "badge field is not text"
     assert len(dates) == SPARK_N and dates == sorted(dates), "date axis"
     assert all(len(v) == len(dates) for v in series.values()), "a series is not aligned to the date axis"
     for r in rows:

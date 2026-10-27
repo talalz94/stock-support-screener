@@ -53,6 +53,9 @@ FLOORS = {
     "fundamental": ("2016-08-01", "SEC fact store + bar floor"),
     "sentiment":   ("2016-08-01", "news store floor"),
     "hype":        ("2016-08-01", "bar floor (volume, trades, short volume)"),
+    # Form 4s go back to 2006, but the liquidity fifths need bars (2016-07) and the
+    # House store starts 2016; the event studies start 2016-09 for the same reason.
+    "insider":     ("2016-09-01", "bar floor for liquidity fifths; House store from 2016"),
 }
 
 # Modules whose floor is NOT a constant: it is wherever their input actually

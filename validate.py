@@ -1198,6 +1198,28 @@ def check_insider(asof: str, quick: bool = False) -> None:
         record("insider", "EDGAR Form 4 fetches", WARN if nf else OK, f"{nf} filing(s) still failing (retried nightly)")
     except Exception as exc:                                     # noqa: BLE001
         record("insider", "insider store readable", WARN, repr(exc)[:100])
+    # The derived purchase table every insider page, badge and score reads, and the
+    # walk-forward that decides whether `insider_score` exists at all.
+    try:
+        import insider_signals as SIG
+        import insider_score_wf as WF
+        if not SIG.DERIVED.exists():
+            record("insider", "derived purchase table current", WARN, "missing: run insider_signals.py --build")
+        else:
+            record("insider", "derived purchase table current", WARN if SIG.is_stale() else OK,
+                   "older than the Form 4 store (rebuilt by the insider_score step)" if SIG.is_stale()
+                   else "newer than every Form 4 store file")
+        wf = WF.read()
+        if not wf:
+            record("insider", "insider_score walk-forward", WARN, "no result file: insider_score is not emitted")
+        else:
+            c = wf.get("chosen") or {}
+            record("insider", "insider_score walk-forward", OK,
+                   f"{wf.get('verdict')}: {c.get('rule')} chosen on train, test t "
+                   f"{(c.get('test') or {}).get('t')} ({wf.get('measured_on', '')[:10]})"
+                   + ("" if wf.get("verdict") == "PASS" else "; insider_score NOT emitted"))
+    except Exception as exc:                                     # noqa: BLE001
+        record("insider", "insider derived table readable", WARN, repr(exc)[:100])
     try:
         import congress as CG
         led = CG._ledger()

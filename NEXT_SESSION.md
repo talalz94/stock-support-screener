@@ -44,6 +44,135 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-27 (night) — INSIDER PHASE 3: PAGES, BADGES, A SCORE, AND WHAT THE WALK-FORWARD DID AND DID NOT SHOW
+
+Phase 3 of the insider module (phases 1-2: the section below). Built ONLY on what phase 2
+measured; every number on every page is rendered from the study files at build time.
+
+**One derivation, `insider_signals.py`.** `data/insider/_derived.parquet`: every purchase
+filing since 2006 (388,903; 312,984 by directors/officers), each with the study's own
+features -- believable price, rarity, point-in-time buyer record (37,207 have one), its
+own 60-session result. Pages, badges, profiles and the score all read it. Rebuilt by the
+`insider_score` step when the Form 4 store is newer: **279 s** measured. To get there,
+three of phase 2's own functions were made fast WITHOUT changing a result (each checked
+against the original on 95K purchases / 40K filings: 0 mismatches, identical records):
+`insider.price_ok` 27 s -> 10 s per 95K (arrays, not per-row pandas), `insider_study.
+history_features` 10 min -> ~10 s over the full store (a MultiIndex `.get` per row was
+0.7 ms), `event_returns.Panel.measure` (vectorised `entry`). `insider.read(columns=...)`
+prunes columns (the 5-year sale read).
+
+**Pages.** `reports/insider/latest.html` (nav "Insiders"): last 90 days of purchase
+FILINGS, aggregated client-side so every filter (window 7-90 d, min insiders, min $, role,
+10b5-1, sector, market cap, small / rare / good-record / Ross / at-support chips, include
+funds & 10%-only owners) changes the counts. Columns: insiders, $, roles, last filed,
+rare, best buyer record, liquidity fifth, market cap, Zones support (AT/NEAR/APPROACHING +
+distance), fund score, insider score; a row expands to each filing with its SEC link
+(built from the accession), price, 10b5-1, rarity and the buyer's record. Beside each
+filter: its own t, coloured by a fixed rule (`insider_page.verdict`: "measured to matter"
+= t >= 2 overall AND >= 1 in each half). Today that rule names small companies, rare
+buyers and CEO/CFO buying; buyers with a good record and unplanned buying are
+"significant overall, weak in one half"; Ross's screen reads not significant.
+`reports/insider/house.html` (nav "House trades"): 365 days of House trades, $50,001+
+stock purchases in green with their measured line, lag, member, owner, amount range,
+the Clerk's PDF link; Senate absence and paper filings (per-year counts, live from the
+ledger) stated; 5 U.S.C. 13107(c) stated. reports/ is never committed.
+
+**Profiles.** New block "Insider and House trades" (settings block `insider`, after the
+radar): chips (30-day buying, rare, small, insider score, House $50K+, the badge), a
+24-month $ bought/sold strip (square-root scale, counts in tooltips), the newest 40
+purchase + sale filings with SEC links and buyer records, each buyer's record, House trades
+with PTR links, and the measured t's read from the files (selling included: not bearish).
+Buy / sale / House-buy markers on every chart window, at the FILING date (`ui.price_chart
+(markers=...)`). Sales = directors/officers, last 5 years, filings over $500M dropped.
+`stock_profile.prime_insider` reads it all once per batch (the profiles step calls it).
+
+**Badge "insider buying at support"** on Candidates, Floor retest and Explore (purple
+"insider"; a filter chip on Candidates): a rare OR small-company director/officer purchase
+of $10K+ filed in 30 days, or a House $50,001+ purchase filed in 60 days, on a stock now
+AT or NEAR a Zones level. Each part was measured; THE COMBINATION WITH SUPPORT WAS NOT
+(zones history is kept 90 days, so it cannot be measured yet) -- every tooltip says so.
+On 10-26: 45 names carry it -- 5 of the 82 Candidates, none of the 5 Floor names. (`insider_signals.badges`.)
+
+**Score module 6, `scores/insider.py`** (SCORE_MODULES now sentiment, fundamental, hype,
+dip, insider, combo). Metrics: buyers_30d, value_30d, rare_buy_30d, small_buy_30d,
+ceo_cfo_buy_30d, house_buy_60d, house_big_buy_60d, insider_score. Insider metrics are
+BLANK (not 0) for a company with no Form 4 of any kind in 3 years -- a foreign private
+issuer files none (266 of 3,467 tradeable names on 10-26). Backfilled every 14 sessions,
+2016-09-06..2026-10-26: 183 sessions, 19 min (`catchup_scores.py --modules insider`).
+Combo theme `insider` (sub-score `th_insider`, blank while nothing is admitted);
+`insider_score` and `th_insider` are in combo's COMPOSITE list.
+
+**What the factor study says** (`study.py --module insider`: 128 cells, 28.7 min, up to 205
+dates of the 206 stored: 183 backfilled every 14 sessions + 23 daily ones the first nightly
+run filled). Ranked across the WHOLE market, t:
+
+    metric              h1     h5     h20    h60
+    buyers_30d        -1.19   0.66   0.23   0.67
+    value_30d         -1.21   0.69   0.25   0.71
+    rare_buy_30d      -0.92   1.58   0.83   0.35
+    small_buy_30d     -1.01  -0.27  -0.88  -0.37
+    ceo_cfo_buy_30d   -0.70   1.21   0.15   0.13
+    insider_score     -1.06   0.79  -0.03   0.14
+    house_buy_60d      2.20   2.17   2.96   2.12
+    house_big_buy_60d  0.22   0.16   2.76   3.42
+
+READ IT PLAINLY: no Form 4 metric ranks stocks across the market, so combo admits none of
+them. Not a contradiction of phase 2: those effects are against SAME-LIQUIDITY peers in a
+few hundred names a month, while a rank IC over ~3,400 stocks (most at 0) compares buyers
+with everything -- and small companies trailed the market as a whole. The insider flags
+are FILTERS (the pages), not rankers. House: `house_big_buy_60d` is admitted at h20 and
+h60. `house_buy_60d` cleared the bar too and was EXCLUDED as a size proxy
+(`combo.EXCLUDED`, the `days_since_filing` precedent), measured over 29 sessions: the
+median cap of a stock members bought is ~17x the universe median (57x for $50K+ buys),
+Spearman +0.23 with mktcap, its t sits in the large tercile, and against same-size peers
+the average member purchase is t +1.28. The $50K+ flag stays: it beat same-size peers in
+both halves. Effect on combo, 10-26 recomputed with and without: Spearman 1.0 / 0.9998
+(h20 / h60), top-50 changes 1 / 0; p90 63.4 -> 61.8 and 64.3 -> 61.7 (a 0/1 metric ranks
+~50 for everyone else, so its theme compresses the scale slightly); House-bought names up
+to +7 / +13 points. Takes effect at the next combo run (session 10-27); earlier combo
+sessions keep the old admission (the known mixed-history issue). `oos.py` NOT re-run.
+Pre-insider study table kept: `data/_factor_study_pre_insider_20261027.parquet`.
+
+**The combined score: walk-forward PASS, and why that is weaker than it sounds**
+(`insider_score_wf.py`, `data/_insider_score_wf.json`). Design fixed before the test half
+was read: flags small / rare / CEO-CFO / good record, 32 "k of subset" rules, chosen on
+2016-09..mid-2021 with a 60-session embargo, tested on 2021-07..2026.
+    chosen on train: small & rare     train t 4.07 (1,605 episodes, mean +2.51pp, median -1.06)
+    test 2021-07..:                   t 2.61, 2,331 episodes, mean +2.04pp, median -0.27, beat peers 49.5%
+                                      (20 sessions t 2.63, 40 sessions t 2.01)
+    baseline, any $10K+ purchase:     test t 3.70, mean +1.10pp (8,159 episodes)
+READ IT PLAINLY: the pre-registered rule says PASS, so `insider_score` (0/1/2 = how many
+of small, rare) is emitted -- 28 names score 2 on 10-26. But the test half lifted nearly
+everything: 28 of 32 rules reached t >= 2 there (median 2.95) and the chosen one ranks
+24th. Its extra +0.94pp over plain insider buying comes with a LOWER t, so the score is NOT
+shown to add to "an insider bought". The baseline was added after the first run, as a
+reported comparison only (the PASS rule is unchanged); the page and the dictionary say
+both. Not blind either: phase 2 had printed each single flag's halves.
+
+**Nightly.** Two steps (33 now): `insider_score` before combo (depends on bars only;
+`_with_backfill`: fills missed sessions newest-first) and `insider_pages` after floor
+(depends on zones, fundamental). validate's WARN-only `insider` group gained "derived
+purchase table current" and "insider_score walk-forward". Hub card "Insiders".
+Measured tonight: `insider_score` 551 s on its FIRST run (23 missed sessions backfilled, ~20 s
+each; a normal night is the derived rebuild, 279 s, plus seconds); `insider_pages` 12 s
+in-process (68 s standalone, where the liquidity fifths load cold); `profiles` 232.7 s for
+105 pages, 0 failed (was ~214 s; budget 900). The 22:48 run that did this was the
+scheduler's 2-hourly repeat (`pythonw orchestrator.py --wait-for-lock 300`); the factor
+study was stopped while it held the lock and rerun afterwards. Page audit: 357 pages clean.
+Selftests: insider_page, insider_signals, scores (insider), candidates (badge field),
+floor, stock_profile (markers + insider block), metrics_doc, ui, insider, congress.
+
+**Found on the way, NOT fixed (follow-ups):**
+* PAM's market cap reads $6.94T in the fundamental store: an ADR's price times the
+  ORDINARY share count (25 shares per ADR). Every page that shows mktcap shows it.
+* Some foreign issuers report Form 4 prices in their home currency (Bradesco's officers
+  at BRL 17.98 against a ~$3 ADR); the Insiders page marks a price far from our close
+  with "?", but dollar totals for those filers are in the wrong currency.
+* The House parser leaves report boilerplate in some asset descriptions ("F S: New S O:
+  ...", "P T R Clerk of the House ..."); tickers are right, descriptions are not.
+* Combo's out-of-sample check (oos.py) was not re-run; if an insider metric is admitted,
+  combo changes from the next run.
+
 ## State at 2026-10-21 (early morning) — THE PROVIDER CHECK TELLS "NOT SENT" FROM "OUT OF BOUNDS"
 
 This settles the open decision in the section below. `_cross_scale_once` now splits what
@@ -3678,7 +3807,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-27 12:44 — do not edit by hand._
+_Generated 2026-10-27 23:38 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -3696,29 +3825,33 @@ _Generated 2026-10-27 12:44 — do not edit by hand._
 | `sec_facts` | quarterly | 7s | 5s | 26s | 60.0 min | 14 |
 | `sec_gap` | weekly | 12.1 min | 5.2 min | 12.1 min | 20.0 min | 13 |
 | `sec_edgar` | daily | 48s | 22s | 3.3 min | 30.0 min | 16 |
+| `insider` | daily | 21s | 21s | 21s | 30.0 min | 1 |
+| `congress` | daily | 17.2 min | 17.2 min | 17.2 min | 30.0 min | 1 |
 | `fundamental` | daily | 4.5 min | 3.0 min | 12.5 min | 180.0 min | 63 |
 | `events` | weekly | 12.1 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 14 |
 | `leaderboard` | weekly | 46.3 min | 40.0 min | 90.2 min ⚠ | 90.0 min | 15 |
 | `dip` | daily | 39s | 17s | 43s | 15.0 min | 63 |
+| `insider_score` | daily | 9.2 min | 9.2 min | 9.2 min | 30.0 min | 1 |
 | `combo` | daily | 39s | 17s | 39s | 15.0 min | 62 |
-| `candidates` | daily | 4s | 4s | 6s | 5.0 min | 19 |
-| `floor` | daily | 56s | 54s | 85s | 15.0 min | 13 |
+| `candidates` | daily | 25s | 4s | 25s | 5.0 min | 20 |
+| `floor` | daily | 2.5 min | 55s | 2.5 min | 15.0 min | 14 |
+| `insider_pages` | daily | 12s | 12s | 12s | 15.0 min | 1 |
 | `sectors` | daily | 4.6 min | 4.0 min | 7.6 min | 30.0 min | 13 |
 | `validate` | daily | 11.0 min | 7.0 min | 24.2 min | 60.0 min | 49 |
-| `explore` | daily | 16s | 8s | 42s | 5.0 min | 70 |
+| `explore` | daily | 22s | 8s | 42s | 5.0 min | 71 |
 | `snapshots` | daily | 20s | 4s | 40s | 5.0 min | 85 |
-| `profiles` | daily | 3.6 min | 23.6 min | 6.4 min | 15.0 min | 65 |
+| `profiles` | daily | 3.9 min | 23.3 min | 6.4 min | 15.0 min | 66 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 75 |
-| `dashboard` | daily | 1s | 0s | 2s | 2.0 min | 76 |
-| `docs` | daily | 3s | 0s | 3s | 5.0 min | 92 |
+| `dashboard` | daily | 1s | 0s | 2s | 2.0 min | 77 |
+| `docs` | daily | 1s | 0s | 3s | 5.0 min | 93 |
 
-**Daily total ≈ 112.0 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 138.6 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-27 12:44 — do not edit by hand._
+_Generated 2026-10-27 23:38 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -3727,7 +3860,7 @@ _Generated 2026-10-27 12:44 — do not edit by hand._
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
 | news | 123 | 173.0 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 12.0 | 2016-08 → 2026-10 |
-| scores | 122 | 323.9 | 2016-09 → 2026-10 |
+| scores | 122 | 326.4 | 2016-09 → 2026-10 |
 | fundamentals | 70 | 341.7 | 2009q2 → 2026q3 |
 | short volume | 75 | 56.8 | 2020-08 → 2026-10 |
 | flags | 61 | 5.2 | 2026-07-31 → 2026-10-26 |
@@ -3735,9 +3868,9 @@ _Generated 2026-10-27 12:44 — do not edit by hand._
 | zones | 42 | 23.7 | 2026-08-27 → 2026-10-26 |
 | fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
 | fundamentals (EDGAR filings) | 21 | 0.4 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 37 | 175.4 | — |
+| loose (macro, universe, jobs, study) | 40 | 179.5 | — |
 
-**`data/` total ≈ 1,448 MB.** `reports/` is a further 108 MB across 353 pages.
+**`data/` total ≈ 1,454 MB.** `reports/` is a further 114 MB across 357 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3745,7 +3878,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-27 12:44 — do not edit by hand._
+_Generated 2026-10-27 23:38 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -3753,17 +3886,18 @@ _Generated 2026-10-27 12:44 — do not edit by hand._
 | `fundamental` | 61 | 244 | 2016-09-26 → 2026-10-26 |
 | `hype` | 20 | 362 | 2016-10-25 → 2026-10-26 |
 | `dip` | 10 | 289 | 2016-09-27 → 2026-10-26 |
-| `combo` | 15 | 244 | 2016-11-04 → 2026-10-26 |
+| `insider` | 8 | 206 | 2016-09-06 → 2026-10-26 |
+| `combo` | 16 | 244 | 2016-11-04 → 2026-10-26 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-27 12:44 — do not edit by hand._
+_Generated 2026-10-27 23:38 — do not edit by hand._
 
-1,856 cells measured across 115 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
+1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
-**71 metric(s) reach |t| >= 2 at their best horizon.**
+**73 metric(s) reach |t| >= 2 at their best horizon.**
 | metric | module | best h | IC | t | hit |
 |---|---|---:|---:|---:|---:|
 | `fund_score` | fundamental | 20 | +0.0370 | +7.63 | 68% |

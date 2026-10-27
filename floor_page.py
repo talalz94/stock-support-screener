@@ -56,7 +56,7 @@ COLS = [
     ("vol", "$M / day", "20-day average dollar volume, millions (pattern requires >= $10M)", "vol"),
 ]
 IX = {c[0]: i for i, c in enumerate(COLS)}
-EXTRA = ["peak", "peak_date", "start", "start_date"]
+EXTRA = ["peak", "peak_date", "start", "start_date", "badge"]
 
 
 def _num(v, nd: int = 5):
@@ -115,6 +115,11 @@ def payload(asof: str) -> dict:
 
     c["above"] = c.close / c.floor - 1.0
     c = c.sort_values(["above", "ticker"]).reset_index(drop=True)
+    try:
+        import insider_signals as SIG
+        badges = SIG.badges(asof)
+    except Exception:                                            # noqa: BLE001
+        badges = {}
     rows = []
     for r in c.itertuples(index=False):
         sent = _num(sc.at[r.ticker, "sent_rank"]) if (r.ticker in sc.index and "sent_rank" in sc) else None
@@ -135,7 +140,7 @@ def payload(asof: str) -> dict:
         row[IX["hype"]] = _num(sc.at[r.ticker, "hype_score"], 1) if (r.ticker in sc.index and "hype_score" in sc) else None
         row[IX["sent"]] = None if sent is None else round(sent * 100, 1)
         row[IX["vol"]] = _num(r.dv20, 0)
-        row += [_num(r.peak, 2), r.peak_date, _num(r.start, 2), r.start_date]
+        row += [_num(r.peak, 2), r.peak_date, _num(r.start, 2), r.start_date, badges.get(r.ticker, "")]
         rows.append(row)
     return {"asof": asof, "rows": rows, "dates": ses, "series": series}
 
@@ -184,6 +189,11 @@ def _evidence() -> str:
     if h in nf and h in nr:
         out.append(f"<div><b>Controls:</b> a pullback with no floor {pp(nf[h]['ex'])}; a floor with no prior run "
                    f"{pp(nr[h]['ex'])} (t = {nr[h]['t_quarters']:+.2f}).</div>")
+    try:
+        import insider_signals as SIG
+        out.append(f"<div><b>insider</b> after a ticker = {ui.esc(SIG.BADGE_HELP)}</div>")
+    except Exception:                                            # noqa: BLE001
+        pass
     out.append("<div><b>History is flattered:</b> stocks that later vanished are under-represented, and "
                "they are exactly the beaten-down kind this pattern selects. Not a buy list; not advice.</div>")
     return "".join(out)
@@ -229,6 +239,7 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system
 .flax{fill:var(--muted);font:10px -apple-system,Segoe UI,Roboto,sans-serif}
 .flaxl{fill:var(--ink);font:600 10px -apple-system,Segoe UI,Roboto,sans-serif}
 .flno{color:var(--muted);font-size:11px}
+.flins{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--blkbg);color:var(--blk)}
 .flfoot{display:flex;gap:10px;align-items:center;margin-top:8px;color:var(--muted);font-size:11.5px}
 </style></head><body>
 @@NAV@@
@@ -318,7 +329,7 @@ function render(){
   var h='';
   for(var i=0;i<m.length;i++){
     var r=m[i], t=r[IX.ticker];
-    h+='<tr class="flr'+(open[t]?' open':'')+'" data-t="'+eh(t)+'"><td>'+chart(t,150,40,false,r[IX.floor])+'</td><td><b>'+eh(t)+'</b></td>';
+    h+='<tr class="flr'+(open[t]?' open':'')+'" data-t="'+eh(t)+'"><td>'+chart(t,150,40,false,r[IX.floor])+'</td><td><b>'+eh(t)+'</b>'+(r[NC+4]?'<span class="flins" title="'+eh(r[NC+4])+'">insider</span>':'')+'</td>';
     for(var j=1;j<K.length;j++) h+='<td class="'+(K[j]=='s'?'':'n')+'">'+fmt(r[j],K[j])+'</td>';
     h+='</tr>'; if(open[t]) h+=det(r);
   }

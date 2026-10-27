@@ -136,6 +136,14 @@ MODULE_DOC = {
         "like PLTR where the story is doing work the accounts do not explain. "
         "It is a MAGNITUDE, not a recommendation: high hype is neither buy nor "
         "sell until measured."),
+    "insider": (
+        "Who is buying with their own money. Company directors and officers (SEC "
+        "Form 4) and House members (Periodic Transaction Reports), from our own "
+        "stores. Measured as events first (insider_study.py, congress_study.py): "
+        "insider buying in general has no broad edge, but SMALL companies and RARE "
+        "buyers do, and House purchases of $50,001+ do. Each metric here is a "
+        "plain reading of one of those; combo admits one only through the factor "
+        "study. The Insiders and House trades pages print the measured tables."),
     "dip": (
         "Strong business, depressed price. A GATE, not a blend: a name must be "
         "top-30% on fundamentals AND top-50% on growth even to qualify, and "
@@ -365,6 +373,10 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
                     "on 3 pillars where a USD filer's rests on 4."),
     "th_attention": ("Theme: attention",
                      "0-100 within the score: volume, trade size, stretch"),
+    "th_insider": ("Theme: insider buying",
+                   "0-100 within the score: the insider and House metrics combo admitted at "
+                   "20 days. Blank while none is admitted -- admission is the factor "
+                   "study's, never hand-set"),
 
     "has_news": ("Has news", "1 if any article covered this name in the window"),
     "news_coverage": ("News coverage", "fraction of the window the store covers"),
@@ -403,6 +415,41 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
     "has_hype": ("Has hype score", "1 if enough components were present"),
     "bars_used": ("Bars used", "sessions of history behind the score"),
     "has_dip": ("Has dip score", "1 if it passed the gate and was scored"),
+    # --- insider and House buying (scores/insider.py, 2026-10-27). Measured
+    # results live in the study files and on the Insiders page, never typed here.
+    "buyers_30d": ("Insider buyers 30d",
+                   "directors and officers who bought the stock in the open market "
+                   "(Form 4 filings, last 30 days). Blank = the company files no Form 4s "
+                   "(e.g. a foreign private issuer), which is not the same as nobody buying."),
+    "value_30d": ("Insider $ bought 30d",
+                  "dollars those directors and officers paid, last 30 days of filings. Some "
+                  "foreign filers report in their home currency."),
+    "rare_buy_30d": ("Rare insider buy",
+                     "1 = a director or officer made a first open-market purchase in this "
+                     "company in 2+ years ($10K+ bought in 30 days). One of the two filters "
+                     "measured to matter; see the Insiders page for the numbers."),
+    "small_buy_30d": ("Small-company insider buy",
+                      "1 = $10K+ bought by directors/officers in 30 days AND the stock is in "
+                      "the bottom two liquidity fifths. The strongest single filter measured; "
+                      "see the Insiders page."),
+    "ceo_cfo_buy_30d": ("CEO/CFO bought",
+                        "1 = the CEO or CFO bought $10K+ in the last 30 days of filings."),
+    "house_buy_60d": ("House buyers 60d",
+                      "House members who reported buying the stock (reports filed in the last "
+                      "60 days). House only; paper filings unread. Measured: the average member "
+                      "purchase predicts nothing."),
+    "house_big_buy_60d": ("House $50K+ buy",
+                          "1 = a House member reported a $50,001+ purchase in the last 60 days "
+                          "of filings -- the one House result that held in both halves of "
+                          "the history (see the House trades page)."),
+    "insider_score": ("Insider score",
+                      "how many of {small company, rare buyer} hold for the last 30 days of "
+                      "director/officer buying: 0, 1 or 2. 2 is the rule chosen on 2016-2021 "
+                      "and tested on 2021-2026 (insider_score_wf.py); emitted only while that "
+                      "test reads PASS. The test years were kind to insider buying in general, "
+                      "so whether 2 beats plain insider buying is NOT shown -- the Insiders page "
+                      "prints both. A fat-tail bet: most such stocks still trail their peers, a "
+                      "few win big."),
     # sector_score.py -- not a score module; joined onto rows by explore.collect.
     "sector_score": ("Sector score",
                      "0-100, the stock's SECTOR, not the stock: average rank of the "

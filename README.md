@@ -117,6 +117,16 @@ report type has a folder with `latest.html` in it (dated copies beside it).
   35-70% pullback, a floor tested 3+ times over 3+ months, the close back at it), drawn
   with the floor line. Rare -- usually none or one on a day. Measured: +4.3pp at 40 days
   (t +1.36, not proven) with the floor breaking in 32% of cases; near misses measured WORSE
+- `reports\insider\latest.html` — **Insiders**: directors' and officers' open-market
+  purchases (SEC Form 4) from our own store, filterable like a paid scanner (window,
+  insiders, $, role, 10b5-1, sector, market cap, rarity, buyer record, liquidity fifth,
+  support) -- with each filter's MEASURED result printed beside it. Small companies and
+  rare buyers measured to matter; Ross's screen did not. "insider" after a ticker on
+  Candidates / Floor retest / Explore = rare or small-company buying (or a House $50K+
+  purchase) at an AT/NEAR support level -- that combination is unmeasured
+- `reports\insider\house.html` — **House trades**: members' Periodic Transaction Reports,
+  $50,001+ stock purchases highlighted (the one House result that held). No Senate (no
+  automated access), paper filings unread. Local only: 5 U.S.C. 13107(c)
 - `reports\sectors\latest.html` — **Sectors**: every sector and sub-industry against the
   market (1/3/6/12-month, share above the 200-day average, highs minus lows), the
   out-of-sample-validated sector score, and each group's stocks in a category today.
@@ -420,6 +430,10 @@ as bankruptcy text and asserts no metric moves.
 | `lowclimb_study.py` | measures "lower low, now climbing" over 245 non-overlapping dates since 2017: no edge, worse in tech. Builds `data/_lowclimb_panel.parquet` once; `--rebuild` |
 | `floorretest_study.py` | the SOFI pattern, defined and measured: event study 2017-2026, controls, near misses, floor-break rate; `current()` lists today's matches. `--rebuild`, `--current` |
 | `floor_page.py` | the Floor-retest page, `reports/zones/floor.html`; the `floor` step. `--selftest` |
+| `insider_signals.py` | the one derivation every insider page, badge and score reads: `data/insider/_derived.parquet` (every purchase filing since 2006 with rarity, buyer record, its own 60-session result). `--build`, `--show T`, `--selftest` |
+| `insider_page.py` | the Insiders and House trades pages; the `insider_pages` step. `--selftest` |
+| `insider_score_wf.py` | walk-forward test of a combined insider score (chosen 2016-21, tested 2021-26), with a same-split baseline; decides whether `insider_score` is emitted |
+| `scores/insider.py` | score module 6: insider and House buying readings per stock; the `insider_score` step |
 | `sectors.py` | sector and sub-industry groups (energy split into producers, services, refiners, pipelines, gas and electric utilities, coal...) and point-in-time equal-weight returns; caches `data/_wide_1d.parquet` |
 | `sector_study.py` | does sector/sub-industry momentum, breadth or quality predict the next 1-3 months? walk-forward composite |
 | `season_study.py` | does same-calendar-month history predict? sector, sub-industry, stock; energy calendar profiles |
