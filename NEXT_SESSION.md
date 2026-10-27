@@ -190,6 +190,34 @@ store (half of all purchases are in companies since delisted, often failures), s
 results are FLATTERED; small-cap spreads and costs are not modelled.
 Phase 3 candidate score: small x rare (x CEO/CFO), validated walk-forward before use.
 
+**House study, `congress_study.py`.** Store after `--reparse` (both layouts): 6,979 PTRs
+2016-2026, 41,019 trades (24,026 stock rows); coverage by year in the summary (electronic
+reports 0-25 unreadable a year; paper 315 in 2016 -> 53 in 2026). Purchases = [ST], ttype P,
+`kind` "trade" (dividend reinvestments, gifts, exercises out), current-universe tickers:
+9,045. Event = the day the report was FILED; entry the next session. 27 tests, ~1.4 by chance:
+
+    test (60 sessions unless noted)           episodes  mean pp  median pp  beat peers   t     t 1st / 2nd
+    any member stock purchase                    4,530    +0.12     -0.74      47.7%   1.28    0.26 / 1.61
+    purchase >= $15,001                          1,077    +1.37     +0.25      50.5%   1.73    1.48 / 0.96
+    PURCHASE >= $50,001                            376    +3.46     +1.94      57.7%   3.36    2.76 / 2.10  (40d +1.84, t 2.34)
+    purchase >= $250,001                            55    +3.71     +5.00      63.6%   0.74    (too few)
+    call options bought                             38    -3.18     -1.10      42.1%  -0.84
+    2+ members bought within 30 days               652    +0.12     -0.50      48.9%   0.73
+    sale >= $15,001 (selling)                    1,295    +0.39     -0.37      49.0%   1.37    (not bearish)
+    dividend reinvestment (CONTROL)                119    +1.26     +1.96      58.8%  -0.04    (~0, as it should be)
+    spouse / joint / child purchase              3,011    +0.09     -0.77      47.5%   0.84
+    entering on the TRADE date (not tradeable)   4,619    -0.05     -0.67      47.9%  -0.11
+
+READ IT PLAINLY: the average House member's stock purchase predicts nothing -- not even
+entered on the trade date, which no outsider can do, so the reporting delay is not what
+hides an edge. LARGE purchases ($50K+) are the exception, stable in both halves, and the
+one result in either study where the typical (median) event beats its peers. Report lag:
+median 28 days, 10% over 245 days. House only; paper filings unread.
+
+**Bugs met and fixed on the way:** a lone UTF-16 surrogate in one 2020 PDF's text stopped
+the first backfill at Parquet (now dropped at extraction); a filer's "3031-04-30" trade
+date overflowed pandas (dates outside 1995..next year are blank, at parse and on read).
+
 ## State at 2026-10-27 — A WATCHLIST TRACKED DAILY: "GAINERS AT SUPPORT" FROM 10-23
 
 The user asked for stocks, by sector, that were often among the market's biggest daily

@@ -159,9 +159,17 @@ def _amount(s: str) -> tuple[float, float]:
     return np.nan, np.nan
 
 
+def _plausible(iso: str | None) -> str | None:
+    """A trade date a filer could mean: 1995 .. next year. Filers mistype years (a
+    "3031-04-30" stopped the first study run); an impossible date is blank, not kept."""
+    if not isinstance(iso, str):
+        return None
+    return iso if "1995-01-01" <= iso <= f"{date.today().year + 1}-12-31" else None
+
+
 def _mdY(s: str) -> str | None:
     try:
-        return datetime.strptime(s, "%m/%d/%Y").strftime("%Y-%m-%d")
+        return _plausible(datetime.strptime(s, "%m/%d/%Y").strftime("%Y-%m-%d"))
     except (TypeError, ValueError):
         return None
 
@@ -257,7 +265,7 @@ _OPTION = re.compile(r"\b(call|put)s?\b|\boption", re.I)
 
 def _mdY1(s: str) -> str | None:
     try:
-        return datetime.strptime(s, "%m/%d/%Y").strftime("%Y-%m-%d")
+        return _plausible(datetime.strptime(s, "%m/%d/%Y").strftime("%Y-%m-%d"))
     except (TypeError, ValueError):
         return None
 
@@ -327,6 +335,9 @@ def parse_pdf(pdf: bytes) -> tuple[str, list[dict]]:
     import pypdf
     rd = pypdf.PdfReader(io.BytesIO(pdf))
     text = "\n".join((p.extract_text() or "") for p in rd.pages)
+    # Some PDFs' fonts extract to lone UTF-16 surrogates, which Parquet cannot store
+    # (a 2020 report stopped the first backfill on '\udf4e'): drop them here, once.
+    text = text.encode("utf-8", "ignore").decode("utf-8")
     if len(text.strip()) < 50:
         return "scanned", []
     old = bool(re.search(r"FILING\s+STATUS\s*:", text, re.I))
@@ -473,6 +484,8 @@ def read() -> pd.DataFrame:
     if not TRADES.exists():
         return pd.DataFrame(columns=COLS)
     df = pd.read_parquet(TRADES)
+    for c in ("trans_date", "notif_date"):            # rows stored before _plausible existed
+        df[c] = df[c].map(_plausible)
     df = (df.sort_values(["filing_date", "doc_id"])
             .drop_duplicates(["member", "owner", "ticker", "asset_type", "ttype", "trans_date", "amount_lo",
                               "amount_hi", "option_kind"], keep="last"))

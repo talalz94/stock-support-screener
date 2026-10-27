@@ -54,9 +54,9 @@ def _events(tr: pd.DataFrame, date_col: str) -> pd.DataFrame:
     g = g.rename(columns={date_col: "event_date"}).sort_values(["ticker", "event_date"])
     n30 = []
     for t, x in g.groupby("ticker", sort=False):
-        d = pd.to_datetime(x.event_date).values.astype("datetime64[D]")
+        d = pd.to_datetime(x.event_date, errors="coerce").values.astype("datetime64[D]")
         mem = tr[tr.ticker == t][[date_col, "member"]]
-        md = pd.to_datetime(mem[date_col]).values.astype("datetime64[D]")
+        md = pd.to_datetime(mem[date_col], errors="coerce").values.astype("datetime64[D]")
         for di in d:
             w = (md > di - np.timedelta64(30, "D")) & (md <= di)
             n30.append(int(mem.member[w].nunique()))
@@ -107,7 +107,7 @@ def run(verbose: bool = True) -> dict:
     cf = panel.measure(_events(buys.dropna(subset=["trans_date"]), "trans_date"))
     cf_eps = ER.first_in_window(cf, GAP, panel)
     counterfactual = [ER.summarize(cf_eps, h, "entering on the TRADE date (not tradeable)") for h in ER.HORIZONS]
-    lag = (pd.to_datetime(buys.filing_date) - pd.to_datetime(buys.trans_date)).dt.days
+    lag = (pd.to_datetime(buys.filing_date, errors="coerce") - pd.to_datetime(buys.trans_date, errors="coerce")).dt.days
     pd.concat(all_ev, ignore_index=True).to_parquet(OUT_EVENTS, index=False)
     out = {"measured_on": datetime.now(timezone.utc).isoformat(timespec="seconds"),
            "tests": len(results), "expected_by_chance": round(len(results) * 0.05, 1),
