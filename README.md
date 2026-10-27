@@ -433,6 +433,7 @@ as bankruptcy text and asserts no metric moves.
 | `insider_signals.py` | the one derivation every insider page, badge and score reads: `data/insider/_derived.parquet` (every purchase filing since 2006 with rarity, buyer record, its own 60-session result). `--build`, `--show T`, `--selftest` |
 | `insider_page.py` | the Insiders and House trades pages; the `insider_pages` step. `--selftest` |
 | `insider_score_wf.py` | walk-forward test of a combined insider score (chosen 2016-21, tested 2021-26), with a same-split baseline; decides whether `insider_score` is emitted |
+| `store_lock.py` | one writer at a time per store: `<store>/.write.lock` with pid + start time, stale-holder takeover; used by every writer in `insider.py` and `congress.py`. `--selftest` |
 | `scores/insider.py` | score module 6: insider and House buying readings per stock; the `insider_score` step |
 | `sectors.py` | sector and sub-industry groups (energy split into producers, services, refiners, pipelines, gas and electric utilities, coal...) and point-in-time equal-weight returns; caches `data/_wide_1d.parquet` |
 | `sector_study.py` | does sector/sub-industry momentum, breadth or quality predict the next 1-3 months? walk-forward composite |
