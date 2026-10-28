@@ -401,6 +401,59 @@ def ingest_edgar(since: date | None = None, until: date | None = None, verbose: 
         return _ingest_edgar(since, until, verbose)
 
 
+# 100 entries a page. `type=4` is a PREFIX match -- 424B2 prospectuses outnumber Form 4s --
+# and each Form 4 is listed once per party, so the whole feed is read: it ended by itself at
+# 37 pages (3,663 entries, 638 Form 4s, 17s) on 2026-10-28; 25 pages would have missed 23%.
+FEED_PAGES = 60
+
+
+def _feed_form4(max_pages: int = FEED_PAGES) -> list[dict]:
+    """Form 4 / 4/A from EDGAR's latest-filings feed: the filings whose daily index is
+    not out yet.
+
+    SEC publishes day D's index at ~22:00 ET -- 07:00 here, two hours AFTER the 05:00 run
+    -- so reading indexes alone, a Form 4 filed on Tuesday reached the store on Thursday
+    (measured 2026-10-28: the 05:00 step found "0 new"; the feed listed 341 filed on 10-27). `edgar.current_feed` solves this for 10-Ks but keeps only those forms. Best
+    effort: a page that fails ends the read, and anything missed is in the next index.
+    """
+    import edgar
+    out: dict[str, dict] = {}
+    for page in range(max_pages):
+        try:
+            st, body = _get(edgar.FEED_URL.format(form="4", start=page * 100))
+            if st != 200:
+                break
+            n, items = _parse_form4_feed(body)
+            for it in items:
+                out.setdefault(it["accession"], it)
+            if n < 100:
+                break
+        except Exception:                                        # noqa: BLE001
+            break
+    return list(out.values())
+
+
+def _parse_form4_feed(body: bytes) -> tuple[int, list[dict]]:
+    """(entries on the page, Form 4/4-A filings in it). Each filing is listed once per
+    party -- issuer and every reporting owner -- and any party's CIK reaches the file."""
+    import xml.etree.ElementTree as ET
+    atom = "{http://www.w3.org/2005/Atom}"
+    entries = list(ET.fromstring(body).iter(atom + "entry"))
+    items = []
+    for e in entries:
+        cat = e.find(atom + "category")
+        if cat is None or cat.get("term") not in FORMS:
+            continue
+        adsh = (e.findtext(atom + "id") or "").rsplit("=", 1)[-1].strip()
+        m = re.search(r"Filed:\s*(?:</b>)?\s*(\d{4}-\d{2}-\d{2})", e.findtext(atom + "summary") or "")
+        c = re.search(r"\((\d{4,10})\)\s*\((?:Issuer|Reporting|Filer|Subject)\)\s*$",
+                      (e.findtext(atom + "title") or "").strip())
+        if m and c and re.fullmatch(r"\d{10}-\d{2}-\d{6}", adsh):
+            items.append({"accession": adsh, "filing_date": m.group(1),
+                          "path": f"edgar/data/{int(c.group(1))}/{adsh}.txt"})
+    return len(entries), items
+
+
 def _ingest_edgar(since: date | None = None, until: date | None = None, verbose: bool = True) -> dict:
     """Form 4 / 4/A filed on [since, until] and not yet in the ledger -> trades_edgar."""
     import edgar
@@ -425,7 +478,13 @@ def _ingest_edgar(since: date | None = None, until: date | None = None, verbose:
             elif st != 404:
                 missing_days.append(d.isoformat())
         d += timedelta(days=1)
-    todo = list({t["accession"]: t for t in todo}.values())
+    # ...plus what the latest-filings feed lists that no index has yet (see _feed_form4).
+    fed = [f for f in _feed_form4() if f["accession"] not in done and since.isoformat() <= f["filing_date"]]
+    n_index = len({t["accession"] for t in todo})
+    todo = list({t["accession"]: t for t in fed + todo}.values())   # an index row wins over a feed row
+    if verbose:
+        log(f"latest-filings feed: {len(fed)} Form 4 filing(s) not yet in the ledger, "
+            f"{len(todo) - n_index} of them in no index yet")
     if verbose:
         log(f"EDGAR {since}..{until}: {days} index day(s), {len(todo):,} new Form 4 filing(s) to fetch")
     frames, ledger_rows, failed = [], [], 0
@@ -689,6 +748,22 @@ def selftest() -> int:
     assert df.iloc[1].trans_code == "A" and np.isnan(df.iloc[1].value), "a zero-price grant has no value"
     p = purchases(df.assign(ticker="MSM"))
     assert len(p) == 1, "the grant is not a purchase"
+    # Latest-filings feed: one filing listed per party -> one item; other forms dropped.
+    def _entry(title, form, adsh, filed="2026-10-27"):
+        return (f"<entry><title>{title}</title><summary type=\"html\"> &lt;b&gt;Filed:&lt;/b&gt; {filed} "
+                f"&lt;b&gt;AccNo:&lt;/b&gt; {adsh}</summary><category scheme=\"https://www.sec.gov/\" "
+                f"label=\"form type\" term=\"{form}\"/><id>urn:tag:sec.gov,2008:accession-number={adsh}</id></entry>")
+    atom = ('<?xml version="1.0" encoding="ISO-8859-1" ?><feed xmlns="http://www.w3.org/2005/Atom">'
+            + _entry("4 - Doe Jane A (0002000001) (Reporting)", "4", "0001003078-26-000112")
+            + _entry("4 - Example Corp (0001003078) (Issuer)", "4", "0001003078-26-000112")
+            + _entry("4/A - Example Corp (0001003078) (Issuer)", "4/A", "0001003078-26-000113", "2026-10-26")
+            + _entry("144 - Example Corp (0001003078) (Subject)", "144", "0001003078-26-000114")
+            + _entry("4 - no cik here", "4", "0001003078-26-000115") + "</feed>").encode("latin-1")
+    n, items = _parse_form4_feed(atom)
+    assert n == 5 and [i["accession"] for i in items] == ["0001003078-26-000112"] * 2 + ["0001003078-26-000113"], items
+    assert items[0] == {"accession": "0001003078-26-000112", "filing_date": "2026-10-27",
+                        "path": "edgar/data/2000001/0001003078-26-000112.txt"}, items[0]
+    assert items[2]["filing_date"] == "2026-10-26" and items[2]["path"].startswith("edgar/data/1003078/")
     # Roles and entities
     assert role_of(False, True, False, False, "SVP & Principal Financial Officer") == "CFO"
     assert role_of(True, False, False, False, "Chairman of the Board") == "Chair"

@@ -44,6 +44,35 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-28 — FORM 4s NO LONGER ARRIVE A DAY AND A HALF LATE
+
+The 05:00 `insider` step logged "0 new Form 4 filing(s) over 17 index day(s)" while 341
+had been filed on 10-27. SEC publishes day D's daily index at ~22:00 ET = **07:00 here,
+two hours after the run**, so a Tuesday filing reached the store on Thursday. `sec_edgar`
+solved this for 10-Ks with the latest-filings feed (`edgar.current_feed`); the insider
+step never had it.
+
+`insider._feed_form4` now reads that feed for Form 4 / 4/A and adds what is not in the
+ledger to the same fetch list as the index rows (`_parse_form4_feed` parses a page; an
+index row wins over a feed row for the same accession). Best effort: a failed page ends
+the read, and anything missed still comes from the next index -- every run re-reads each
+index day from the first uncovered quarter, so feeding a filing early never skips its day.
+
+Measured 2026-10-28, against the index that appeared at 07:00:
+- the feed listed exactly the 341 Form 4s that 10-27's index then held (plus 10-26's,
+  already stored); paths built from a feed CIK -- issuer or reporting owner -- fetch the
+  same file (12/12 sampled).
+- **`type=4` is a PREFIX match**: of 3,663 entries, 1,586 were 424B2 prospectuses and
+  1,316 Form 4. Each Form 4 is listed once per party, so 638 filings in all. A 25-page
+  cap missed 23% of them, so `FEED_PAGES = 60`; the feed ended by itself at 37 pages.
+- cost: the step went 9 s -> **28 s** (17 s of it the feed), timeout 1,800 s.
+- not covered: Form 4s filed after ~20:00 ET (the run's start) on day D wait for the
+  index, as before. Selftest covers the parser (party dedup, 4/A kept, 144 dropped,
+  entry without a CIK dropped).
+
+The study and score are unchanged: they measure from the filing date and enter the next
+session, so this moves when a buy shows on the pages, not what it predicts.
+
 ## State at 2026-10-27 (night) — INSIDER PHASE 3: PAGES, BADGES, A SCORE, AND WHAT THE WALK-FORWARD DID AND DID NOT SHOW
 
 Phase 3 of the insider module (phases 1-2: the section below). Built ONLY on what phase 2
@@ -3823,70 +3852,70 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-27 23:38 — do not edit by hand._
+_Generated 2026-10-28 05:31 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 38s | 8s | 53s | 2.0 min | 58 |
-| `bars` | daily | 5.9 min | 50s | 5.9 min | 10.0 min | 58 |
-| `macro` | daily | 3.8 min | 1.6 min | 3.8 min | 15.0 min | 58 |
-| `news` | daily | 20s | 5s | 20s | 10.0 min | 58 |
-| `senti_cache` | daily | 15s | 3s | 22s | 10.0 min | 58 |
-| `sentiment` | daily | 80s | 16s | 80s | 15.0 min | 59 |
-| `bounce` | daily | 86s | 39s | 86s | 15.0 min | 59 |
-| `zones` | daily | 2.7 min | 86s | 4.3 min | 30.0 min | 42 |
-| `shortvol` | daily | 6s | 4s | 8s | 10.0 min | 56 |
-| `hype` | daily | 4.2 min | 2.1 min | 5.6 min | 120.0 min | 59 |
-| `provider` | daily | 64.7 min | 65.1 min | 73.8 min | 120.0 min | 51 |
+| `universe` | daily | 6s | 7s | 53s | 2.0 min | 59 |
+| `bars` | daily | 36s | 50s | 5.9 min | 10.0 min | 59 |
+| `macro` | daily | 62s | 1.6 min | 3.8 min | 15.0 min | 59 |
+| `news` | daily | 14s | 5s | 20s | 10.0 min | 59 |
+| `senti_cache` | daily | 6s | 3s | 22s | 10.0 min | 59 |
+| `sentiment` | daily | 23s | 16s | 80s | 15.0 min | 60 |
+| `bounce` | daily | 43s | 39s | 86s | 15.0 min | 60 |
+| `zones` | daily | 54s | 82s | 4.3 min | 30.0 min | 43 |
+| `shortvol` | daily | 4s | 4s | 8s | 10.0 min | 57 |
+| `hype` | daily | 79s | 2.0 min | 5.6 min | 120.0 min | 60 |
+| `provider` | daily | 2.4 min | 65.1 min | 73.8 min | 120.0 min | 52 |
 | `sec_facts` | quarterly | 7s | 5s | 26s | 60.0 min | 14 |
 | `sec_gap` | weekly | 12.1 min | 5.2 min | 12.1 min | 20.0 min | 13 |
-| `sec_edgar` | daily | 48s | 22s | 3.3 min | 30.0 min | 16 |
-| `insider` | daily | 21s | 21s | 21s | 30.0 min | 1 |
-| `congress` | daily | 17.2 min | 17.2 min | 17.2 min | 30.0 min | 1 |
-| `fundamental` | daily | 4.5 min | 3.0 min | 12.5 min | 180.0 min | 63 |
+| `sec_edgar` | daily | 68s | 25s | 3.3 min | 30.0 min | 17 |
+| `insider` | daily | 9s | 15s | 21s | 30.0 min | 2 |
+| `congress` | daily | 2s | 8.6 min | 17.2 min | 30.0 min | 2 |
+| `fundamental` | daily | 5.0 min | 3.1 min | 12.5 min | 180.0 min | 64 |
 | `events` | weekly | 12.1 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 14 |
 | `leaderboard` | weekly | 46.3 min | 40.0 min | 90.2 min ⚠ | 90.0 min | 15 |
-| `dip` | daily | 39s | 17s | 43s | 15.0 min | 63 |
-| `insider_score` | daily | 9.2 min | 9.2 min | 9.2 min | 30.0 min | 1 |
-| `combo` | daily | 39s | 17s | 39s | 15.0 min | 62 |
-| `candidates` | daily | 25s | 4s | 25s | 5.0 min | 20 |
-| `floor` | daily | 2.5 min | 55s | 2.5 min | 15.0 min | 14 |
-| `insider_pages` | daily | 12s | 12s | 12s | 15.0 min | 1 |
-| `sectors` | daily | 4.6 min | 4.0 min | 7.6 min | 30.0 min | 13 |
-| `validate` | daily | 11.0 min | 7.0 min | 24.2 min | 60.0 min | 49 |
-| `explore` | daily | 22s | 8s | 42s | 5.0 min | 71 |
-| `snapshots` | daily | 20s | 4s | 40s | 5.0 min | 85 |
-| `profiles` | daily | 3.9 min | 23.3 min | 6.4 min | 15.0 min | 66 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 75 |
-| `dashboard` | daily | 1s | 0s | 2s | 2.0 min | 77 |
-| `docs` | daily | 1s | 0s | 3s | 5.0 min | 93 |
+| `dip` | daily | 29s | 17s | 43s | 15.0 min | 64 |
+| `insider_score` | daily | 2.6 min | 5.9 min | 9.2 min | 30.0 min | 2 |
+| `combo` | daily | 29s | 17s | 39s | 15.0 min | 63 |
+| `candidates` | daily | 4s | 4s | 25s | 5.0 min | 21 |
+| `floor` | daily | 38s | 54s | 2.5 min | 15.0 min | 15 |
+| `insider_pages` | daily | 5s | 9s | 12s | 15.0 min | 2 |
+| `sectors` | daily | 50s | 3.9 min | 7.6 min | 30.0 min | 14 |
+| `validate` | daily | 7.1 min | 7.0 min | 24.2 min | 60.0 min | 50 |
+| `explore` | daily | 14s | 8s | 42s | 5.0 min | 72 |
+| `snapshots` | daily | 17s | 4s | 20s | 5.0 min | 86 |
+| `profiles` | daily | 4.7 min | 22.9 min | 6.4 min | 15.0 min | 67 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 76 |
+| `dashboard` | daily | 1s | 0s | 2s | 2.0 min | 78 |
+| `docs` | daily | 0s | 0s | 3s | 5.0 min | 94 |
 
-**Daily total ≈ 138.6 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 126.0 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-27 23:38 — do not edit by hand._
+_Generated 2026-10-28 05:31 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 249.2 | 2016-09 → 2026-10 |
-| bars 1h | 5 | 0.8 | 2026-06 → 2026-10 |
+| bars 1d | 122 | 249.4 | 2016-09 → 2026-10 |
+| bars 1h | 5 | 0.9 | 2026-06 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
-| news | 123 | 173.0 | 2016-08 → 2026-10 |
+| news | 123 | 173.3 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 12.0 | 2016-08 → 2026-10 |
-| scores | 122 | 326.4 | 2016-09 → 2026-10 |
+| scores | 122 | 327.8 | 2016-09 → 2026-10 |
 | fundamentals | 70 | 341.7 | 2009q2 → 2026q3 |
-| short volume | 75 | 56.8 | 2020-08 → 2026-10 |
-| flags | 61 | 5.2 | 2026-07-31 → 2026-10-26 |
-| rejects | 21 | 7.9 | 2026-09-28 → 2026-10-26 |
-| zones | 42 | 23.7 | 2026-08-27 → 2026-10-26 |
+| short volume | 75 | 56.9 | 2020-08 → 2026-10 |
+| flags | 62 | 5.3 | 2026-07-31 → 2026-10-27 |
+| rejects | 22 | 8.3 | 2026-09-28 → 2026-10-27 |
+| zones | 43 | 24.2 | 2026-08-27 → 2026-10-27 |
 | fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
 | fundamentals (EDGAR filings) | 21 | 0.4 | 2009q4 → 2026q3 |
 | loose (macro, universe, jobs, study) | 40 | 179.5 | — |
 
-**`data/` total ≈ 1,454 MB.** `reports/` is a further 114 MB across 357 pages.
+**`data/` total ≈ 1,457 MB.** `reports/` is a further 117 MB across 366 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3894,22 +3923,22 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-27 23:38 — do not edit by hand._
+_Generated 2026-10-28 05:31 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 387 | 2016-09-27 → 2026-10-26 |
-| `fundamental` | 61 | 244 | 2016-09-26 → 2026-10-26 |
-| `hype` | 20 | 362 | 2016-10-25 → 2026-10-26 |
-| `dip` | 10 | 289 | 2016-09-27 → 2026-10-26 |
-| `insider` | 8 | 206 | 2016-09-06 → 2026-10-26 |
-| `combo` | 16 | 244 | 2016-11-04 → 2026-10-26 |
+| `sentiment` | 26 | 388 | 2016-09-27 → 2026-10-27 |
+| `fundamental` | 61 | 245 | 2016-09-26 → 2026-10-27 |
+| `hype` | 20 | 363 | 2016-10-25 → 2026-10-27 |
+| `dip` | 10 | 290 | 2016-09-27 → 2026-10-27 |
+| `insider` | 8 | 207 | 2016-09-06 → 2026-10-27 |
+| `combo` | 16 | 245 | 2016-11-04 → 2026-10-27 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-27 23:38 — do not edit by hand._
+_Generated 2026-10-28 05:31 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
