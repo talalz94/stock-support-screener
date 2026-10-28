@@ -73,6 +73,15 @@ Measured 2026-10-28, against the index that appeared at 07:00:
 The study and score are unchanged: they measure from the filing date and enter the next
 session, so this moves when a buy shows on the pages, not what it predicts.
 
+**The watchlist refresh task stalled on approvals (same day).** Its first scheduled run
+(10:31) stopped at its second shell command and never moved, even after an approval, so
+the dashboard was refreshed by hand. The task now needs two FIXED commands, so an approval
+(or an exact allow rule) covers them for good: `watchlist_track.py --refresh` (waits for a
+live orchestrator lock -- a dead writer's lock does not count -- measures, prints one
+`VERDICT:` line) and `--mark-uploaded` (writes summary.json's own session to
+last_uploaded.txt; no typed date). It no longer deletes the old asset files, since a delete
+may always need a person. Approvals given in a run are kept on the task.
+
 ## State at 2026-10-27 (night) — INSIDER PHASE 3: PAGES, BADGES, A SCORE, AND WHAT THE WALK-FORWARD DID AND DID NOT SHOW
 
 Phase 3 of the insider module (phases 1-2: the section below). Built ONLY on what phase 2
