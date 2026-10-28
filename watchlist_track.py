@@ -28,12 +28,20 @@ names have a bar for it: a part-filled day (a backfill of a few names before the
 nightly fetch) would otherwise be read as the latest close for the few it covers.
 
 Run: python watchlist_track.py --name gainers_at_support_20261023 --entry 2026-10-23
+
+THE DAILY DASHBOARD REFRESH (a scheduled task) uses two fixed commands, so that each can be
+allowed by an exact permission rule and an unattended run never stops for an approval:
+    --refresh        wait for the nightly run's lock, measure, and print one VERDICT line:
+                     whether there is a session the dashboard does not have yet
+    --mark-uploaded  after the upload, record the session summary.json holds (never a date
+                     typed in) in last_uploaded.txt
 """
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timezone
 
 import numpy as np
@@ -46,6 +54,8 @@ ROOT = config.DATA / "watchlists"
 MIN_PRICE, MIN_DV = 5.0, 20e6           # the list's own eligibility, for the benchmark
 FAIL_BELOW = 0.90                       # a low under 90% of the level = failed
 FULL_DAY = 0.90                         # a session counts once 90% of entry-day names have a bar
+UPLOADED = "last_uploaded.txt"          # the session the dashboard was last given
+LOCK_WAIT_H, LOCK_POLL_S = 6.0, 300     # --refresh: how long to wait for the nightly run
 
 
 def _status(close: float, entry: float, level: float, failed: bool) -> str:
@@ -140,6 +150,50 @@ def track(name: str, entry: str, verbose: bool = True) -> dict:
     return S
 
 
+def _nightly_running() -> bool:
+    """The orchestrator's lock is held by a live process (a lock left by a dead one is not)."""
+    if not config.ORCH_LOCK_FILE.exists():
+        return False
+    import store_lock
+    try:
+        info = json.loads(config.ORCH_LOCK_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return True                                          # being written: treat as held
+    return store_lock.pid_alive(info.get("pid"), info.get("started")) is not False
+
+
+def refresh(name: str, entry: str) -> int:
+    """Wait for the nightly run, measure, and say whether the dashboard needs the result."""
+    end = time.time() + LOCK_WAIT_H * 3600
+    while _nightly_running():
+        if time.time() >= end:
+            print(f"VERDICT: stop -- the nightly run still holds its lock after {LOCK_WAIT_H:g} h; nothing measured")
+            return 2
+        time.sleep(LOCK_POLL_S)
+    S = track(name, entry)
+    d = ROOT / name
+    last = (d / UPLOADED).read_text(encoding="utf-8").strip() if (d / UPLOADED).exists() else ""
+    if not S["sessions"]:
+        print(f"VERDICT: stop -- no full session after {entry} yet")
+    elif S["latest"] == last:
+        print(f"VERDICT: stop -- no new session since {last}")
+    else:
+        print(f"VERDICT: upload -- session {S['latest']} is new (the dashboard has {last or 'none'})")
+        print(f"FILES: {d / 'tracking.csv'}")
+        print(f"FILES: {d / 'summary.json'}")
+    return 0
+
+
+def mark_uploaded(name: str) -> int:
+    """Record the session in summary.json as the one the dashboard now has."""
+    d = ROOT / name
+    latest = json.loads((d / "summary.json").read_text(encoding="utf-8"))[0]["latest"]
+    datetime.strptime(latest, "%Y-%m-%d")                    # a date, nothing else
+    (d / UPLOADED).write_text(latest + "\n", encoding="utf-8")
+    print(f"{name}: recorded {latest} in {UPLOADED}")
+    return 0
+
+
 def selftest() -> int:
     assert _status(105, 100, 95, False) == "per plan"
     assert _status(99, 100, 95, False) == "held"
@@ -154,12 +208,20 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--name")
     ap.add_argument("--entry")
+    ap.add_argument("--refresh", action="store_true", help="wait for the nightly run, measure, print a VERDICT")
+    ap.add_argument("--mark-uploaded", action="store_true", help="record summary.json's session as uploaded")
     ap.add_argument("--selftest", action="store_true")
     a = ap.parse_args()
     if a.selftest:
         return selftest()
+    if a.mark_uploaded:
+        if not a.name:
+            ap.error("--mark-uploaded needs --name")
+        return mark_uploaded(a.name)
     if not (a.name and a.entry):
         ap.error("--name and --entry are required")
+    if a.refresh:
+        return refresh(a.name, a.entry)
     track(a.name, a.entry)
     return 0
 
