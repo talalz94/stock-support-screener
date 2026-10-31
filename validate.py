@@ -697,6 +697,21 @@ def check_screen(asof: str, quick: bool) -> None:
         except Exception as exc:                                 # noqa: BLE001
             record("screen", "zones audit", WARN, repr(exc)[:110])
 
+        # ---- history joined across a listing change (bars.py --history).
+        # A forced refetch that skipped bars.apply_joins would put AZN back on
+        # ADS prices, a +103% step that every level on the chart then rests on.
+        # Shown to FAIL on that defect by `python bars.py --selftest`.
+        try:
+            import bars as _B
+            probs = _B.verify_joins(asof)
+            n = len(config.HISTORY_JOINS)
+            record("screen", "history joins hold", FAIL if probs else OK,
+                   "; ".join(probs)[:150] if probs else
+                   f"{n} declared join(s) + ledger: history present, no step "
+                   f"beyond {config.JOIN_MAX_Z:g} sd")
+        except Exception as exc:                                 # noqa: BLE001
+            record("screen", "history joins", WARN, repr(exc)[:110])
+
         # The panel is the population. A stored run that does not cover it has
         # dropped names silently -- which is exactly what returning only the
         # pattern tier did until 2026-08-24.

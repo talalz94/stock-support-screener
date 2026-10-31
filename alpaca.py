@@ -196,6 +196,7 @@ def fetch_bars(
     timeframe: str = "1d",
     feed: str | None = None,
     limit: int = 10_000,
+    asof: str | None = None,
 ) -> dict[str, list[dict]]:
     """Batched multi-symbol bars, fully paginated.
 
@@ -203,6 +204,13 @@ def fetch_bars(
     form). Symbols with no data are simply absent -- a well-formed but
     nonexistent symbol is silently omitted by the API with a 200, so absence is
     not an error.
+
+    `asof` is Alpaca's symbol-mapping date. Left unset, Alpaca maps the symbol
+    to TODAY's entity and follows renames back (VMRK returns Equity
+    Residential's bars). `asof="-"` turns mapping off and returns whatever
+    traded under the literal symbol -- needed where Alpaca starts a new entity
+    at a listing change the company itself calls continuous (TEVA's ADS ->
+    ordinary share exchange on 2026-09-14, measured 2026-10-31).
 
     `end` must not reach into the free tier's 15-minute SIP embargo. Note that a
     bare DATE resolves to the END of that day, so `end=<today>` is in the future
@@ -234,6 +242,8 @@ def fetch_bars(
         }
         if end_iso:
             params["end"] = end_iso
+        if asof:
+            params["asof"] = asof
         if token:
             params["page_token"] = token
 
