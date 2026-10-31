@@ -303,6 +303,7 @@ NAV = [
     ("insider", "Insiders", "insider/latest.html"),
     ("house", "House trades", "insider/house.html"),
     ("sectors", "Sectors", "sectors/latest.html"),
+    ("watchlist", "Watchlists", "watchlist/index.html"),
     ("sentiment", "Sentiment", "sentiment/latest.html"),
     ("fundamental", "Fundamental", "fundamental/latest.html"),
     ("profiles", "Profiles", "stock/index.html"),

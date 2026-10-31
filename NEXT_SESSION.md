@@ -82,6 +82,18 @@ live orchestrator lock -- a dead writer's lock does not count -- measures, print
 last_uploaded.txt; no typed date). It no longer deletes the old asset files, since a delete
 may always need a person. Approvals given in a run are kept on the task.
 
+**2026-10-31: the measuring moved into the orchestrator.** The Claude scheduled task
+fires only while the Claude app is open and its window listening -- the app's log shows
+10-28 fired 68 min late, 10-29 (PC asleep 07:19-11:25) and 10-30 (PC and app up) never
+fired, and 10-31 fired at 17:01 when the app's scheduler re-initialised. A prompt left
+unanswered closed itself after ~5 min and the run still reported "succeeded". So the new
+`watchlists` step (after `bars`, before `retention`; `watchlist_page.py`) re-measures every
+`data/watchlists/*/track.json` list each night and draws reports/watchlist/ (index + one
+page per list; Watchlists in the nav and on the hub). Nothing is lost on a missed night:
+the tracker recomputes from the bar store. Only the copy to the claude.ai dashboard still
+needs a Claude session (the scheduled task, now auto-approved), and when it runs late it
+uploads the latest numbers. Measured: 6.5 s for the 181-stock list.
+
 ## State at 2026-10-27 (night) — INSIDER PHASE 3: PAGES, BADGES, A SCORE, AND WHAT THE WALK-FORWARD DID AND DID NOT SHOW
 
 Phase 3 of the insider module (phases 1-2: the section below). Built ONLY on what phase 2
@@ -3861,70 +3873,70 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-28 05:31 — do not edit by hand._
+_Generated 2026-10-31 09:20 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 7s | 53s | 2.0 min | 59 |
-| `bars` | daily | 36s | 50s | 5.9 min | 10.0 min | 59 |
-| `macro` | daily | 62s | 1.6 min | 3.8 min | 15.0 min | 59 |
-| `news` | daily | 14s | 5s | 20s | 10.0 min | 59 |
-| `senti_cache` | daily | 6s | 3s | 22s | 10.0 min | 59 |
-| `sentiment` | daily | 23s | 16s | 80s | 15.0 min | 60 |
-| `bounce` | daily | 43s | 39s | 86s | 15.0 min | 60 |
-| `zones` | daily | 54s | 82s | 4.3 min | 30.0 min | 43 |
-| `shortvol` | daily | 4s | 4s | 8s | 10.0 min | 57 |
-| `hype` | daily | 79s | 2.0 min | 5.6 min | 120.0 min | 60 |
-| `provider` | daily | 2.4 min | 65.1 min | 73.8 min | 120.0 min | 52 |
-| `sec_facts` | quarterly | 7s | 5s | 26s | 60.0 min | 14 |
-| `sec_gap` | weekly | 12.1 min | 5.2 min | 12.1 min | 20.0 min | 13 |
-| `sec_edgar` | daily | 68s | 25s | 3.3 min | 30.0 min | 17 |
-| `insider` | daily | 9s | 15s | 21s | 30.0 min | 2 |
-| `congress` | daily | 2s | 8.6 min | 17.2 min | 30.0 min | 2 |
-| `fundamental` | daily | 5.0 min | 3.1 min | 12.5 min | 180.0 min | 64 |
-| `events` | weekly | 12.1 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 14 |
-| `leaderboard` | weekly | 46.3 min | 40.0 min | 90.2 min ⚠ | 90.0 min | 15 |
-| `dip` | daily | 29s | 17s | 43s | 15.0 min | 64 |
-| `insider_score` | daily | 2.6 min | 5.9 min | 9.2 min | 30.0 min | 2 |
-| `combo` | daily | 29s | 17s | 39s | 15.0 min | 63 |
-| `candidates` | daily | 4s | 4s | 25s | 5.0 min | 21 |
-| `floor` | daily | 38s | 54s | 2.5 min | 15.0 min | 15 |
-| `insider_pages` | daily | 5s | 9s | 12s | 15.0 min | 2 |
-| `sectors` | daily | 50s | 3.9 min | 7.6 min | 30.0 min | 14 |
-| `validate` | daily | 7.1 min | 7.0 min | 24.2 min | 60.0 min | 50 |
-| `explore` | daily | 14s | 8s | 42s | 5.0 min | 72 |
-| `snapshots` | daily | 17s | 4s | 20s | 5.0 min | 86 |
-| `profiles` | daily | 4.7 min | 22.9 min | 6.4 min | 15.0 min | 67 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 76 |
-| `dashboard` | daily | 1s | 0s | 2s | 2.0 min | 78 |
-| `docs` | daily | 0s | 0s | 3s | 5.0 min | 94 |
+| `universe` | daily | 9s | 8s | 2.6 min ⚠ | 2.0 min | 62 |
+| `bars` | daily | 71s | 51s | 37.0 min ⚠ | 10.0 min | 62 |
+| `macro` | daily | 82s | 1.6 min | 8.3 min | 15.0 min | 62 |
+| `news` | daily | 18s | 5s | 23s | 10.0 min | 62 |
+| `senti_cache` | daily | 24s | 3s | 50s | 10.0 min | 62 |
+| `sentiment` | daily | 1.6 min | 16s | 3.2 min | 15.0 min | 63 |
+| `bounce` | daily | 82s | 40s | 1.6 min | 15.0 min | 63 |
+| `zones` | daily | 1.9 min | 1.6 min | 2.7 min | 30.0 min | 46 |
+| `shortvol` | daily | 6s | 4s | 10s | 10.0 min | 60 |
+| `hype` | daily | 3.4 min | 2.1 min | 4.6 min | 120.0 min | 63 |
+| `provider` | daily | 65.1 min | 65.1 min | 71.0 min | 120.0 min | 55 |
+| `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 15 |
+| `sec_gap` | weekly | 6.4 min | 5.4 min | 12.1 min | 20.0 min | 14 |
+| `sec_edgar` | daily | 2.6 min | 34s | 4.3 min | 30.0 min | 20 |
+| `insider` | daily | 2.0 min | 87s | 2.0 min | 30.0 min | 5 |
+| `congress` | daily | 11s | 17s | 17.2 min | 30.0 min | 5 |
+| `fundamental` | daily | 5.6 min | 3.1 min | 8.6 min | 180.0 min | 67 |
+| `events` | weekly | 37.7 min | 10.7 min | 590.9 min ⚠ | 30.0 min | 15 |
+| `leaderboard` | weekly | 91.0 min | 40.7 min | 91.0 min ⚠ | 90.0 min | 16 |
+| `dip` | daily | 47s | 18s | 77s | 15.0 min | 67 |
+| `insider_score` | daily | 7.9 min | 7.2 min | 9.2 min | 30.0 min | 5 |
+| `combo` | daily | 1.7 min | 19s | 1.7 min | 15.0 min | 66 |
+| `candidates` | daily | 12s | 6s | 25s | 5.0 min | 24 |
+| `floor` | daily | 2.1 min | 55s | 2.5 min | 15.0 min | 18 |
+| `insider_pages` | daily | 12s | 8s | 12s | 15.0 min | 5 |
+| `sectors` | daily | 2.0 min | 3.2 min | 4.6 min | 30.0 min | 17 |
+| `validate` | daily | 13.9 min | 7.1 min | 13.9 min | 60.0 min | 53 |
+| `explore` | daily | 44s | 9s | 44s | 5.0 min | 75 |
+| `snapshots` | daily | 36s | 5s | 36s | 5.0 min | 89 |
+| `profiles` | daily | 7.8 min | 22.5 min | 7.8 min | 15.0 min | 70 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 79 |
+| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 81 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 97 |
 
-**Daily total ≈ 126.0 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 119.8 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-28 05:31 — do not edit by hand._
+_Generated 2026-10-31 09:20 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 249.4 | 2016-09 → 2026-10 |
-| bars 1h | 5 | 0.9 | 2026-06 → 2026-10 |
+| bars 1d | 122 | 249.7 | 2016-09 → 2026-10 |
+| bars 1h | 4 | 0.8 | 2026-07 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
-| news | 123 | 173.3 | 2016-08 → 2026-10 |
+| news | 123 | 174.4 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 12.0 | 2016-08 → 2026-10 |
-| scores | 122 | 327.8 | 2016-09 → 2026-10 |
+| scores | 122 | 331.8 | 2016-09 → 2026-10 |
 | fundamentals | 70 | 341.7 | 2009q2 → 2026q3 |
-| short volume | 75 | 56.9 | 2020-08 → 2026-10 |
-| flags | 62 | 5.3 | 2026-07-31 → 2026-10-27 |
-| rejects | 22 | 8.3 | 2026-09-28 → 2026-10-27 |
-| zones | 43 | 24.2 | 2026-08-27 → 2026-10-27 |
-| fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 21 | 0.4 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 40 | 179.5 | — |
+| short volume | 75 | 57.0 | 2020-08 → 2026-10 |
+| flags | 65 | 5.5 | 2026-07-31 → 2026-10-30 |
+| rejects | 22 | 8.3 | 2026-10-01 → 2026-10-30 |
+| zones | 46 | 25.9 | 2026-08-27 → 2026-10-30 |
+| fundamentals (companyfacts) | 131 | 74.9 | 1980q3 → 2028q3 |
+| fundamentals (EDGAR filings) | 21 | 0.8 | 2009q4 → 2026q3 |
+| loose (macro, universe, jobs, study) | 40 | 179.7 | — |
 
-**`data/` total ≈ 1,457 MB.** `reports/` is a further 117 MB across 366 pages.
+**`data/` total ≈ 1,466 MB.** `reports/` is a further 124 MB across 384 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -3932,22 +3944,22 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-28 05:31 — do not edit by hand._
+_Generated 2026-10-31 09:20 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 388 | 2016-09-27 → 2026-10-27 |
-| `fundamental` | 61 | 245 | 2016-09-26 → 2026-10-27 |
-| `hype` | 20 | 363 | 2016-10-25 → 2026-10-27 |
-| `dip` | 10 | 290 | 2016-09-27 → 2026-10-27 |
-| `insider` | 8 | 207 | 2016-09-06 → 2026-10-27 |
-| `combo` | 16 | 245 | 2016-11-04 → 2026-10-27 |
+| `sentiment` | 26 | 391 | 2016-09-27 → 2026-10-30 |
+| `fundamental` | 61 | 248 | 2016-09-26 → 2026-10-30 |
+| `hype` | 20 | 366 | 2016-10-25 → 2026-10-30 |
+| `dip` | 10 | 293 | 2016-09-27 → 2026-10-30 |
+| `insider` | 8 | 210 | 2016-09-06 → 2026-10-30 |
+| `combo` | 16 | 248 | 2016-11-04 → 2026-10-30 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-28 05:31 — do not edit by hand._
+_Generated 2026-10-31 09:20 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

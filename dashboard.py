@@ -71,6 +71,8 @@ DASHBOARDS = [
     ("Insiders", "insider/latest.html",
      "Directors&rsquo; and officers&rsquo; purchases, each filter&rsquo;s measured result beside it",
      "insider/house.html", "House trades"),
+    ("Watchlists", "watchlist/index.html",
+     "Fixed lists tracked from their entry close against the liquid market", None, None),
 ]
 
 # Stores summarised on the page. `label, path, glob`.

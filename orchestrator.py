@@ -1577,6 +1577,15 @@ def _step_docs(asof: str) -> tuple[int, str]:
     return n, f"{len(docs.BLOCKS)} generated block(s) in {n} file(s)"
 
 
+def _step_watchlists(asof: str) -> tuple[int, str]:
+    """Re-measure every tracked watchlist (data/watchlists/*/track.json) and draw
+    reports/watchlist/. Here, not only in a Claude scheduled task: that fires only
+    while the Claude app is open, and on 10-29/10-30 it never fired at all."""
+    import watchlist_page
+    p, n = watchlist_page.build()
+    return n, f"{n} watchlist(s) re-measured, drawn on watchlist/{p.name}"
+
+
 def _step_dashboard(asof: str) -> tuple[int, str]:
     """Last step by design: it renders the job table, so it must run after every
     other step has written its row. Its own row therefore always reads `running`
@@ -1773,6 +1782,11 @@ REGISTRY: tuple[Step, ...] = (
          # pushing the CIK filter into pyarrow took a 29-page run to 165s, so
          # 900s is now ~5x headroom rather than ~2x.
          timeout=900, desc="per-stock pages for today's bounce flags"),
+    # Reads only bars and each list's own files; recomputed whole every night.
+    Step("watchlists", _step_watchlists, config.CADENCE_DAILY,
+         depends_on=("bars",), timeout=600,
+         desc="re-measure tracked watchlists from their entry date against the "
+              "liquid market, and the Watchlists page"),
     Step("retention", _step_retention, config.CADENCE_DAILY, timeout=300,
          session_indexed=False, desc="age-based pruning of rejects, 1h, reports"),
     # Session-indexed too: it summarises the newest session, so a new session
