@@ -281,6 +281,11 @@ def scan(tickers: list[str] | None = None, asof: str | None = None,
     if tickers is None:
         ps = B.load_panel_stats()
         newest = str(ps["last_date"].max()) if len(ps) else "?"
+        # 400, not MIN_BARS (310), and MEASURED not to lower (zonelen_study.py,
+        # 2026-10-31): cutting a mature stock's history to 310 bars leaves its
+        # zones' failure rate unchanged (33.8% vs 33.3%, t +0.06), but the names
+        # a lower bar would ADMIT are young listings, whose zones failed 52.8% of
+        # first tests against 53.5% for random lines on the same names (t -0.71).
         ps = ps[(ps["n_bars"] >= 400)
                 & (ps["last_close"] >= config.MIN_PRICE)
                 & (ps["dollar_vol_20"] >= config.MIN_DOLLAR_VOL)

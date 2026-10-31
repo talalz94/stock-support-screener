@@ -114,6 +114,8 @@ EXIT_RULES_FILE = DATA / "_exit_rules.parquet"
 FUNDAMENTALS_FILE = DATA / "_fundamentals.parquet"  # yfinance market cap cache
 
 STATE_FILE = DATA / "_state.json"
+# Every history import `bars` made across a join, with what it measured there.
+HISTORY_LEDGER = DATA / "_history_joins.json"
 LOG_FILE = DATA / "_run.log"
 DIGEST_FILE = DATA / "_digest.txt"
 
@@ -190,6 +192,64 @@ ADJUSTMENT = "split"         # NOT "all": dividend back-adjustment is look-ahead
 
 # Splits are applied retroactively, so recent stored bars can go stale.
 SPLIT_RECHECK_DAYS = 10
+
+# ---------------------------------------------------------------------------
+# History across a listing change (`bars.py --history`, measured 2026-10-31)
+# ---------------------------------------------------------------------------
+# `update` only ever fetches a 10-session window, and `--backfill` counts a name
+# as done once its NEWEST bar is recent. So a name that enters the universe
+# late -- a rename, an ADS that became an ordinary share, a name the filters
+# used to drop -- keeps only those 10 sessions for good, and every screen that
+# needs 310-400 bars silently skips it. On 2026-10-30, 5 of the 81 liquid
+# SHORT_HISTORY names were exactly this: the 4 below, joined, and MSGK, held
+# back (MSG Sports renamed, then the Rangers spun off: -20.5% on 2026-10-27).
+# The other 76 are new to US exchanges; the source has nothing earlier.
+#
+# Each entry is a join CHECKED BY HAND: the company's own filing for the ratio,
+# the source's bars against ours on the overlap, and the close-to-close move
+# across the join against the stock's own volatility. `factor` multiplies
+# prices (and divides volume) on bars dated BEFORE `join`, and is applied in
+# `bars.fetch_many`, so a forced refetch reproduces the joined series instead
+# of quietly restoring the unadjusted one. `asof` is Alpaca's symbol mapping:
+# None = follow renames (the default fetch), "-" = the literal symbol.
+# validate's `screen` group FAILS if any join below shows a step again.
+HISTORY_JOINS: dict[str, dict] = {
+    "AZN": {"join": "2026-02-02", "factor": 2.0, "asof": None,
+            "why": "ADSs on Nasdaq -> ordinary shares on NYSE. 6-K 2026-01-20 "
+                   "(0001654954-26-000464): the ADSs represented ordinary shares "
+                   "'on a two-for-one basis'. Unadjusted join +103.1% (z +47); "
+                   "x2 leaves +1.55%."},
+    "TEVA": {"join": "2026-09-14", "factor": 1.0, "asof": "-",
+             "why": "8-K 2026-09-14 (0001193125-26-390562): ADS program ended, "
+                    "each ADS exchanged for one ordinary share. Alpaca maps a NEW "
+                    "entity from 09-14, so the earlier series needs asof='-'. "
+                    "Join +4.39% (z +1.91)."},
+    "VMRK": {"join": "2026-08-18", "factor": 1.0, "asof": None,
+             "why": "Equity Residential renamed (SEC CIK 906107, former name to "
+                    "2026-08-12). Joined series equals our stored EQR bars on all "
+                    "2,502 shared days; join +0.58% (z +0.44)."},
+    "SKYD": {"join": "2026-10-06", "factor": 1.0, "asof": None,
+             "why": "Paramount Skydance renamed (same CIK, former name to "
+                    "2026-10-06). Joined series equals our stored PSKY bars on all "
+                    "292 shared days; join -2.51% (z -0.89)."},
+}
+# A join is refused when the move across it exceeds this many of the stock's own
+# 60-session sds. MEASURED on 400 random liquid names, 2022-01..2026-10 (451,036
+# daily returns): |z|>4 on 0.69% of days, >5 on 0.39%, >6 on 0.25%. 5 refuses
+# AZN's unadjusted join (z 47) and the MSGK spin-off day (MSGR, 2026-10-27,
+# -20.5%) while wrongly refusing ~0.4% of ordinary joins -- a refusal is logged
+# for a person, never written.
+JOIN_MAX_Z = 5.0
+# Sessions allowed between the last fetched bar and our first. A reused symbol
+# leaves years (FLY: Fly Leasing to 2021-08-02, Firefly from 2025-08-07).
+JOIN_MAX_GAP = 3
+# `update` asks the source for earlier history for every name new to the store
+# and joins what passes `bars.join_check` (ledger: HISTORY_LEDGER). It follows
+# Alpaca's symbol mapping, so it keeps a SECURITY's history across a ticker
+# change -- a rename, or a reverse merger like ADIL -> AZR (Adial, same CIK,
+# joined 2026-10-31) -- exactly as an unchanged ticker would. It does not judge
+# whether the business changed. False = declared joins only.
+HISTORY_AUTO_JOIN = True
 
 # ~2520 sessions. IND_WARMUP + STRUCT_WIN needs 890, so the screener never used
 # more than 4y -- this is set for the FACTOR WORK, not the screen. Raised 4 -> 10

@@ -44,6 +44,248 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-10-31 — 81 LIQUID NAMES WERE "SHORT_HISTORY": 65 NEW LISTINGS, 11 NEW TO US EXCHANGES, 5 GAPS IN OUR STORE (4 NOW JOINED)
+
+**The question.** `data/rejects/2026-10-30.parquet`: of 1,890 liquid names (adv_usd >= $20M,
+close >= $5), **81** were rejected SHORT_HISTORY, and zones skips them too. Which are new
+listings, and which are history we lost? AZN was the example: 189 bars from 2026-02-02.
+
+**Method, per name; three sources, and no cause inferred from a company name:**
+- **our store:** first bar, and bars inside the screen's 895-session window;
+- **Alpaca**, asked for 2016-01..2026-10 twice: with symbol mapping (what every fetch here
+  does; it follows renames back) and with `asof='-'` (the literal symbol);
+- **SEC submissions:** ticker -> CIK from `company_tickers.json`, former names, and the
+  dated listing forms (424B4, Form 10, S-4, 8-A12B, 40FR12B/F-10/20-F, Form 25);
+- **filing text**, for every listing change and every claim of trading elsewhere before.
+
+The full table is at the end of this section.
+
+    65  genuinely new:    46 IPO, 1 carve-out IPO (MMED), 13 spin-offs (Form 10),
+                          5 SPAC or merger successors (CCXI, SECZ, INFQ, PURR, SHAZ)
+    11  new to US exchanges; their earlier prices are not on SIP:
+                          TSX (EMA, ALM, MDA, GLXY; AUGO also B3), B3 (JBS),
+                          LSE (WSE, SUNB as Ashtead), OTC (BMNR, CBC),
+                          a non-traded REIT's first listing (SMA)
+     5  MISSING FROM OUR STORE; the source has the earlier series:
+                          AZN, TEVA, VMRK, SKYD -> joined; MSGK -> withheld
+
+**Why the 5 were missing (the root cause, in code).** `bars.update` fetches only a
+10-session window, and `bars._backfill_todo` counts a ticker as done once its NEWEST bar is
+recent. So a name that enters the universe late keeps those 10 sessions for good: a rename
+(EQR -> VMRK on 08-18, PSKY -> SKYD on 10-06, MSGS -> MSGK), or an ADS that became an
+ordinary share (TEVA, AZN). Its old history sat in the store under the dead ticker (EQR,
+PSKY, MSGS) or nowhere. AZN's case also needs the ADS ratio, below.
+
+**FLY (1,548 bars, still SHORT_HISTORY) is a reused symbol.** 1,237 of its stored bars are
+Fly Leasing's (2016-09-01..2021-08-02; acquired in 2021); Firefly listed 2025-08-07. The panel
+prefilter counts all 1,548 bars, but the screen reads only its 895-session window, which
+holds Firefly's 311. CCXI (ChemoCentryx bars to 2022-10-19) and XE (171 bars from
+2016-12/2017-09) are the same. **Not fixed, and it leaks:**
+- the zones scan's 6-year window includes Fly Leasing's 2020-21 bars, and FLY's one zone
+  (15.99) is drawn from pivots of both companies;
+- CCXI is flagged `suspect_split` only because of the 51.99 -> 10.26 jump across its gap.
+
+**What was joined, and how each join was verified** (`config.HISTORY_JOINS`, with the
+evidence in each entry):
+- **AZN.** The 6-K of 2026-01-20 says the ADSs represented ordinary shares "on a
+  two-for-one basis". The ADSs left Nasdaq on 01-30; ordinary shares traded on NYSE from
+  02-02. Alpaca's series is UNADJUSTED across that: +103.1% overnight (z +47). Bars before
+  02-02 are x2 in price and /2 in volume. The join is then +1.55% (z +1.02), and
+  01-30's close is 185.54 = 92.77 x 2.
+- **TEVA.** The 8-K of 2026-09-14 says the ADS program ended "with each ADS exchanged for
+  one ordinary share". Alpaca maps a NEW entity from 09-14, so the earlier series needs the
+  literal symbol. The join is +4.39% (z +1.91, a move seen on 9.4% of its days).
+- **VMRK.** Equity Residential renamed 2026-08-12 (same CIK 906107). The joined bars equal
+  our stored EQR bars on all 2,502 shared days (max close diff 0.0). Join +0.58% (z +0.44).
+- **SKYD.** Paramount Skydance renamed 2026-10-06 (same CIK). The joined bars equal our
+  PSKY bars on all 292 shared days. Join -2.51% (z -0.89).
+- **MSGK, withheld.** MSG Sports renamed 2026-10-09 (same CIK), and MSGR spun off on
+  10-27: -20.5% that day (|z| 14). Pre-spin MSGS prices include the Rangers.
+  Split-only adjustment already leaves every parent's spin-off step in the store (below),
+  but joining MSGK would add one more and show levels at $380-410 under a $313 stock.
+
+Written: 7,652 bars, 2026-10-31 18:05. Checks:
+- **No other ticker's rows changed** in any of the 122 month files, compared with the
+  backup at scratchpad `bars_1d_backup_20261031/`.
+- **Every bar held before the write is unchanged**; only bars dated before each name's
+  first bar were written.
+- **No split flags:** `pattern.suspect_split` and `zones.is_suspect` are False on all
+  four full series.
+- **The largest remaining moves are dated single-day events**, not joins:
+  AZN 2017-07-27 -14.9%, TEVA 2017-08-03 -24.0%, VMRK 2020-03-16 -16.9%.
+
+**After.** Bars as of 10-30: AZN, TEVA and VMRK 2,555 each (896 in the screen's window).
+They now pass SHORT_HISTORY and stop at NEAR_HIGHS (AZN at 0.877 of its 250-day high).
+Zones: AZN 174.60 (6.9% below, 9 touches), 169.76, 164.06; VMRK 60.94 (AT, 20 touches).
+TEVA and SKYD show NO SUPPORT within 16%. **AZN's 154 shelf is 17.5% below 186.65, beyond
+the 16% band, so it is correctly not listed.** SKYD has 311 bars: it clears
+`zones.MIN_BARS` but not the 400 the scan and screen use.
+
+**The code: the store can no longer lose this silently.**
+- `bars.py --history [T1,T2] [--dry-run]` is the vetted join. It fetches with the entry's
+  `asof` and `factor`, and `join_check` writes nothing when the overlap disagrees with our
+  bars (> 1e-4), there is a gap (> 3 sessions), there is a step at the join, or there is a
+  step in our first 10 bars (> `JOIN_MAX_Z` = 5 sd). It also checks each declared join at
+  its own date, writes only bars older than ours, and records each write in
+  `data/_history_joins.json`.
+- `JOIN_MAX_Z = 5`, measured on 400 random liquid names (2022-01..2026-10, 451,036 daily
+  returns): |z| > 5 on 0.39% of days, so ~0.4% of good joins are wrongly refused and logged.
+- `bars.apply_joins` runs inside `fetch_many`, so a forced refetch keeps AZN's x2 instead of
+  restoring the ADS prices.
+- **Nightly.** `update` now asks the source once for earlier bars for any name whose first
+  bar falls inside its window, and joins what passes (`config.HISTORY_AUTO_JOIN`).
+  Run end-to-end 18:28 (`--update --force`), 16 names new to the store:
+  - **AZR** joined 2,066 bars. It is Adial Pharmaceuticals (CIK 1513525), renamed Azora
+    after merging with "Legacy Azora". Our ADIL bars match on all 2,075 shared days. It keeps
+    the security's history, as an unchanged ticker would; it does not judge whether the
+    business changed.
+  - **CTY** refused: a 1,466-session gap, i.e. a reused symbol.
+  - **MSGR** and **NORD** refused: too little overlap to compare.
+- `bars.py --history-audit`: liquid names under 400 bars, with the source's first bar mapped
+  and literal. After the joins it lists only MSGK and MSGR (an unrelated 2021-23 MSGR) as
+  mapped-earlier, and FIG, Q, MDA and SPCX as literal-only, which are other companies by
+  their filings.
+- validate `screen` group: **"history joins hold"**. It FAILS if a declared or ledger join
+  loses its history or shows a step. Shown to fail on the real series with AZN put back on
+  ADS prices (+103.1%, z +46.9) and with TEVA cut to 10 bars before its join.
+  `python bars.py --selftest` proves each refusal.
+- `alpaca.fetch_bars(asof=...)` passes Alpaca's symbol-mapping date.
+
+**MIN_BARS: measured, NOT lowered** (`zonelen_study.py`, 408 s,
+`data/_zonelen_study.json`).
+- Design: 14 dates, 2019-07-01..2026-01-06, 126 sessions apart, so no test windows overlap.
+  Names are point-in-time liquid. A zone's first test after the date is the first bar
+  reaching within 2.5% above it, within 60 sessions. It FAILED if a close in the next 40
+  bars is >= 10% below the level: the zones study's `dd_break_rate` rule, with crashes
+  through the level counted.
+- Arm A: the same 3,480 mature name-dates with their history cut to L bars, against the
+  scan's 6-year window. Arm B: the young listings a lower minimum would actually admit.
+- Baseline: random lines 0.5-16% below price, on the same names.
+
+    arm (A: same stocks)   with a zone   scored   fail    vs full (pp, t)
+    full 6y window            87.4%       5,648   33.3%
+    last 400 bars             75.1%       3,506   33.6%   -0.41  t -0.73
+    last 310 bars             70.2%       2,999   33.8%   +0.03  t +0.06
+    last 250 bars             64.9%       2,593   33.7%   +0.29  t +0.37
+    last 150 bars             48.4%       1,611   33.9%   +0.86  t +0.99
+    random lines, mature         --       5,100   39.8%   +3.68  t +2.37
+    (B) young, 310-399 bars   56.0%         152   47.4%
+    (B) young, 150-399 bars      --         409   52.8%
+    random lines on those young names     1,332   53.5%   zones -2.4pp, t -0.71
+
+- **History length is not what makes a zone fail.** Cut to 310 bars, a mature stock's zones
+  fail as often as on six years. 96% of them are also full-history zones; fewer are found.
+- **A young listing's zones are no better than random lines on that stock** (310-399 bars:
+  47.4% vs 51.9%, t -0.57).
+- So lowering the scan's 400 (or the screen's) would admit 22 of the 81 (310-399 bars;
+  FLY, SECZ and INFQ among them, with borrowed bars), whose zones measure as noise.
+  **No threshold changed.**
+- `zones.MIN_BARS` = 310 is in practice shadowed by the scan's `n_bars >= 400`; comment added.
+
+**Found, not fixed:**
+- **Parents keep their spin-off steps.** `ADJUSTMENT = "split"` does not adjust a
+  distribution: HON -50.9% on 2026-06-29 (HONA, z -35.5), FDX -17.8% on 2026-06-01 (FDXF,
+  z -8.8). Every level above the step is drawn from a company that no longer exists, and
+  `zones.is_suspect` (5% of the 250-day high) does not catch a 51% drop.
+- **Reused symbols mix two companies** (FLY, CCXI, XE above). A fix belongs in the read
+  path (cut at a 10+ session hole); purging rows would come back on any refetch.
+- **`screen.py --only X` crashes** (`KeyError: False`) when no named name reaches the
+  stage that sets `passed`: `allrows.get("passed", False)` returns a scalar.
+- **MSGK's stored 13 bars include 9 pre-spin bars** (10-14..10-26), with the -20.5% step
+  on 10-27.
+- **Duplicate histories:** EQR/VMRK, PSKY/SKYD and ADIL/AZR hold the same bars under two
+  tickers for past dates, so a by-ticker cross-section counts each company twice (3 of
+  ~5,500).
+- **SKYD's -23.8% on 2026-10-14** is inside bars we already held, and was not examined.
+
+**The 81** (bars and first bar as the screen saw them on 10-30; "source first" =
+Alpaca with symbol mapping, plus the literal symbol where it differs):
+
+| ticker | bars | first bar | source first | cause | evidence |
+|---|---:|---|---|---|---|
+| AZN | 189 | 2026-02-02 | 2016-01-04 | MISSING -> joined | ADS (Nasdaq) -> ordinary share (NYSE) 2026-02-02; 6-K 2026-01-20: 2 ADS = 1 share; x2 before the join |
+| VMRK | 62 | 2026-08-05 | 2016-01-04 (literal 2026-08-18) | MISSING -> joined | Equity Residential renamed 2026-08-12 (same CIK 906107); history stored as EQR |
+| TEVA | 45 | 2026-08-28 | 2026-09-14 (literal 2016-01-04) | MISSING -> joined | ADS -> ordinary share 2026-09-14; 8-K 2026-09-14: 1 ADS = 1 share; literal-symbol series |
+| SKYD | 28 | 2026-09-23 | 2025-08-07 (literal 2026-10-06) | MISSING -> joined | Paramount Skydance renamed 2026-10-06 (same CIK); history stored as PSKY; 311 bars, still < 400 |
+| MSGK | 13 | 2026-10-14 | 2016-01-04 (literal 2026-10-27) | RENAME + SPIN, withheld | MSG Sports renamed 2026-10-09 (same CIK); MSGR spun off 2026-10-27, -20.5% that day (z -14): MSGS history includes the Rangers |
+| SMA | 398 | 2025-04-02 | same | FIRST LISTING: non-traded REIT | 10-K since 2014; 424B4 2025-04-02: no public market before |
+| BMNR | 354 | 2025-06-05 | same | UPLISTING: OTC | reporting since 2021 (10-K/10-Q); NYSE American from 2025-06-05 with a 424B4; prospectus: 'could revert' to OTC |
+| CBC | 237 | 2025-11-20 | same | UPLISTING: OTC | 424B4 2025-11-21: quoted on OTC Markets as CBCY before the offering |
+| JBS | 348 | 2025-06-13 | same | VENUE: B3 | JBS N.V. holdco (F-4 2023-07-12) for B3-listed JBS S.A.; NYSE from 2025-06-13 |
+| SUNB | 170 | 2026-03-02 | same | VENUE: LSE | Form 10 2026-01-27: LSE was the historical venue of Ashtead's shares; NYSE from 2026-03-02 |
+| WSE | 121 | 2026-05-11 | same | VENUE: LSE | 20-F 2026-06-25: primary listing moved from the LSE to Nasdaq 2026-05-11 |
+| GLXY | 367 | 2025-05-16 | same | VENUE: TSX | 424B4 2025-05-30: listed on Nasdaq and the TSX; reorganised (S-4) |
+| EMA | 360 | 2025-05-28 | same | VENUE: TSX | 40FR12B 2025-05-02 (TSX rules on its listed shares); NYSE from 2025-05-28 |
+| ALM | 329 | 2025-07-14 | same | VENUE: TSX | F-10 2025-07-07; TSX-listed; Nasdaq from 2025-07-14 |
+| MDA | 162 | 2026-03-12 | same (literal 2017-10-05) | VENUE: TSX | F-10 2026-03-10: common shares listed on the TSX; NYSE from 2026-03-12 |
+| AUGO | 327 | 2025-07-16 | same | VENUE: TSX/B3 | 424B1 2025-07-16 quotes its last TSX price |
+| SECZ | 377 | 2025-05-02 | same (literal 2026-07-02) | DE-SPAC | S-4 2026-01-28; operating company from 2026-07-02 (literal symbol); the 292 bars before are the SPAC shell's |
+| INFQ | 334 | 2025-07-07 | same (literal 2026-02-17) | DE-SPAC | Churchill Capital Corp X renamed 2026-02-18 (same CIK); S-4 2026-01-05; 155 SPAC-shell bars before |
+| SHAZ | 178 | 2026-02-18 | same | DE-SPAC HOLDCO | S-4 2025-05-15; the predecessor SPAC was quoted on OTC Markets (USCTF) |
+| PURR | 229 | 2025-12-03 | same | MERGER HOLDCO | S-4 2025-09-04; new registrant (first filing 2025-08-01); 8-A12B 2025-12-02 |
+| CCXI | 184 | 2026-02-09 | 2016-01-04 | SPAC (itself) | 424B4 2025-12-17 (units); Class A from 2026-02-09; S-4 2026-09-04 for its merger; REUSED SYMBOL: store also holds 1,544 bars of ChemoCentryx, 2016-09-01..2022-10-19 |
+| HNGE | 363 | 2025-05-22 | same | IPO | 424B4 2025-05-23; 8-A12B 2025-05-19 |
+| CRCL | 354 | 2025-06-05 | same | IPO | 424B4 2025-06-05; 8-A12B 2025-05-27 |
+| VOYG | 350 | 2025-06-11 | same | IPO | 424B4 2025-06-12; 8-A12B 2025-06-11 |
+| CHYM | 349 | 2025-06-12 | same | IPO | 424B4 2025-06-12; 8-A12B 2025-06-10 |
+| SLDE | 345 | 2025-06-18 | same | IPO | 424B4 2025-06-18; 8-A12B 2025-06-17 |
+| ARX | 321 | 2025-07-24 | same | IPO | 424B4 2025-07-25; 8-A12B 2025-07-23 |
+| AMBQ | 317 | 2025-07-30 | same | IPO | 424B4 2025-07-31; 8-A12B 2025-07-25 |
+| FIG | 316 | 2025-07-31 | same (literal 2016-01-04) | IPO | 424B4 2025-07-31; 8-A12B 2025-07-22 |
+| FLY | 311 | 2025-08-07 | 2016-01-04 | IPO | 424B4 2025-08-08; 8-A12B 2025-08-06; REUSED SYMBOL: store also holds 1,237 bars of Fly Leasing, 2016-09-01..2021-08-02 |
+| WYFI | 311 | 2025-08-07 | same | IPO | 424B4 2025-08-08; 8-A12B 2025-08-04 |
+| HTFL | 310 | 2025-08-08 | same | IPO | 424B4 2025-08-08; 8-A12B 2025-08-07 |
+| BLSH | 307 | 2025-08-13 | same | IPO | 424B4 2025-08-13; 8-A12B 2025-08-11 |
+| MIAX | 306 | 2025-08-14 | same | IPO | 424B4 2025-08-14; 8-A12B 2025-08-13 |
+| KLAR | 288 | 2025-09-10 | same | IPO | 424B4 2025-09-10; 8-A12B 2025-09-09 |
+| FIGR | 287 | 2025-09-11 | same | IPO | 424B4 2025-09-11; 8-A12B 2025-09-08 |
+| LGN | 286 | 2025-09-12 | same | IPO | 424B4 2025-09-15; 8-A12B 2025-09-11 |
+| STUB | 283 | 2025-09-17 | same | IPO | 424B4 2025-09-17; 8-A12B 2025-09-12 |
+| NTSK | 282 | 2025-09-18 | same | IPO | 424B4 2025-09-18; 8-A12B 2025-09-15 |
+| NAVN | 252 | 2025-10-30 | same | IPO | 424B4 2025-10-31; 8-A12B 2025-10-28 |
+| BETA | 249 | 2025-11-04 | same | IPO | 424B4 2025-11-04; 8-A12B 2025-11-03 |
+| BLLN | 247 | 2025-11-06 | same | IPO | 424B4 2025-11-06; 8-A12B 2025-11-03 |
+| MDLN | 219 | 2025-12-17 | same | IPO | 424B4 2025-12-18; 8-A12B 2025-12-17 |
+| EQPT | 195 | 2026-01-23 | same | IPO | 424B4 2026-01-26; 8-A12B 2026-01-20 |
+| MANE | 187 | 2026-02-04 | same | IPO | 424B4 2026-02-04; 8-A12B 2026-02-03 |
+| FPS | 186 | 2026-02-05 | same | IPO | 424B4 2026-02-06; 8-A12B 2026-02-05 |
+| MWH | 182 | 2026-02-11 | same | IPO | 424B4 2026-02-11; 8-A12B 2026-02-11 |
+| ARXS | 138 | 2026-04-16 | same | IPO | 424B4 2026-04-16; 8-A12B 2026-04-15 |
+| MAIR | 138 | 2026-04-16 | same | IPO | 424B4 2026-04-17; 8-A12B 2026-04-16 |
+| ALMR | 137 | 2026-04-17 | same | IPO | 424B4 2026-04-17; 8-A12B 2026-04-15 |
+| AVEX | 137 | 2026-04-17 | same | IPO | 424B4 2026-04-20; 8-A12B 2026-04-17 |
+| XE | 132 | 2026-04-24 | 2016-12-30 | IPO | 424B4 2026-04-27; 8-A12B 2026-04-24; REUSED SYMBOL: store also holds 171 bars of an earlier XE, 2016-12-30..2017-09-05 |
+| FRVO | 119 | 2026-05-13 | same | IPO | 424B4 2026-05-14; 8-A12B 2026-05-11 |
+| BXDC | 118 | 2026-05-14 | same | IPO | 424B4 2026-05-15; 8-A12B 2026-05-13 |
+| CBRS | 118 | 2026-05-14 | same | IPO | 424B4 2026-05-14; 8-A12B 2026-05-11 |
+| AADX | 105 | 2026-06-03 | same | IPO | 424B4 2026-06-04; 8-A12B 2026-06-03 |
+| QNT | 104 | 2026-06-04 | same | IPO | 424B4 2026-06-05; 8-A12B 2026-06-04 |
+| INIO | 104 | 2026-06-04 | same | IPO | 424B4 2026-06-04; 8-A12B 2026-06-04 |
+| EROC | 100 | 2026-06-10 | same | IPO | 424B4 2026-06-10; 8-A12B 2026-06-09 |
+| PBLS | 100 | 2026-06-10 | same | IPO | 424B4 2026-06-10; 8-A12B 2026-06-05 |
+| SPCX | 98 | 2026-06-12 | same (literal 2020-12-16) | IPO | 424B4 2026-06-12; 8-A12B 2026-06-10 |
+| DPC | 90 | 2026-06-25 | same | IPO | 424B4 2026-06-26; 8-A12B 2026-06-24 |
+| BSP | 86 | 2026-07-01 | same | IPO | 424B4 2026-07-01; 8-A12B 2026-07-01 |
+| CSQR | 76 | 2026-07-16 | same | IPO | 424B4 2026-07-16; 8-A12B 2026-07-15 |
+| IOND | 68 | 2026-07-28 | same | IPO | 424B4 2026-07-28: no public market before the listing |
+| JMKE | 66 | 2026-07-30 | same | IPO | 424B4 2026-07-31; 8-A12B 2026-07-30 |
+| BBTX | 1 | 2026-10-30 | same | IPO | 424B4 2026-10-30; 8-A12B 2026-10-27 |
+| MMED | 166 | 2026-03-06 | same | IPO (carve-out) | 424B4 2026-03-06, Medtronic carve-out |
+| AMRZ | 343 | 2025-06-23 | same | SPIN-OFF | Form 10 2025-02-28 |
+| RAL | 338 | 2025-06-30 | same | SPIN-OFF | Form 10 2025-05-05 |
+| SOLS | 260 | 2025-10-20 | same (literal 2025-10-30) | SPIN-OFF | Form 10 2025-08-21; first bars are when-issued (regular way from 2025-10-30) |
+| Q | 250 | 2025-11-03 | same (literal 2016-01-04) | SPIN-OFF | Form 10 2025-04-24 |
+| VSNT | 221 | 2025-12-15 | same (literal 2026-01-05) | SPIN-OFF | Form 10 2025-09-18; first bars are when-issued (regular way from 2026-01-05) |
+| VGNT | 148 | 2026-04-01 | same | SPIN-OFF | Form 10 2025-11-14 |
+| TRAX | 146 | 2026-04-06 | same (literal 2026-04-20) | SPIN-OFF | Form 10 2026-03-03; first bars are when-issued (regular way from 2026-04-20) |
+| OCTV | 113 | 2026-05-21 | same (literal 2026-05-28) | SPIN-OFF | Form 10 2026-02-11; first bars are when-issued (regular way from 2026-05-28) |
+| FDXF | 107 | 2026-06-01 | same | SPIN-OFF | Form 10 2026-01-16 |
+| HONA | 97 | 2026-06-15 | same (literal 2026-06-29) | SPIN-OFF | Form 10 2026-03-03; first bars are when-issued (regular way from 2026-06-29) |
+| MBGL | 86 | 2026-07-01 | same | SPIN-OFF | Form 10 2026-05-07 |
+| VYLR | 22 | 2026-10-01 | same | SPIN-OFF | Form 10 2026-06-29 |
+| MSGR | 4 | 2026-10-27 | 2021-12-09 | SPIN-OFF | Form 10 2026-08-14; Alpaca also has 343 bars of an unrelated MSGR (2021-12-09..2023-04-21), not stored |
+
+
 ## State at 2026-10-28 — FORM 4s NO LONGER ARRIVE A DAY AND A HALF LATE
 
 The 05:00 `insider` step logged "0 new Form 4 filing(s) over 17 index day(s)" while 341
