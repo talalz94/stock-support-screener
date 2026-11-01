@@ -1,5 +1,5 @@
 """
-EDGAR per-filing ingest: a new 10-Q/10-K/20-F/40-F reaches the fact store the
+EDGAR per-filing ingest: a new 10-Q/10-K/20-F/40-F/6-K reaches the fact store the
 night after it is filed, instead of waiting months for SEC's quarterly bulk set.
 
     python edgar.py                       the nightly pass (what `sec_edgar` runs)
@@ -27,7 +27,7 @@ THE SOURCE: EDGAR ITSELF, ONE FILING AT A TIME
               filing accepted that day; SEC publishes it ~22:00 ET), plus the
               "latest filings" Atom feed for the days whose index is not out
               yet. Filtered to the bulk set's own form rule (10-K, 10-Q, 20-F,
-              40-F and their /A, KT, QT variants) and to CIKs the ticker map
+              40-F, 6-K and their /A, KT, QT variants) and to CIKs the ticker map
               knows. The submissions API is the per-name path (`--tickers`).
     fetch     per filing: the folder's index.json, FilingSummary.xml, the
               presentation linkbase and the extracted XBRL instance
@@ -113,10 +113,18 @@ FEED_URL = ("https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent"
             "&type={form}&company=&dateb=&owner=include&start={start}"
             "&count=100&output=atom")
 
-# The bulk ingest's own form rule (`fundamentals.fetch_quarter`), so both
+# The bulk ingest's own form rule (`fundamentals.STATEMENT_FORMS`), so both
 # sources accept exactly the same filings: 10-K, 10-K/A, 10-KT, 10-Q, 10-Q/A,
-# 20-F, 20-F/A, 40-F, 40-F/A.
-FORMS = ("10-K", "10-Q", "20-F", "40-F")
+# 20-F, 20-F/A, 40-F, 40-F/A, 6-K, 6-K/A.
+#
+# 6-K since 2026-10-31. ~100-150 a day come from ticker-map filers (measured
+# 10-26..10-30) and almost all are press releases with no XBRL: one
+# index.json each, ledgered "no_xbrl" and never fetched again.
+FORMS = fundamentals.STATEMENT_FORMS
+# A day's index read under an older rule is not settled under this one: a
+# 6-K filed that day was skipped. Recorded per day, so changing FORMS makes
+# the nightly pass re-read its lookback window instead of trusting it.
+FORMS_KEY = ",".join(FORMS)
 
 # SEC's fair-access ceiling is 10 requests/second per client. Six workers share
 # ONE pacer, so the aggregate never exceeds RATE however fast the responses
@@ -772,6 +780,11 @@ def _read_days() -> dict:
         return {}
 
 
+def _settled(rec: dict) -> bool:
+    """A day whose index was read under the CURRENT form rule (see FORMS_KEY)."""
+    return rec.get("status") == "ok" and rec.get("forms") == FORMS_KEY
+
+
 def _write_days(days: dict) -> None:
     config.FUNDAMENTALS_EDGAR.mkdir(parents=True, exist_ok=True)
     tmp = _days_path().with_suffix(".json.tmp")
@@ -910,7 +923,7 @@ def discover(since: date | None = None, use_feed: bool = True,
     today = today_et()
     days = _read_days()
     if since is None:
-        settled = sorted(d for d, v in days.items() if v.get("status") == "ok")
+        settled = sorted(d for d, v in days.items() if _settled(v))
         start = today - timedelta(days=LOOKBACK_DAYS)
         if settled:
             start = min(start, date.fromisoformat(settled[-1]) + timedelta(days=1))
@@ -923,7 +936,7 @@ def discover(since: date | None = None, use_feed: bool = True,
         prior = days.get(key, {})
         # A published index is final, and a weekend has none. A 404 more than
         # a day old is a holiday; a fresher one may just not be published yet.
-        if d.weekday() >= 5 or prior.get("status") == "ok" or (
+        if d.weekday() >= 5 or _settled(prior) or (
                 prior.get("status") == "none" and d < today - timedelta(days=1)):
             d += timedelta(days=1)
             continue
@@ -937,7 +950,7 @@ def discover(since: date | None = None, use_feed: bool = True,
         if got is None:
             days[key] = {"status": "none"}
         else:
-            days[key] = {"status": "ok", "n": len(got)}
+            days[key] = {"status": "ok", "n": len(got), "forms": FORMS_KEY}
             found.extend(got)
             fresh += 1
         d += timedelta(days=1)
@@ -1235,11 +1248,19 @@ def _selftest_feed_and_index() -> None:
            "21344|COCA COLA CO|10-Q|20260729|edgar/data/21344/0001628280-26-050503.txt\n"
            "21344|COCA COLA CO|4|20260729|edgar/data/21344/0000021344-26-000154.txt\n"
            "1000|X CORP|10-12G|20260729|edgar/data/1000/0000001000-26-000001.txt\n"
-           "2000|Y CORP|20-F/A|20260729|edgar/data/2000/0000002000-26-000002.txt\n")
+           "2000|Y CORP|20-F/A|20260729|edgar/data/2000/0000002000-26-000002.txt\n"
+           "901832|ASTRAZENECA PLC|6-K|20260727|edgar/data/901832/0001104659-26-086846.txt\n"
+           "3000|Z CORP|8-K|20260729|edgar/data/3000/0000003000-26-000003.txt\n")
     got = parse_master(idx)
     assert [(g["cik"], g["form"], g["adsh"], g["filed"]) for g in got] == [
         (21344, "10-Q", "0001628280-26-050503", "2026-07-29"),
-        (2000, "20-F/A", "0000002000-26-000002", "2026-07-29")], got
+        (2000, "20-F/A", "0000002000-26-000002", "2026-07-29"),
+        (901832, "6-K", "0001104659-26-086846", "2026-07-27")], got
+    # A day read before 6-K joined FORMS skipped that day's 6-Ks: not settled.
+    assert not _settled({"status": "ok", "n": 300})
+    assert not _settled({"status": "none"})
+    assert _settled({"status": "ok", "n": 300, "forms": FORMS_KEY})
+    assert FORMS == fundamentals.STATEMENT_FORMS and "6-K" in FORMS
     feed = (b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><entry>'
             b'<title>10-Q - Quartzsea Acquisition Corp (0002047455) (Filer)</title>'
             b'<summary type="html"> &lt;b&gt;Filed:&lt;/b&gt; 2026-10-09 '

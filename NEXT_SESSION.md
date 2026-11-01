@@ -44,6 +44,170 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-11-01 (small hours) — AZN'S GROWTH SCORE: A WIDER PILLAR, AND 6-K INTERIMS NEITHER INGEST READ
+
+Asked: why AstraZeneca's growth_score was missing (so the dip gate dropped it at its 10-13
+low of 154.00 before +21% to 186.65), who else lost theirs, and the fix. Two causes, one of
+each kind. Measured from `data/scores` and the fact store; population named per number.
+
+**1. THE SCORE NEVER "DISAPPEARED" IN OCTOBER -- IT LIVED SEVEN SESSIONS IN AUGUST.**
+`data/scores` holds an AZN growth_score only on 08-12..08-20 (55.3-58.8). Those sessions --
+08-05..08-20 generally -- were written by code BEFORE f880a66 (08-23), when the growth
+pillar had 5 inputs and 3 of 5 cleared FUND_MIN_COVERAGE = 0.60 (rev_growth, asset_growth,
+and eps_growth once the provider overlay supplied it on 08-12). Every session from 08-21 on,
+and 07-24..08-04, was written after f880a66 widened the pillar to 13 inputs with the same
+0.60, i.e. 8 of 13. Under the current code AZN had no growth_score on ANY stored session.
+Identity checked on 10-30: growth_score present <=> >= 8 of the 13 inputs stored, 3,311
+fundamental rows, 0 exceptions.
+
+WHO LOST IT AT THE SAME BOUNDARY (fundamental rows, session 08-20 vs 08-21): 3,116 -> 2,517
+growth scores; **606 lost, 7 gained**. Of the 606: 513 still had >= 3 of the 5 original
+inputs (lost to the wider denominator alone), 89 lost inputs (mostly the new year-on-year
+guard -- AZN's mechanism, below), 4 had no row. A rule change whose coverage cost was not
+measured when it landed; NOT changed here -- proposal below. The brief's suspects (10-14
+`_afm`/`_ANNUAL_FORM_RE`, bank revenue, in-filing AGGREGATE_MAX) are not it: 10-09 -> 10-13
+lost 60 growth scores (withheld bank revenue), regained on 10-19.
+
+**2. THE DATA REGRESSION: 6-K INTERIMS.** AZN files a 20-F and its half year on a 6-K with
+inline XBRL (H1-2026: 0001104659-26-086846, filed 2026-07-27). The bulk ingest
+(`fetch_quarter`) and EDGAR (`edgar.FORMS`) accepted only 10-K/10-Q/20-F/40-F, so 6-K rows
+reached the store only via companyfacts -- which served AZN's 2022-2025 halves and, on
+10-31, still not 2026's (its newest fact there is the 20-F of 02-24). From 2026-07-29 (the
+day the year-back frame gained H1-2025) AZN's current frame stopped at FY2025 against a
+year-back H1-2025: 184 days, outside `_yoy_ok`'s 270-550, so every YoY input (revenue,
+assets, book, both margins) was withheld. The stored rows show the step: 07-28 six growth
+inputs, 07-29 one.
+
+SEC's own 2026q3 bulk set HAS the filing (AZN H1-26 revenue 30,672M, Q2 15,384M) and 373
+6-Ks from 367 ticker-map filers, each with statement facts we read. On 10-30's frame **111
+universe names had their newest period only in a 6-K** (median 181 days behind): AZN, BP,
+HSBC, BCS, BBVA, ING, DB, BTI, BUD, BCE, BMO, BNS, CM, FTS, GRAB, MNDY, MT, ALC, FNV, AU, B,
+AER ... 71 had a fund_score, 8 a growth_score.
+
+FIX
+* `fundamentals.STATEMENT_FORMS` / `statement_form`: ONE form rule for both ingests, now
+  with 6-K and 6-K/A; `edgar.FORMS` is that tuple.
+* `edgar.FORMS_KEY`: each index day records the form rule it was read under; a day read
+  under an older rule is not "settled", so the nightly pass re-reads its lookback instead of
+  skipping a day's 6-Ks. Cost: ~100-150 6-Ks a day from ticker-map filers (10-26..10-30),
+  nearly all press releases without XBRL -- one index.json each, ledgered `no_xbrl`, never
+  fetched again.
+* `_ttm`: A COMPONENT CANNOT ROLL FORWARD IN PLACE OF THE TOTAL. Reading 6-Ks exposed it:
+  ALVO's 20-F has RevenueFromContractsWithCustomers 586.3M beside RevenueFromSaleOfGoods
+  276.3M; its H1-26 6-K tags only the second, so the only complete roll was the component's
+  (276.3 + 105.9 - 204.7 = 177.5M) and its later end beat the total. For revenue a roll's
+  annual leg must now be the largest alias in its own annual filing; else the annual total
+  stands. 1 of 236 revenue rolls on 10-30's frame; 0 of 167 before 6-Ks were read.
+
+DATA
+* Bulk store re-ingested `--backfill --years 5 --force --newest-first`: 22 quarters
+  (2021q3-2026q3), 0 failed, 15.6 min. Diffed per partition against the old copy: the ONLY
+  change is 188,341 6-K rows from 3,163 filings; 0 other rows added or lost.
+* `edgar.py --since 2026-10-01`: 2,071 fetched, 47 stored (44 6-K, 3 6-K/A; 3,146 rows),
+  2,019 without XBRL, 4 without statements, 1 failed -- LOOP's 10-Q, malformed XML at SEC,
+  failing since 10-17 (pre-existing, retried nightly).
+* Old copies: `data/fundamentals_pre20261031`, `data/fundamentals_edgar_pre20261031`.
+* Facts as of 10-30, before vs after: newest period advanced for 113 names, went back for 0;
+  revenue_ttm changed for 93, every one with a period advance. Moves over 25% read from the
+  filed legs: IVA (EUR 4.5M -> 0.05M), SLGL (19.4 -> 1.8M), NBTX are real -- 2025 milestone
+  revenue that H1-2026 did not repeat; ALVO was the component case above.
+
+VERIFIED
+* EDGAR's parse vs the bulk rows for 12 2026q3 6-Ks (AZN, BMO, HSBC, FTS, GRAB, MT, BP,
+  TSEM, ICLR, DSGX, BTI, AU): 800 rows, all matched, 0 value diffs (`fp` is blank in the bulk
+  set for 3 of them; nothing reads it).
+* AZN by hand from the filed legs = pipeline: revenue_ttm 58,739 + 30,672 - 28,045 =
+  61,366M; net income 10,233 + 5,589 - 5,369 = 10,453M; assets 115,833M at 06-30. Pinned
+  (DATED_PINS @ 2026-10-30). regression_pins 43/43.
+* Selftests: `fundamentals._selftest_statement_forms` -- form truth table; `fetch_quarter`
+  on an in-memory data set keeps 10-Q/6-K/6-K-A and drops 8-K; AZN's legs through `_ttm`
+  (61,366M @ 06-30 with the 6-K, 58,739M @ 2025-12-31 without); ALVO's legs give the 586.3M
+  total (177.5M with the guard off). edgar selftest: 6-K index line kept, 8-K dropped, a day
+  read under the old rule not settled.
+
+BEFORE/AFTER -- 10-30 re-scored (`orchestrator.py --step fundamental --step dip --step combo
+... --step docs`; fundamental 3,973 s, the off-cycle Finnhub refetch). Population: the 10-30
+fundamental/dip rows, stored copy before vs re-score after.
+
+    fund_score       2,888 -> 2,894   (+6, 0 lost)
+    growth_score     2,602 -> 2,644   (+42, 0 lost) -- all 42 are names whose newest period
+                                       arrived in a 6-K; nothing else gained or lost one
+    the 111 6-K names  fund_score 71 -> 76, growth_score 8 -> 50, median growth inputs 3 -> 7
+    dip gate         616 -> 632       19 entered (AS, ASM, ASND, AZN, DDI, DSGX, FNV, GD, GEF,
+                                       IMPP, MNDY, ONON, PBR, SHIP, TFPM, TOYO, UPBD, VIK, WPM),
+                                       3 left (DCBO, DLO, FDX -- rank shifts as peers joined)
+
+Gained a growth score: ALC, ALLT, AMBP, AQN, AS, ASM, ASND, AZ, AZN, BIRK, BUD, CLBT, CMRE,
+DAC, DDI, DSGX, FNV, FTS, GFS, GILT, GRAB, GSL, IGIC, IHS, IMPP, MNDY, MT, NOMD, NVS, ONON, PBR,
+REAX, SHIP, SLGL, SSYS, TATT, TFPM, TOYO, TU, VIK, WPM, ZGN.
+
+**AZN NOW: growth_score 56.6 on 8 of 13 inputs** (rev 8.6%, EPS 17.4%, assets 3.0%, rev
+CAGR-3y 11.3%, book 12.4%, gross margin +0.5pp, op margin +2.7pp, mom_12_1 -4.7%) --
+exactly the threshold, and it took BOTH fixes: the 6-K takes it from 2 inputs (provider EPS
+growth, rev CAGR) to 7, and the eighth, `mom_12_1`, exists only because c5572d7 (10-31)
+joined AZN's ADS history to its NYSE line (bars from
+2016-01-04, beta 0.31 against -0.47..+0.16 on nine months). fund_score 78.1 -> 67.5 (the
+growth pillar now counts), fund_rank 93.0, growth_rank 66.4: `dip_gate` 1, dip_score 19.1 --
+at 186.65 it is no longer depressed. Point-in-time history was NOT re-scored: sessions
+before 10-30 still hold the old data, so AZN's 10-13 row is unchanged.
+
+### PROPOSED, NOT CHANGED: THE DIP GATE AND A MISSING GROWTH SCORE
+
+Today a missing growth_score fails the gate exactly like a low one: `dip_gate` 0 either way,
+which is the conflation the module's own docstring forbids. Measured on 10-30 after the fix:
+top-30% fund band 869; gated 632; 161 in the band ranked below the growth cut; **76 in the
+band have NO growth score** -- 43 of them one input short (7/13), including LLY, BAC, AEM,
+PSX, BP, B, TRI, TFC, DEO, CFG, AER, APA, UNM, FRO, ALLY. Across 08-24..10-30 (stored rows,
+before the fix) that group was 84-136 a session.
+
+    A  status quo                         632
+    B  missing growth passes on quality   708  (+76, +12.0%; 9 non-USD; Financials 23,
+                                                Mining 15, Transport 11; median cap $4.6B
+                                                vs $3.6B gated)
+    C  passes if >= 3 of the 5 original   687  (+55)
+       growth inputs exist
+
+RECOMMENDED: first make the state distinct, which moves no name -- `dip_gate` 0 with label
+"no growth score" (or a `growth_known` 0/1 row), so the pages say "not judged on growth"
+instead of "did not qualify". Then decide admission UPSTREAM in the coverage rule (next
+section): B readmits names whose growth is unknown, which turns the AND of the thesis into a
+one-leg gate for 12% of the band, and 17 of the 76 have 1-4 growth inputs. No forward-return
+comparison is offered: ~50 overlapping sessions since the pillar changed is not a test.
+
+### PROPOSED, NOT CHANGED: GROWTH-PILLAR COVERAGE
+
+0.60 of 13 inputs (8) counts inputs that are ABSENT BY DESIGN as missing. Of the 108
+fund-scored names at 7/13 on 10-30: 82 lack BOTH quarter-on-quarter inputs (withheld unless a
+new quarter landed 45-140 days after the frame three months back -- never for a semi-annual
+filer, and for quarterly filers for part of every quarter; 1,775-2,262 of 2,894 have them),
+92 lack `eps_cagr_3y` (defined only when EPS is positive at both ends: 1,113 names). So
+whether a name has a growth score drifts with the reporting calendar.
+
+    >= 8 of 13 (now)                    2,644
+    >= 7 of 13                          2,752  (+108)
+    >= 6 of 13                          2,785
+    >= 3 of the 5 original (pre-08-23)  2,788
+
+RECOMMENDED for a decision: measure coverage against the inputs that CAN exist for the filer
+-- drop the QoQ pair from the denominator when `_q_ok` is false, `eps_cagr_3y` when either
+end's EPS is not positive, the margin changes when no gross profit / operating income is
+filed. `fund_metrics.compute` knows each reason; the store does not, so this needs a run to
+count. Changing it moves fund_score for every name that gains a growth pillar.
+
+### ALSO FOUND, NOT FIXED
+* LLY sits at 7/13 without `op_margin_chg` or `eps_cagr_3y`; PSX, AEM the same pair. Worth a
+  (ddate, qtrs, value, tag, rank) dump before calling it structural.
+* LOOP's 10-Q 0001437749-26-032746: SEC's instance is malformed XML (line 4578); `error` in
+  the EDGAR ledger since 10-17, retried nightly.
+* validate after the re-score: 1 PROBLEM, `ttm:392/393`. Not this change: the whole-universe
+  check (`ttm_invariants.check`, 10-30) finds the SAME 57 bad 4-quarter windows on the SAME 9
+  filers with the old stores and the new -- ACI, AIV, AZO, COST, DPZ, JACK, KR, PEP, RRGB, all
+  but AIV 52/53-week calendars whose month-end rounding opens a 120-day "gap". The 6-Ks added
+  38 windows (22,572 -> 22,610), all clean. Open.
+* The re-score refreshed the Finnhub cache off-cycle (~62 min inside `fundamental`), and
+  `candidates` took 813 s rebuilding the wide bar cache after another session's bar cuts.
+
+
 ## State at 2026-10-31 — 81 LIQUID NAMES WERE "SHORT_HISTORY": 65 NEW LISTINGS, 11 NEW TO US EXCHANGES, 5 GAPS IN OUR STORE (4 NOW JOINED)
 
 **The question.** `data/rejects/2026-10-30.parquet`: of 1,890 liquid names (adv_usd >= $20M,
