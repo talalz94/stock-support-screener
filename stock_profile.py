@@ -896,6 +896,50 @@ def _link(url: str | None, text: str) -> str:
     return (f'<a href="{ui.esc(url)}" target="_blank" rel="noopener">{text}</a>' if url else "&ndash;")
 
 
+def _block_events(ticker: str, asof: str, limit: int = 10) -> str:
+    """Next earnings date, recent SEC filings by type, and any filing the news-event
+    study measured as a warning -- point in time, quoted from its result file."""
+    try:
+        import news_events as NE
+        fl = NE.page_flags(asof).get(ticker, {})
+        help_ = NE.flag_help()
+        e = NE.read(start=(pd.Timestamp(asof) - pd.Timedelta(days=90)).strftime("%Y-%m-%d"), end=asof)
+        e = NE.explode_items(e[e.ticker == ticker])
+    except Exception as exc:                                     # noqa: BLE001
+        return f'<div class="note">filing data unavailable: {ui.esc(type(exc).__name__)}</div>'
+    out = []
+    earn = fl.get("earn")
+    if earn:
+        when = {"bmo": "before the open", "amc": "after the close"}.get(earn[1], "time not given")
+        out.append(f'<div class="card"><b>Next earnings: {ui.esc(earn[0])}</b>, {when} &mdash; the price '
+                   f'reacts in {earn[2]} session(s).<div class="note" style="margin:4px 0 0">'
+                   f'{ui.esc(help_.get("earnings", ""))}</div></div>')
+    else:
+        out.append('<div class="note">No earnings date in the calendar snapshot for this session '
+                   '(snapshots began 2026-11-01).</div>')
+    for short, tag, sess_, url, measured in fl.get("warn") or []:
+        out.append(f'<div class="card" style="border-left:3px solid var(--neg)"><b>&#9888; {ui.esc(tag)}</b> '
+                   f'&mdash; 8-K public {ui.esc(sess_)} (<a href="{ui.esc(url)}" target="_blank" '
+                   f'rel="noopener">filing</a>).<div class="note" style="margin:4px 0 0">{ui.esc(measured)}</div></div>')
+    if len(e):
+        g = (e.sort_values("accepted_utc", ascending=False)
+              .groupby(["accession", "public_session", "form", "cik"], sort=False)["event_type"]
+              .apply(lambda x: ", ".join(dict.fromkeys(x))).reset_index().head(limit))
+        rows = "".join(
+            f'<tr><td>{ui.esc(r.public_session)}</td><td>{ui.esc(r.form)}</td>'
+            f'<td>{ui.esc(r.event_type.replace("_", " "))}</td>'
+            f'<td><a href="{ui.esc(NE._sec_url(r.cik, r.accession))}" target="_blank" rel="noopener">filing</a></td></tr>'
+            for r in g.itertuples(index=False))
+        out.append('<div class="scroll"><table><thead><tr><th class="lab">public</th><th class="lab">form</th>'
+                   f'<th class="lab">what it reports</th><th class="lab"></th></tr></thead><tbody>{rows}</tbody>'
+                   f'</table></div><div class="note">SEC filings of the last 90 days (latest {limit}), typed by '
+                   '8-K item. The news-event study found no filing type that predicts a rise; the three '
+                   'marked &#9888; above were measured as warnings.</div>')
+    else:
+        out.append('<div class="note">No 8-K, deal or activist filing in the last 90 days.</div>')
+    return "".join(out)
+
+
 def _block_insider(ticker: str, asof: str) -> str:
     """Insider buying and selling, House trades, each buyer's record -- and what the
     studies measured, read from their files (never typed here)."""
@@ -1315,6 +1359,8 @@ def build(ticker: str, verbose: bool = True,
                          + panes)
         elif key == "insider":
             parts.append("<h2>Insider and House trades</h2>" + _block_insider(ticker, asof))
+        elif key == "events":
+            parts.append("<h2>Filings and earnings</h2>" + _block_events(ticker, asof, opt.get("limit") or 10))
         elif key == "fundamentals":
             parts.append("<h2>Fundamental metrics</h2>" + _metric_card(
                 "", sc.get("fundamental") or {}, opt.get("metrics", []),

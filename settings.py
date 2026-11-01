@@ -45,7 +45,7 @@ PROFILE_FILE = config.DATA / "_profile.json"
 DEFAULT_PROFILE: dict[str, Any] = {
     "schema": SCHEMA_VERSION,
     "name": "default",
-    "order": ["header", "chart", "radar", "scores", "insider", "financials", "growth",
+    "order": ["header", "chart", "radar", "scores", "insider", "events", "financials", "growth",
               "fundamentals", "sentiment", "hype", "levels"],
     "blocks": {
         "header": {"enabled": True,
@@ -110,6 +110,9 @@ DEFAULT_PROFILE: dict[str, Any] = {
         # Directors' and officers' purchases and sales, House trades, each buyer's
         # record, and the measured result of each (insider_signals, 2026-10-27).
         "insider": {"enabled": True},
+        # Next earnings date, recent SEC filings by type, and the filing types the
+        # news-event study measured as warnings (news_events, 2026-11-01).
+        "events": {"enabled": True, "limit": 10},
     },
 }
 

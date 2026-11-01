@@ -244,6 +244,11 @@ border:1px solid var(--line);border-radius:9px;position:sticky;top:46px;z-index:
 .tk .star.on{color:var(--warn)}
 .insb{margin-left:5px;padding:0 5px;border-radius:9px;font-size:10px;font-weight:600;
   background:var(--blkbg);color:var(--blk)}
+.evw{margin-left:5px;padding:0 5px;border-radius:9px;font-size:10px;font-weight:600;
+  background:var(--negbg);color:var(--neg);text-decoration:none;white-space:nowrap}
+.eve{margin-left:5px;padding:0 5px;border-radius:9px;font-size:10px;font-weight:600;
+  background:var(--warnbg);color:var(--warn);white-space:nowrap}
+.eve.later{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
 .watchtog{display:inline-flex;align-items:center;gap:4px;font-size:12px;
   color:var(--muted);cursor:pointer}
 .watchn{color:var(--warn)}
@@ -337,7 +342,8 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
            sessions: list[str] | None = None,
            dropped: list[str] | None = None,
            strat_cov: dict | None = None,
-           badges: dict | None = None) -> str:
+           badges: dict | None = None,
+           flags: dict | None = None) -> str:
     navbar = ui.nav("explore", 1,
                     ui.session_picker(asof, sessions or [],
                                       "{d}.html",
@@ -349,6 +355,18 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
     lower = json.dumps(sorted(LOWER_BETTER))
     integerish = json.dumps(sorted(INTEGERISH))
     badge_js = json.dumps(badges or {}, separators=(",", ":")).replace("<", "\\u003c")
+    # Warning filings and next earnings (news_events.page_flags), COMPACT: 3,000+ rows,
+    # so the measured text goes in the legend once, not into every row.
+    flag_js = json.dumps({t: {"w": [[w[0], w[2], w[3]] for w in (v.get("warn") or [])], "e": v.get("earn")}
+                          for t, v in (flags or {}).items()},
+                         separators=(",", ":")).replace("<", "\\u003c")
+    try:
+        import news_events as _NE
+        _fh = _NE.flag_help()
+        warn_help = " | ".join(v for k, v in _fh.items() if k != "earnings")
+        earn_help, earn_soon = _fh.get("earnings", ""), int(_NE.EARN_SOON)
+    except Exception:                                            # noqa: BLE001
+        warn_help, earn_help, earn_soon = "news-event data unavailable", "", 10
     try:
         import insider_signals as _SIG
         badge_help = _SIG.BADGE_HELP
@@ -422,6 +440,8 @@ every unscored company at the top of an ascending P/E screen, which is the most
 misleading way to show "we don't know". Colour marks direction only for metrics
 where low is conventionally better; sorting itself is always literal.
 <br><b>insider</b> after a ticker = {ui.esc(badge_help)}
+<br><b>&#9888; tags</b> = a recent SEC filing measured as a WARNING (click for the filing): {ui.esc(warn_help)}
+<br><b>earnings</b> tag (mm-dd &middot; sessions away) = {ui.esc(earn_help)}. A grey tag is further out.
 <br>Rows render on demand, so sorting stays instant across the full universe.
 </div>
 </div>
@@ -430,6 +450,17 @@ const DATA = {data};
 const LOWER = new Set({lower});
 const INTEGERISH = new Set({integerish});
 const BADGE = {badge_js};
+const FLAGS = {flag_js}, SOON = {earn_soon}, HR = {{bmo: 'before the open', amc: 'after the close'}};
+function evtags(tk){{
+  const f = FLAGS[tk]; if (!f) return '';
+  let h = '';
+  for (const w of (f.w || [])) h += '<a class="evw" href="' + w[2] + '" target="_blank" rel="noopener"'
+      + ' title="8-K public ' + w[1] + ' (see the legend for what was measured)">&#9888; ' + w[0] + '</a>';
+  if (f.e) h += '<span class="eve' + (f.e[2] <= SOON ? '' : ' later') + '" title="next earnings ' + f.e[0]
+      + (HR[f.e[1]] ? ', ' + HR[f.e[1]] : ', time not given') + '; reacts in ' + f.e[2] + ' session(s)">'
+      + f.e[0].slice(5) + ' &middot; ' + f.e[2] + '</span>';
+  return h;
+}}
 const COLS = DATA.cols, ROWS = DATA.rows;
 const NCOL = 4;                      // ticker, name, sector, exchange
 let view = ROWS.slice(), sortI = null, sortAsc = false, painted = 0;
@@ -599,6 +630,7 @@ function rowHTML(r){{
         + ' night, not sampled">' + (WATCH.has(tk) ? '★' : '☆')
         + '</span>' + cell
         + (BADGE[tk] ? '<span class="insb" title="' + BADGE[tk] + '">insider</span>' : '')
+        + evtags(tk)
         + '<a class="tv" href="' + tvLink(tk, r[3]) + '" target="_blank"'
         + ' rel="noopener" title="TradingView">&#9741;</a></td>'
         + '<td class="sec">' + (r[2] || '') + '</td>';
@@ -835,11 +867,16 @@ def build(metrics: list[str] | None = None, verbose: bool = True,
         badges = SIG.badges(asof)
     except Exception:                                            # noqa: BLE001
         badges = {}
+    try:
+        import news_events as NE
+        flags = NE.page_flags(asof)
+    except Exception:                                            # noqa: BLE001
+        flags = {}
     config.REPORTS_EXPLORE.mkdir(parents=True, exist_ok=True)
     out = OUT if session is None else \
         config.REPORTS_EXPLORE / f"{session}.html"
     out.write_text(render(cols, rows, prov, asof, available_sessions(),
-                          dropped=dropped, strat_cov=strat_cov, badges=badges),
+                          dropped=dropped, strat_cov=strat_cov, badges=badges, flags=flags),
                    encoding="utf-8")
     if verbose:
         print(f"  explore: {out}  ({len(rows):,} tickers x {len(cols)} metrics, "

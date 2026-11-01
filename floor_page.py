@@ -56,7 +56,7 @@ COLS = [
     ("vol", "$M / day", "20-day average dollar volume, millions (pattern requires >= $10M)", "vol"),
 ]
 IX = {c[0]: i for i, c in enumerate(COLS)}
-EXTRA = ["peak", "peak_date", "start", "start_date", "badge"]
+EXTRA = ["peak", "peak_date", "start", "start_date", "badge", "warn", "earn"]
 
 
 def _num(v, nd: int = 5):
@@ -120,6 +120,11 @@ def payload(asof: str) -> dict:
         badges = SIG.badges(asof)
     except Exception:                                            # noqa: BLE001
         badges = {}
+    try:
+        import news_events as NE
+        flags = NE.page_flags(asof)
+    except Exception:                                            # noqa: BLE001
+        flags = {}
     rows = []
     for r in c.itertuples(index=False):
         sent = _num(sc.at[r.ticker, "sent_rank"]) if (r.ticker in sc.index and "sent_rank" in sc) else None
@@ -140,9 +145,19 @@ def payload(asof: str) -> dict:
         row[IX["hype"]] = _num(sc.at[r.ticker, "hype_score"], 1) if (r.ticker in sc.index and "hype_score" in sc) else None
         row[IX["sent"]] = None if sent is None else round(sent * 100, 1)
         row[IX["vol"]] = _num(r.dv20, 0)
-        row += [_num(r.peak, 2), r.peak_date, _num(r.start, 2), r.start_date, badges.get(r.ticker, "")]
+        fl = flags.get(r.ticker, {})
+        row += [_num(r.peak, 2), r.peak_date, _num(r.start, 2), r.start_date, badges.get(r.ticker, ""),
+                fl.get("warn") or [], fl.get("earn")]
         rows.append(row)
     return {"asof": asof, "rows": rows, "dates": ses, "series": series}
+
+
+def _earn_soon() -> int:
+    try:
+        import news_events as NE
+        return int(NE.EARN_SOON)
+    except Exception:                                            # noqa: BLE001
+        return 10
 
 
 def _evidence() -> str:
@@ -194,6 +209,15 @@ def _evidence() -> str:
         out.append(f"<div><b>insider</b> after a ticker = {ui.esc(SIG.BADGE_HELP)}</div>")
     except Exception:                                            # noqa: BLE001
         pass
+    try:
+        import news_events as NE
+        fh = NE.flag_help()
+        out.append("<div><b>&#9888; tags</b> = a recent SEC filing the news-event study measured as a WARNING "
+                   "(click it for the filing): <span class=\"flm\">"
+                   + ui.esc(" | ".join(v for k, v in fh.items() if k != "earnings")) + "</span></div>")
+        out.append(f"<div><b>earnings</b> tag = {ui.esc(fh.get('earnings', ''))}. A grey tag is further out.</div>")
+    except Exception:                                            # noqa: BLE001
+        pass
     out.append("<div><b>History is flattered:</b> stocks that later vanished are under-represented, and "
                "they are exactly the beaten-down kind this pattern selects. Not a buy list; not advice.</div>")
     return "".join(out)
@@ -240,6 +264,11 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system
 .flaxl{fill:var(--ink);font:600 10px -apple-system,Segoe UI,Roboto,sans-serif}
 .flno{color:var(--muted);font-size:11px}
 .flins{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--blkbg);color:var(--blk)}
+.flwarn{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--negbg);color:var(--neg);text-decoration:none;white-space:nowrap}
+.flwarn:hover{text-decoration:underline}
+.flearn{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--warnbg);color:var(--warn);white-space:nowrap}
+.flearn.later{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
+.flm{color:var(--muted)}
 .flfoot{display:flex;gap:10px;align-items:center;margin-top:8px;color:var(--muted);font-size:11.5px}
 </style></head><body>
 @@NAV@@
@@ -265,6 +294,14 @@ var R=@@ROWS@@, DATES=@@DATES@@, S=@@SERIES@@, K=@@KINDS@@, IX=@@IX@@, NC=@@NC@@
 var $=function(s){return document.getElementById(s)};
 var sec='all', quiet=false, tier='match', q='', sc=IX.above, sd=1, open={};
 function eh(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');}
+var HR={bmo:'before the open',amc:'after the close'}, SOON=@@EARN_SOON@@;
+function eq(s){return eh(s).replace(/"/g,'&quot;');}
+function flflags(r){
+  var h='',w=r[NC+5]||[],i,e=r[NC+6];
+  for(i=0;i<w.length;i++) h+='<a class="flwarn" href="'+eq(w[i][3])+'" target="_blank" rel="noopener" title="'+eq(w[i][1]+' -- 8-K public '+w[i][2]+'. '+w[i][4])+'">&#9888; '+eh(w[i][0])+'</a>';
+  if(e) h+='<span class="flearn'+(e[2]<=SOON?'':' later')+'" title="'+eq('Next earnings '+e[0]+(HR[e[1]]?', '+HR[e[1]]:', time not given')+'; the price reacts in '+e[2]+' session(s).')+'">earnings '+eh(e[0].slice(5))+' &middot; '+e[2]+'</span>';
+  return h;
+}
 function fmt(v,k){
   if(v==null) return '&ndash;';
   switch(k){
@@ -329,7 +366,7 @@ function render(){
   var h='';
   for(var i=0;i<m.length;i++){
     var r=m[i], t=r[IX.ticker];
-    h+='<tr class="flr'+(open[t]?' open':'')+'" data-t="'+eh(t)+'"><td>'+chart(t,150,40,false,r[IX.floor])+'</td><td><b>'+eh(t)+'</b>'+(r[NC+4]?'<span class="flins" title="'+eh(r[NC+4])+'">insider</span>':'')+'</td>';
+    h+='<tr class="flr'+(open[t]?' open':'')+'" data-t="'+eh(t)+'"><td>'+chart(t,150,40,false,r[IX.floor])+'</td><td><b>'+eh(t)+'</b>'+(r[NC+4]?'<span class="flins" title="'+eh(r[NC+4])+'">insider</span>':'')+flflags(r)+'</td>';
     for(var j=1;j<K.length;j++) h+='<td class="'+(K[j]=='s'?'':'n')+'">'+fmt(r[j],K[j])+'</td>';
     h+='</tr>'; if(open[t]) h+=det(r);
   }
@@ -378,7 +415,7 @@ def build(asof: str | None = None) -> tuple[Path, int]:
             .replace("@@EVIDENCE@@", _evidence()).replace("@@HEADS@@", heads)
             .replace("@@ROWS@@", js(p["rows"])).replace("@@DATES@@", js(p["dates"]))
             .replace("@@SERIES@@", js(p["series"])).replace("@@KINDS@@", js([c[3] for c in COLS]))
-            .replace("@@IX@@", js(IX)).replace("@@NC@@", str(len(COLS))).replace("@@AT@@", str(F.AT_FLOOR)))
+            .replace("@@IX@@", js(IX)).replace("@@NC@@", str(len(COLS))).replace("@@AT@@", str(F.AT_FLOOR)).replace("@@EARN_SOON@@", str(_earn_soon())))
     config.REPORTS_ZONES.mkdir(parents=True, exist_ok=True)
     out = config.REPORTS_ZONES / "floor.html"
     out.write_text(html, encoding="utf-8")
