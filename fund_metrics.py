@@ -755,6 +755,42 @@ def compute(cur: pd.DataFrame, prior: pd.DataFrame, px: pd.DataFrame,
     else:
         out["rev_growth_q"] = np.nan
         out["eps_growth_q"] = np.nan
+
+    # WHICH GROWTH INPUTS CANNOT EXIST FOR THIS FILER -- as opposed to missing.
+    #
+    # `rank_pillars` counts coverage over the inputs that CAN exist (the
+    # `_na_<metric>` flags below), so a filer is not blanked for one that is
+    # undefined by construction. Measured 2026-11-01 on 10-30: 108 fund-scored
+    # names sat at 7 of 13 growth inputs, one short of 0.60; 82 lacked BOTH
+    # quarter-on-quarter inputs and 92 lacked eps_cagr_3y. Not applicable means:
+    #   QoQ pair   no report 45-140 days before this one (`_q_ok` false): never
+    #              for a semi-annual filer, and between quarters for the rest
+    #   CAGR pair  no frame three years back (`_t3_ok` false), or a
+    #              non-positive end -- a CAGR is defined only when both are > 0
+    #   margins    the margin's line is reported in NEITHER period: a bank or
+    #              insurer has no gross profit, LLY presents no operating
+    #              income. Reported in only one period is a gap and counts.
+    # Every other input is NEVER excused. The first version also excused any
+    # YoY input whose line was absent in both periods, and it reached 374 new
+    # scores, 17 on 3-4 inputs, mostly by excusing DATA gaps (EPS without a
+    # tagged share count: 183; FCF, EBITDA, revenue) -- not this rule.
+    # mom_12_1 is never excused either: missing price history is a gap (AZN).
+    def _never(now, then):
+        return (pd.Series(now).reindex(d.index).isna()
+                & pd.Series(then).reindex(d.index).isna())
+
+    out["_na_gross_margin_chg"] = _never(d["gross_profit"], p["gross_profit"])
+    out["_na_op_margin_chg"] = _never(d["ebit"], p["ebit"])
+    out["_na_rev_growth_q"] = ~_q_ok.reindex(d.index).fillna(False).astype(bool)
+    out["_na_eps_growth_q"] = out["_na_rev_growth_q"]
+    _no3 = ~_t3_ok.reindex(d.index).fillna(False).astype(bool)
+    if t3 is not None:
+        _e3 = _safe(t3["net_income"], t3["shares"])
+        out["_na_rev_cagr_3y"] = _no3 | (d["revenue"] <= 0) | (t3["revenue"] <= 0)
+        out["_na_eps_cagr_3y"] = _no3 | (eps_c <= 0) | (_e3 <= 0)
+    else:
+        out["_na_rev_cagr_3y"] = True
+        out["_na_eps_cagr_3y"] = True
     # PEG only means anything when both legs are positive; a negative-growth PEG
     # is arithmetically fine and financially nonsense.
     g = out["eps_growth"] * 100.0
@@ -830,7 +866,17 @@ def rank_pillars(m: pd.DataFrame, sector: pd.Series | None = None) -> pd.DataFra
         if not cols:
             continue
         sub = out[cols]
-        cov = sub.notna().mean(axis=1)
+        # Coverage over the inputs that CAN exist for the filer: an input
+        # flagged `_na_<metric>` by `compute` (undefined by construction) leaves
+        # the denominator, unless a value arrived anyway (the provider overlay).
+        # Only growth inputs carry flags; every other pillar is unchanged.
+        have = sub.notna()
+        can = pd.DataFrame(True, index=sub.index, columns=cols)
+        for c in cols:
+            f = m.get(f"_na_{c[2:]}")
+            if f is not None:
+                can[c] = have[c] | ~pd.Series(f, index=m.index).fillna(False).astype(bool)
+        cov = (have.sum(axis=1) / can.sum(axis=1).replace(0, np.nan)).fillna(0.0)
         out[f"{pillar}_score"] = (sub.mean(axis=1) * 100).where(
             cov >= config.FUND_MIN_COVERAGE)
         out[f"{pillar}_cov"] = cov
@@ -1049,6 +1095,40 @@ def selftest(verbose: bool = True) -> None:
         fails.append("higher-is-better metric ranked backwards")
     if r["r_ev_ebitda"].iloc[-1] >= r["r_ev_ebitda"].iloc[0]:
         fails.append("lower-is-better metric ranked backwards")
+
+    # GROWTH COVERAGE COUNTS ONLY INPUTS THAT CAN EXIST (2026-11-01). Ten names
+    # with every growth input give the ranks; then four test rows, each with 7
+    # or 5 of 13 present and the QoQ pair and CAGR pair absent:
+    #   SEMI  7 present, QoQ pair flagged          7/11 = 0.64 -> scored
+    #   NOFL  the same 7, nothing flagged          7/13 = 0.54 -> blank
+    #   THIN  5 present, QoQ pair flagged           5/11 = 0.45 -> blank (an
+    #         UNFLAGGED missing input still counts -- the first cut dropped it)
+    #   OVER  SEMI, plus a value in a flagged input 8/12 -> it counts both ways
+    g = [n for n, (p, _, _) in REGISTRY.items() if p == "growth"]
+    seven = [n for n in g if n not in ("rev_growth_q", "eps_growth_q",
+                                       "rev_cagr_3y", "eps_cagr_3y",
+                                       "ebitda_growth", "fcf_growth")]
+    rows = [{"ticker": f"F{i}", **{n: float(i) for n in g}} for i in range(10)]
+    rows += [{"ticker": "SEMI", **{n: 5.0 for n in seven}},
+             {"ticker": "NOFL", **{n: 5.0 for n in seven}},
+             {"ticker": "THIN", **{n: 5.0 for n in seven[:5]}},
+             {"ticker": "OVER", **{n: 5.0 for n in seven}, "rev_growth_q": 5.0}]
+    gm = pd.DataFrame(rows)
+    for n in ("rev_growth_q", "eps_growth_q"):
+        gm[f"_na_{n}"] = gm["ticker"].isin(["SEMI", "THIN", "OVER"])
+    gr = rank_pillars(gm).set_index(gm["ticker"])
+    if pd.isna(gr.at["SEMI", "growth_score"]):
+        fails.append("7 of 11 inputs that can exist should score")
+    if pd.notna(gr.at["NOFL", "growth_score"]):
+        fails.append("7 of 13 with nothing flagged must stay blank")
+    if pd.notna(gr.at["THIN", "growth_score"]):
+        fails.append("an unflagged missing input stopped counting against coverage")
+    if not (pd.notna(gr.at["OVER", "growth_score"])
+            and abs(gr.at["OVER", "growth_cov"] - 8 / 12) < 1e-9):
+        fails.append(f"a value in a flagged input must count: cov "
+                     f"{gr.at['OVER', 'growth_cov']}, want 8/12")
+    if gr.loc[[f"F{i}" for i in range(10)], "growth_cov"].ne(1.0).any():
+        fails.append("full-coverage names lost coverage")
 
     for name, (pillar, direction, _) in REGISTRY.items():
         if pillar not in PILLARS:
