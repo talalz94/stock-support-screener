@@ -1086,6 +1086,24 @@ def _step_insider(asof: str) -> tuple[int, str]:
     return int(res.get("rows", 0) or 0), detail
 
 
+def _step_news_events(asof: str) -> tuple[int, str]:
+    """Stock news events into data/news_events/: SEC filings by type (8-K items, deal and
+    activist forms) since the watermark, the press-release and FDA feeds, and one
+    earnings-calendar snapshot a day. NOTHING DEPENDS ON THIS STEP. See news_events.py."""
+    import news_events
+    import store_lock
+    try:
+        res = news_events.update(verbose=False, wait_s=news_events.WAIT_NIGHTLY)
+    except store_lock.StoreBusy as exc:
+        raise StepSkipped(f"skipped: a manual run holds the events store's writer lock -- {exc.holder()}")
+    ed, wi, cal = res["edgar"], res["wires"], res["calendar"]
+    detail = (f"{ed['new']:,} new filing event(s) over {ed['index_days']} index day(s) + feed "
+              f"(through {ed['through']}, {ed['pending']} pending); wires "
+              + ", ".join(f"{k} {v}" for k, v in wi.items() if k != "stored")
+              + (f"; calendar {cal.get('rows', 0):,} row(s) {cal.get('from')}..{cal.get('to')}" if cal else ""))
+    return int(ed["new"]), detail
+
+
 def _step_congress(asof: str) -> tuple[int, str]:
     """House members' trades (Periodic Transaction Reports) into data/congress/.
 
@@ -1532,6 +1550,19 @@ def _step_validate(asof: str) -> tuple[int, str]:
         _lap("insider", time.time() - _t)
     except Exception as exc:                                     # noqa: BLE001
         parts.append(f"insider:ERR({type(exc).__name__})")
+    # The `news` group: news-event store freshness. WARN-only, like `insider`.
+    try:
+        _t = time.time()
+        import validate as _V
+        _V._results.clear()
+        _V.check_news(asof, False)
+        _ew = [r for r in _V._results if r[2] == _V.WARN]
+        parts.append("news:" + ("pass" if not _ew else f"{len(_ew)}warn"))
+        for _g, _n, _st, _d in _V._results:
+            note(f"news.{_n}"[:48], int(_st == _V.OK), 0, _d)
+        _lap("news", time.time() - _t)
+    except Exception as exc:                                     # noqa: BLE001
+        parts.append(f"news:ERR({type(exc).__name__})")
         note("insider_group", 0, 0, repr(exc)[:120])
 
     log(f"    [validate] timing: {', '.join(_laps)}")
@@ -1680,6 +1711,10 @@ REGISTRY: tuple[Step, ...] = (
          session_indexed=False,
          desc="corporate insider trades (SEC Form 4): new quarterly dataset if posted, "
               "then each new Form 4 from EDGAR"),
+    Step("news_events", _step_news_events, config.CADENCE_DAILY, timeout=1800,
+         session_indexed=False,
+         desc="stock news events: SEC 8-K items and deal/activist forms, PR Newswire "
+              "and FDA feeds, earnings-calendar snapshot"),
     Step("congress", _step_congress, config.CADENCE_DAILY, timeout=1800,
          session_indexed=False,
          desc="House members' trades from new Periodic Transaction Reports (Senate: no "
