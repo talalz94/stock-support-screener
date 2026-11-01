@@ -80,7 +80,9 @@ def run_once(asof: str | None = None, verbose: bool = True) -> dict:
     write_html(payload, asof)
     if verbose:
         log(f"  {payload['n_scored']:,} scored of {len(uni):,} tradeable "
-            f"({payload['n_nodata']:,} without enough filings) | {time.time() - t0:.0f}s")
+            f"({payload['n_few_pillars']:,} on fewer than {config.FUND_MIN_PILLARS} "
+            f"pillars, {payload['n_nodata']:,} without enough filings) | "
+            f"{time.time() - t0:.0f}s")
     return {"ok": True, "n": payload["n_scored"]}
 
 
@@ -102,6 +104,15 @@ def build_payload(asof: str, rows: pd.DataFrame, top: int = 150) -> dict:
     has = w.get("has_fundamentals", pd.Series(1.0, index=w.index)).fillna(0)
     scored = w[(has > 0) & w.get("fund_score", pd.Series(np.nan)).notna()].copy()
     n_nodata = int((has == 0).sum())
+    # Filed and scored per pillar, but on fewer than config.FUND_MIN_PILLARS, so
+    # no composite to rank here. Counted so the page says where they went:
+    # their pillar scores are in Explore and on their profiles.
+    pcol = [c for c in ("quality_score", "value_score", "safety_score",
+                        "growth_score") if c in w.columns]
+    n_pill = (w[pcol].notna().sum(axis=1) if pcol
+              else pd.Series(0, index=w.index))
+    fs = w["fund_score"] if "fund_score" in w.columns         else pd.Series(np.nan, index=w.index)
+    n_few = int(((has > 0) & fs.isna() & (n_pill > 0)).sum())
 
     scored = scored.sort_values("fund_score", ascending=False)
 
@@ -147,6 +158,7 @@ def build_payload(asof: str, rows: pd.DataFrame, top: int = 150) -> dict:
 
     return {"asof": asof, "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "n_scored": int(len(scored)), "n_nodata": n_nodata,
+            "n_few_pillars": n_few,
             "sectors": sect, "cards": cards,
             "flags": _flags(scored)}
 
@@ -250,7 +262,8 @@ font-size:11px;margin-right:3px;font-variant-numeric:tabular-nums}}
 </style></head><body>{_UI_NAV}
 <h1>Fundamental screen &middot; {esc(asof)}</h1>
 <div class="meta">generated {esc(payload['generated'])} &middot;
-{payload['n_scored']:,} scored &middot; {payload['n_nodata']:,} without enough filings
+{payload['n_scored']:,} scored &middot; {payload.get('n_few_pillars', 0):,} on fewer than
+{config.FUND_MIN_PILLARS} pillars (pillar scores in Explore) &middot; {payload['n_nodata']:,} without enough filings
 &middot; ranked by composite</div>
 <div class="hdr">
  <div class="stat">Piotroski F &ge; 8<b>{fl['strong_f_ge_8']:,}</b></div>

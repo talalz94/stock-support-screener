@@ -44,6 +44,57 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-11-01 (evening) — A FUND SCORE NEEDS TWO OF THE FOUR PILLARS
+
+User decision, after the coverage change below showed 149 new fund scores on the growth
+pillar alone: `fund_score` now needs `config.FUND_MIN_PILLARS` = 2 of quality, value, safety,
+growth. Asked explicitly: the names below it must not become invisible or stop updating.
+
+WITHHELD, NOT DROPPED -- checked consumer by consumer:
+* still computed and stored every night: the `fundamental` step scores the whole tradeable
+  universe and writes every row, so each pillar score, every input metric and `fund_cov`
+  (0.25 = one pillar) are kept, and the name gains a fund_score the night a second pillar
+  lands. Nothing filters the universe on fund_score.
+* still shown: Explore's rows are every ticker with any stored metric (pillar scores, combo,
+  hype ... and a blank fund_score); profiles are built from bounce flags and on demand; the
+  bounce, floor, zones, sector and insider pages select on their own criteria; combo never
+  used fund_score (it is in `COMPOSITE`).
+* leaves only the lists whose rule IS the fund score: the dip quality gate (`dip_gate` 0,
+  still emitted), candidates (fund_score >= 55), and the fundamentals ranking page, which now
+  says how many sit below two pillars ("N on fewer than 2 pillars (pillar scores in
+  Explore)").
+
+MEASURED, 10-30 re-scored: (11 steps, 0 failed; fundamental 282 s). Population: the 10-30
+fundamental/dip rows, stored copy before vs re-score after.
+
+    fund_score   3,043 -> 2,539   504 withheld, 0 gained. Their one pillar: growth 433,
+                 quality 62, value 5, safety 4; Financials 252, Biotech 107; 45 non-USD.
+                 All 504 still have their rows (34 metrics each), the same pillar scores,
+                 fund_cov 0.25 and a dip_gate (0). No kept name's fund_score moved (0 of 2,539).
+    dip gate     711 -> 587       117 one-pillar names left; 7 more fell below a top-30% band
+                 now drawn from fewer names (EXTR, MCS, MGA, MSA, PLPC, SPGI, WRBY); 0 entered.
+    candidates   96 -> 84;  combo 3,011 unchanged;  validate: the same two pre-existing flags.
+    page         "2,539 scored · 504 on fewer than 2 pillars (pillar scores in Explore) · 94
+                 without enough filings"; Explore lists GM, BNS, BRK.B, CM with their growth
+                 scores and a blank fund_score.
+
+Withheld, largest first: BRK.B, TTE, SCHW, IBKR, RIO, PNC, WMB, KKR, DASH, HOOD, GM, AJG, APO,
+DLR, AFL, O, STT, AMP, LYV, PRU, NTRS, RJF, ARES, CPRT (growth pillar only), EQNR, MSTR
+(quality only). selftest: a one-pillar name keeps its pillar score and fund_cov and gets no
+fund_score; two pillars give one.
+
+WHY BIG NAMES ARE AMONG THEM -- A DEBT GAP, NOT A RULE. GM, WMB, DASH, CPRT have a growth
+pillar and no other: quality 7/12, value 4/7 (3/7), safety 4/8 (3/8) -- each just under
+0.60, and the same in the original 10-30 nightly, so not caused today. The missing inputs all
+need DEBT (debt_to_equity, net_debt_ebitda, ev_ebitda, ev_sales, fcf_yield, roic, roic_wacc,
+eva, interest_cover): `debt_lt` and `debt_st` are blank in `facts_asof` for all four, while
+TAGS knows only LongTermDebtNoncurrent / LongTermDebt / LongtermBorrowings and
+LongTermDebtCurrent / ShortTermBorrowings / DebtCurrent. 195 of the 252 non-financial names
+withheld lack debt_to_equity. OPEN, proposed as its own session: dump the debt tags these
+filers use, add aliases with care (total vs component, leases once; CPRT may truly have
+none), re-ingest (WANTED filters at ingest), re-measure.
+
+
 ## State at 2026-11-01 (afternoon) — GROWTH COVERAGE COUNTS ONLY INPUTS THAT CAN EXIST
 
 The user approved the coverage proposal in the 2026-11-01 (small hours) AZN section ("suggestion 2"). The growth

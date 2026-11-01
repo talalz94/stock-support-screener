@@ -992,6 +992,10 @@ FUNDAMENTALS_MIN_FILER_FRAC = 0.55   # of the 8 nearest quarters' median
 # measuring is the mistake this project has already made once.
 FUND_WEIGHTS = {"quality": 1.0, "value": 1.0, "safety": 1.0, "growth": 1.0}
 FUND_MIN_COVERAGE = 0.60      # fraction of pillar inputs present, else no score
+# fund_score needs at least this many of the four pillars (user decision,
+# 2026-11-01). Below it the name keeps every pillar score, fund_cov and metric,
+# is scored every night, and gains a fund_score the night a second pillar lands.
+FUND_MIN_PILLARS = 2
 
 # Winsorise before ranking: XBRL carries genuine 1e12 outliers from unit errors
 # and micro-cap equity near zero makes ratios explode. Clipping at the 1/99th
