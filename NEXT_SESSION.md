@@ -44,6 +44,80 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-11-01 — SPIN-OFF STEPS AND OTHER COMPANIES' PRICES REMOVED FROM 35 SERIES
+
+Zones were drawn across prices that did not belong to the stock: a parent's history
+before a spin-off still carried the business that left (HON -50.9% on 2026-06-29), and a
+reused symbol carried the previous company's years (FLY: Fly Leasing to 2021). Fixed in
+the bar store, re-applied on every fetch, and checked nightly.
+
+**Reused symbols: 11 cuts (13,763 bars moved, none deleted).** Scan: every liquid name
+(1,890; $20M+/day, $5+) for a gap of 20+ sessions inside its stored series -> exactly 9.
+Each checked in SEC records: the company on the ticker today first registered AFTER the
+old series ended -- CAI, CCXI, FLY, JAN, LIFE, NIQ, WLTH, XE -- or, NBIS, is Yandex
+renamed after selling its Russian business and a 2-month break. Two more found among the
+spin-offs: XPER and MSGE, spun-off companies that took the parent's old ticker (XPER's
+pre-2022-10-03 closes are identical to ADEA's). Bars before `keep_from` move to an
+archive ticker (`FLY~2021` ...), kept for studies, and `apply_cuts` drops them from every
+fetch. `config.HISTORY_CUTS`, with the evidence per name.
+
+**Spin-offs: 27 adjustments over 24 parents.** Found from the other side, because drop
+size alone cannot: 6,748 drops of 12%+ (z <= -4) in liquid names, nearly all earnings
+crashes, and some new listing starts on almost every day. So: every Form 10-12B
+registrant since 2016 from SEC's quarterly form indexes (739 filings, 242 registrants,
+117 first trading inside our history), each information statement read for its parent
+and distribution ratio; the seven left blank (Honeywell Aerospace, FedEx Freight, Qnity,
+Ralliant, Everus, Sandisk, MSG Rangers) from the parents' own 8-Ks via SEC full-text
+search. `factor` = parent / (parent + ratio x spin-off) on the first common session,
+from the SOURCE'S RAW prices -- because the source's "split" adjustment treats spin-offs
+three ways, measured against `adjustment=raw`:
+- already adjusted: CAG (pre-spin x0.7782 vs our 0.7724) -- left alone;
+- wrongly scaled as a reverse split: RTX x2.0, CNX x8.0 (raw 16.16, stored 129.28) --
+  undone, then adjusted (RTX -71.0% -> +5.2%, CNX -89.6% -> +1.5%);
+- untouched: everything else. A real reverse split on the same day (HON 1-for-2, ENOV
+  1-for-3) is kept and the ratio taken per post-split share.
+Only STEPS are adjusted: a parent move beyond JOIN_MAX_Z (5 sds of its own) at ex. Every
+entry removes its step on the stored series (`bars.py --corrections --dry-run`: 26 of
+26 inside 5 sds; MSGK's 2020 entry applies once its history is joined). One by hand:
+SNX keeps +12.9% (z 5.4), the raw combined value's real move that day (`max_z` 6).
+Not adjusted, named: spin-offs inside the parent's normal volatility (ASIX, REZI 2018,
+SOLS, KTB, DOW, CTVA, VNT, OGN, SLVM, KD, ONL, EMBC, MBC, GRAL, VSNT, VGNT, MBGL; |z| < 5),
+CAG (source already did it), parents with no stored pre-spin history (HWM, BBWI, SPHR),
+GTX 2018 (no stored GTX bars then), illiquid parents (TRN, IRWD, XRX, SWBI, SITC, CMPO).
+NOT COVERED: spin-offs whose spun-off company no longer trades (125 of the 242 Form 10
+registrants have no ticker today) -- their parents were not checked.
+
+**Machinery.** `bars.apply_spinoffs` / `apply_cuts` inside `apply_corrections`, which every
+fetch passes through. `python bars.py --corrections [--dry-run]`: refuses while the
+nightly holds its lock, backs up the month files it touches (data/_bak/), measures before
+writing (a parent with no step at ex is left alone, so a re-run is harmless; a factor
+that does not remove the step is refused), moves cuts with `store.drop_rows`, ledger in
+data/_corrections_ledger.json. A series too short for a z (MSGK, 9 bars before its
+spin-off) is judged by plain size (> 10% = a step). validate `screen`: FAIL if a step or a
+cut comes undone; WARN on any liquid name with an undeclared 20+-session gap
+(`bars.py --corrections-audit`). Also fixed: `screen.py --only X` crashed when no named
+stock reached the stage that sets `passed`.
+
+**Written 2026-11-01 14:48-14:58** (lock free; backup of the 121 month files in
+data/_bak/bars_1d_pre_corrections_20261101_1448): 26 spin-offs adjusted, 11 cuts, 48,952
+bars written; then MSGK joined (2,542 bars from 2016, join -0.01%), after which both its
+spin-off days read +4.4% and +2.6%. verify_corrections, verify_joins: clean; audit: no
+undeclared gap. Spot checks: HON 236.15 -> 227.80 across 06-29 (was -50.9%), FDX +0.4%,
+RTX +5.2%. Zones recomputed from the corrected bars for 10-30 (stored zone files are
+history and were NOT rewritten; the next nightly draws from the corrected store):
+FDX 306.83/294.76/284.30/274.17 -> 279.37 only; HON none -> 212.46/204.49/198.89; DD
+131.14/123.69 -> 136.01/131.32/127.09/121.71; MSGK none -> 293.51; RTX, GE, FLY, NBIS
+unchanged (their old steps lie outside the window the levels come from).
+
+WORKFLOW FOR A NEW SPIN-OFF: add the entry, then run `--corrections` before the next
+nightly -- the nightly fetch re-adjusts the last 10 sessions on its own, so an entry left
+unwritten across a nightly would leave a recent parent half-adjusted.
+
+**Left as is, named:** the same past bars under two tickers after a join or rename --
+EQR/VMRK, PSKY/SKYD, ADIL/AZR, MSGS/MSGK. Scores were stored under the ticker of the day,
+so each old ticker's bars still price its own score history; removing them would drop
+those observations from studies.
+
 ## State at 2026-11-01 (small hours) — AZN'S GROWTH SCORE: A WIDER PILLAR, AND 6-K INTERIMS NEITHER INGEST READ
 
 Asked: why AstraZeneca's growth_score was missing (so the dip gate dropped it at its 10-13
@@ -4279,7 +4353,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-10-31 09:20 — do not edit by hand._
+_Generated 2026-11-01 04:26 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -4299,50 +4373,51 @@ _Generated 2026-10-31 09:20 — do not edit by hand._
 | `sec_edgar` | daily | 2.6 min | 34s | 4.3 min | 30.0 min | 20 |
 | `insider` | daily | 2.0 min | 87s | 2.0 min | 30.0 min | 5 |
 | `congress` | daily | 11s | 17s | 17.2 min | 30.0 min | 5 |
-| `fundamental` | daily | 5.6 min | 3.1 min | 8.6 min | 180.0 min | 67 |
+| `fundamental` | daily | 66.2 min | 3.2 min | 66.2 min | 180.0 min | 68 |
 | `events` | weekly | 37.7 min | 10.7 min | 590.9 min ⚠ | 30.0 min | 15 |
 | `leaderboard` | weekly | 91.0 min | 40.7 min | 91.0 min ⚠ | 90.0 min | 16 |
-| `dip` | daily | 47s | 18s | 77s | 15.0 min | 67 |
+| `dip` | daily | 2.2 min | 18s | 2.2 min | 15.0 min | 68 |
 | `insider_score` | daily | 7.9 min | 7.2 min | 9.2 min | 30.0 min | 5 |
-| `combo` | daily | 1.7 min | 19s | 1.7 min | 15.0 min | 66 |
-| `candidates` | daily | 12s | 6s | 25s | 5.0 min | 24 |
-| `floor` | daily | 2.1 min | 55s | 2.5 min | 15.0 min | 18 |
+| `combo` | daily | 2.2 min | 19s | 2.2 min | 15.0 min | 67 |
+| `candidates` | daily | 13.6 min | 6s | 13.6 min ⚠ | 5.0 min | 25 |
+| `floor` | daily | 4.2 min | 56s | 4.2 min | 15.0 min | 19 |
 | `insider_pages` | daily | 12s | 8s | 12s | 15.0 min | 5 |
-| `sectors` | daily | 2.0 min | 3.2 min | 4.6 min | 30.0 min | 17 |
-| `validate` | daily | 13.9 min | 7.1 min | 13.9 min | 60.0 min | 53 |
-| `explore` | daily | 44s | 9s | 44s | 5.0 min | 75 |
+| `sectors` | daily | 5.0 min | 3.5 min | 5.0 min | 30.0 min | 18 |
+| `validate` | daily | 27.0 min | 7.1 min | 27.0 min | 60.0 min | 54 |
+| `explore` | daily | 75s | 9s | 75s | 5.0 min | 76 |
 | `snapshots` | daily | 36s | 5s | 36s | 5.0 min | 89 |
-| `profiles` | daily | 7.8 min | 22.5 min | 7.8 min | 15.0 min | 70 |
+| `profiles` | daily | 16.4 min | 22.3 min | 16.4 min ⚠ | 15.0 min | 71 |
+| `watchlists` | daily | 6s | 6s | 6s | 10.0 min | 1 |
 | `retention` | daily | 0s | 0s | 0s | 5.0 min | 79 |
-| `dashboard` | daily | 1s | 0s | 1s | 2.0 min | 81 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 97 |
+| `dashboard` | daily | 5s | 0s | 5s | 2.0 min | 83 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 98 |
 
-**Daily total ≈ 119.8 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 120.2 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-10-31 09:20 — do not edit by hand._
+_Generated 2026-11-01 04:26 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 249.7 | 2016-09 → 2026-10 |
+| bars 1d | 122 | 249.9 | 2016-09 → 2026-10 |
 | bars 1h | 4 | 0.8 | 2026-07 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
 | news | 123 | 174.4 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 12.0 | 2016-08 → 2026-10 |
 | scores | 122 | 331.8 | 2016-09 → 2026-10 |
-| fundamentals | 70 | 341.7 | 2009q2 → 2026q3 |
+| fundamentals | 70 | 344.1 | 2009q2 → 2026q3 |
 | short volume | 75 | 57.0 | 2020-08 → 2026-10 |
 | flags | 65 | 5.5 | 2026-07-31 → 2026-10-30 |
 | rejects | 22 | 8.3 | 2026-10-01 → 2026-10-30 |
 | zones | 46 | 25.9 | 2026-08-27 → 2026-10-30 |
 | fundamentals (companyfacts) | 131 | 74.9 | 1980q3 → 2028q3 |
 | fundamentals (EDGAR filings) | 21 | 0.8 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 40 | 179.7 | — |
+| loose (macro, universe, jobs, study) | 41 | 180.1 | — |
 
-**`data/` total ≈ 1,466 MB.** `reports/` is a further 124 MB across 384 pages.
+**`data/` total ≈ 1,469 MB.** `reports/` is a further 124 MB across 386 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -4350,7 +4425,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-10-31 09:20 — do not edit by hand._
+_Generated 2026-11-01 04:26 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -4365,7 +4440,7 @@ _Generated 2026-10-31 09:20 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-10-31 09:20 — do not edit by hand._
+_Generated 2026-11-01 04:26 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

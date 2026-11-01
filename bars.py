@@ -31,6 +31,7 @@ import argparse
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -130,8 +131,9 @@ def fetch_many(symbols: list[str], start, end, interval: str = "1d",
                ) -> tuple[pd.DataFrame, set[str], float]:
     """Fetch `symbols` in parallel batches. Returns (frame, found, error_rate).
 
-    Every frame passes through `apply_joins`, so bars from before a declared
-    listing change come back on today's share basis however they were asked for.
+    Every frame passes through `apply_corrections` (joins, spin-offs, cuts), so
+    bars from before a declared listing change or spin-off come back on today's
+    basis, and a reused symbol's other company never comes back, however asked.
     """
     batch = batch or config.BATCH_BACKFILL
     workers = workers or config.FETCH_WORKERS
@@ -155,7 +157,7 @@ def fetch_many(symbols: list[str], start, end, interval: str = "1d",
             try:
                 payload, _retired, err = fut.result()
                 errors += err
-                df = apply_joins(store.bars_from_payload(payload, interval))
+                df = apply_corrections(store.bars_from_payload(payload, interval))
                 if not df.empty:
                     frames.append(df)
                     found |= set(df["ticker"].unique())
@@ -568,6 +570,272 @@ def verify_joins(asof: str | None = None,
     return probs
 
 
+# ------------------------------------------- spin-offs and reused symbols (2026-11-01)
+def spinoff_factor(parent_close: float, spin_close: float, ratio: float) -> float:
+    """The share of the combined value that stayed with the parent, on a day both
+    trade regular-way: parent / (parent + ratio x spin-off). `ratio` = spin-off
+    shares distributed per parent share, from the spin-off's own Form 10."""
+    return float(parent_close) / (float(parent_close) + float(ratio) * float(spin_close))
+
+
+def apply_spinoffs(df: pd.DataFrame, spinoffs: dict | None = None) -> pd.DataFrame:
+    """A parent's prices before each declared spin-off, on today's basis.
+
+    Alpaca's "split" adjustment leaves a pro-rata spin-off in the parent's series
+    as a one-day fall (HON -50.9% on 2026-06-29), and every support level drawn
+    across that day rests on prices that included the business that left. Prices
+    before `ex` are multiplied by `factor`; volume is untouched, because the share
+    count did not change. Two spin-offs compound on bars before both.
+    """
+    spinoffs = config.SPINOFFS if spinoffs is None else spinoffs
+    if df is None or df.empty or not spinoffs:
+        return df
+    tick = df["ticker"].astype(str)
+    if not tick.isin(list(spinoffs)).any():
+        return df
+    d = df["date"].astype(str)
+    out = df.copy()
+    for c in PRICE_COLS:
+        if c in out.columns:
+            out[c] = out[c].astype("float64")
+    for t, entries in spinoffs.items():
+        for e in entries:
+            f = float(e["factor"])
+            m = (tick == t) & (d < str(e["ex"]))
+            if f != 1.0 and m.any():
+                for c in PRICE_COLS:
+                    if c in out.columns:
+                        out.loc[m, c] = out.loc[m, c] * f
+    return out
+
+
+def apply_cuts(df: pd.DataFrame, cuts: dict | None = None) -> pd.DataFrame:
+    """Drop bars that belong to the company that used a symbol before (FLY was Fly
+    Leasing to 2021-08-02, Firefly Aerospace from 2025-08-07). The store keeps
+    them under the entry's `archive` ticker; a fetch never brings them back."""
+    cuts = config.HISTORY_CUTS if cuts is None else cuts
+    if df is None or df.empty or not cuts:
+        return df
+    tick, d = df["ticker"].astype(str), df["date"].astype(str)
+    m = pd.Series(False, index=df.index)
+    for t, c in cuts.items():
+        m |= (tick == t) & (d < str(c["keep_from"]))
+    return df[~m] if m.any() else df
+
+
+def apply_corrections(df: pd.DataFrame) -> pd.DataFrame:
+    """Every declared correction, in the one place every fetch passes through."""
+    return apply_cuts(apply_spinoffs(apply_joins(df)))
+
+
+def _orchestrator_running() -> bool:
+    """The nightly run's lock is held by a live process (a dead writer's is not)."""
+    import json
+    import store_lock
+    if not config.ORCH_LOCK_FILE.exists():
+        return False
+    try:
+        info = json.loads(config.ORCH_LOCK_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return True
+    return store_lock.pid_alive(info.get("pid"), info.get("started")) is not False
+
+
+def _step(g: pd.DataFrame, day: str) -> tuple[float, float] | None:
+    """(log move, z) into `day` in one ticker's sorted series, or None if absent."""
+    d = g["date"].astype(str).reset_index(drop=True)
+    hit = d[d == str(day)].index
+    if not len(hit):
+        return None
+    return _z_at(g["close"].reset_index(drop=True), int(hit[0]))
+
+
+SHORT_STEP = 0.10      # with < 20 prior returns there is no z: a move beyond 10% is a step
+
+
+def _is_step(r: float, z: float, max_z: float | None = None) -> bool:
+    """Is a move across a corrected date still a step? Judged in the stock's own
+    sds (JOIN_MAX_Z, or an entry's own `max_z` set by hand with its reason);
+    a series too short for a z (MSGK: 9 bars before its spin-off) is judged by
+    plain size instead."""
+    if np.isfinite(z):
+        return abs(z) > (max_z or config.JOIN_MAX_Z)
+    return not (np.isfinite(r) and abs(np.expm1(r)) <= SHORT_STEP)
+
+
+def corrections(write: bool = True, backup_dir: Path | None = None) -> list[dict]:
+    """Bring the stored series in line with config.SPINOFFS and config.HISTORY_CUTS.
+
+        python bars.py --corrections --dry-run   measure, write nothing
+        python bars.py --corrections             write (refused while the nightly runs)
+
+    MEASURED, so a re-run is harmless: a spin-off whose parent no longer shows a
+    step at `ex` (|z| <= JOIN_MAX_Z) is already adjusted and left alone, and one
+    whose step does not shrink inside JOIN_MAX_Z with the declared factor is
+    refused -- the factor is then wrong, and writing it would hide the error. A
+    cut moves the old company's bars to `archive` and deletes them under the
+    live ticker. Every write is recorded in config.CORRECTIONS_LEDGER.
+    """
+    import json
+    import shutil
+    if write and _orchestrator_running():
+        raise RuntimeError("the nightly run holds data/_orchestrator.lock; run again after it")
+    res: list[dict] = []
+    to_write: list[pd.DataFrame] = []
+    drops: list[tuple[str, str]] = []
+    parents = sorted(config.SPINOFFS)
+    held_all = (store.read("1d", tickers=parents) if parents
+                else pd.DataFrame(columns=store.SCHEMA))
+    for t in parents:
+        g = held_all[held_all["ticker"].astype(str) == t].sort_values("date").reset_index(drop=True)
+        adj = g.copy()
+        for c in PRICE_COLS:
+            if c in adj.columns:
+                adj[c] = adj[c].astype("float64")
+        for e in sorted(config.SPINOFFS[t], key=lambda e: e["ex"]):
+            rec = {"kind": "spinoff", "ticker": t, "ex": e["ex"], "spinco": e.get("spinco"),
+                   "factor": float(e["factor"])}
+            s = _step(adj, e["ex"])
+            if s is None:
+                res.append(rec | {"action": "skip", "why": f"{e['ex']} not in the stored series"})
+                continue
+            r0, z0 = s
+            rec.update(ret_before=float(np.expm1(r0)), z_before=float(z0))
+            if not _is_step(r0, z0, e.get("max_z")):
+                res.append(rec | {"action": "held", "why": "no step at ex: already adjusted"})
+                continue
+            m = adj["date"].astype(str) < str(e["ex"])
+            trial = adj.copy()
+            for c in PRICE_COLS:
+                if c in trial.columns:
+                    trial.loc[m, c] = trial.loc[m, c] * float(e["factor"])
+            r1, z1 = _step(trial, e["ex"])
+            rec.update(ret_after=float(np.expm1(r1)), z_after=float(z1), rows=int(m.sum()))
+            if _is_step(r1, z1, e.get("max_z")):
+                res.append(rec | {"action": "refuse",
+                                  "why": f"factor leaves {np.expm1(r1):+.1%} (z {z1:+.1f}) at ex"})
+                continue
+            adj = trial
+            res.append(rec | {"action": "adjust", "why": "step removed"})
+        changed = ~np.isclose(adj["close"].to_numpy(float), g["close"].to_numpy(float)) if len(g) else []
+        if len(g) and changed.any():
+            to_write.append(adj.loc[changed, store.SCHEMA])
+    for t, c in sorted(config.HISTORY_CUTS.items()):
+        old = store.read("1d", end=str(c["keep_from"]), tickers=[t])
+        old = old[old["date"].astype(str) < str(c["keep_from"])]
+        rec = {"kind": "cut", "ticker": t, "keep_from": c["keep_from"], "archive": c["archive"],
+               "rows": len(old)}
+        if old.empty:
+            res.append(rec | {"action": "held", "why": "nothing stored before keep_from"})
+            continue
+        to_write.append(old.assign(ticker=c["archive"])[store.SCHEMA])
+        drops.append((t, str(c["keep_from"])))
+        res.append(rec | {"action": "cut", "why": f"{len(old):,} bar(s) to {c['archive']}"})
+    for r in res:
+        log(f"  correction {r['kind']:7} {r['ticker']:6} {r['action'].upper():6} {r['why']}"
+            + (f" | step {r['ret_before']:+.1%} z {r['z_before']:+.1f}"
+               + (f" -> {r['ret_after']:+.1%} z {r['z_after']:+.1f}" if 'z_after' in r else "")
+               if 'z_before' in r else ""))
+    if write and (to_write or drops):
+        if backup_dir is not None:
+            months = set()
+            for f in to_write:
+                months |= set(f["date"].astype(str).str.slice(0, 7))
+            for t, k in drops:
+                months |= {m for m in store.months("1d") if m <= k[:7]}
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            for m in sorted(months):
+                p = store.part_path(m, "1d")
+                if p.exists():
+                    shutil.copy2(p, backup_dir / p.name)
+            log(f"corrections: backed up {len(months)} month file(s) to {backup_dir}")
+        if to_write:
+            store.write(pd.concat(to_write, ignore_index=True), "1d",
+                        max_date=calendar_us.last_closed_session())
+        store.drop_rows(drops)
+        done = [r | {"written": calendar_us.last_closed_session()} for r in res
+                if r["action"] in ("adjust", "cut")]
+        led = (json.loads(config.CORRECTIONS_LEDGER.read_text(encoding="utf-8"))
+               if config.CORRECTIONS_LEDGER.exists() else [])
+        config.CORRECTIONS_LEDGER.write_text(json.dumps(led + done, indent=1, default=str),
+                                             encoding="utf-8")
+        build_panel_stats()
+        log(f"corrections: {sum(r['action'] == 'adjust' for r in res)} spin-off(s) adjusted, "
+            f"{len(drops)} cut(s), {sum(len(f) for f in to_write):,} bar(s) written")
+    return res
+
+
+def verify_corrections(asof: str | None = None,
+                       frames: dict[str, pd.DataFrame] | None = None,
+                       firsts: dict[str, str] | None = None) -> list[str]:
+    """Problems with any declared spin-off or cut. Empty list = all still hold.
+
+    A spin-off holds when the parent's move across `ex` is within JOIN_MAX_Z of
+    its own volatility -- a refetch that skipped apply_spinoffs would put HON's
+    -50.9% back. A cut holds when the live ticker has nothing before `keep_from`.
+    `frames`/`firsts` let a test hand in defective series instead of the store.
+    """
+    probs = []
+    if frames is None and config.SPINOFFS:
+        lo = (pd.Timestamp(min(e["ex"] for es in config.SPINOFFS.values() for e in es))
+              - pd.DateOffset(days=150)).strftime("%Y-%m-%d")
+        got = store.read("1d", start=lo, end=asof, tickers=list(config.SPINOFFS),
+                         columns=["ticker", "date", "close"])
+        frames = {t: g for t, g in got.groupby("ticker")}
+    for t, entries in sorted(config.SPINOFFS.items()):
+        g = (frames or {}).get(t)
+        if g is None or g.empty:
+            probs.append(f"{t}: no stored bars")
+            continue
+        g = g.sort_values("date").reset_index(drop=True)
+        for e in entries:
+            s = _step(g, e["ex"])
+            if s is None:
+                continue                          # ex after `asof` or before the window
+            r, z = s
+            if _is_step(r, z, e.get("max_z")):
+                probs.append(f"{t}: spin-off step at {e['ex']} {np.expm1(r):+.1%} (z {z:+.1f})")
+    if firsts is None and config.HISTORY_CUTS:
+        ps = load_panel_stats()
+        firsts = (dict(zip(ps["ticker"].astype(str), ps["first_date"].astype(str)))
+                  if not ps.empty else {})
+    for t, c in sorted(config.HISTORY_CUTS.items()):
+        f = (firsts or {}).get(t)
+        if f and f < str(c["keep_from"]):
+            probs.append(f"{t}: bars from {f}, before the {c['keep_from']} cut (another company's)")
+    return probs
+
+
+def corrections_audit(min_dollar_vol: float = 20e6, min_close: float = 5.0,
+                      gap_sessions: int = 20) -> list[str]:
+    """Undeclared cases among liquid names, for a person: a WARN, never a write.
+
+    A gap of more than `gap_sessions` inside a stored series is the mark of a
+    reused symbol (FLY, XE, CAI ... on 2026-11-01) or a long suspension (NBIS).
+    Liquidity is the panel's own 20-day figures, so the audit needs no network.
+    """
+    ps = load_panel_stats()
+    if ps.empty:
+        return []
+    liq = ps[(pd.to_numeric(ps["dollar_vol_20"], errors="coerce") >= min_dollar_vol)
+             & (pd.to_numeric(ps["last_close"], errors="coerce") >= min_close)]
+    sess = calendar_us.all_sessions()
+    idx = {s: i for i, s in enumerate(sess)}
+    out = []
+    for r in liq.itertuples():
+        t = str(r.ticker)
+        if t in config.HISTORY_CUTS:
+            continue
+        a, b = idx.get(str(r.first_date)), idx.get(str(r.last_date))
+        if a is None or b is None:
+            continue
+        missing = (b - a + 1) - int(r.n_bars)
+        if missing > gap_sessions:
+            out.append(f"{t}: {missing} session(s) missing between {r.first_date} and "
+                       f"{r.last_date} -- a reused symbol or a suspension? (HISTORY_CUTS)")
+    return out
+
+
 def selftest() -> int:
     """`python bars.py --selftest`: the join rules, each shown to refuse."""
     ses = [d.strftime("%Y-%m-%d") for d in pd.bdate_range("2025-01-01", periods=200)]
@@ -621,8 +889,37 @@ def selftest() -> int:
     finally:
         config.HISTORY_JOINS = saved
 
+    # spin-offs: a -40% step at ses[120], removed by its factor; volume untouched
+    sp = px.copy()
+    sp[120:] *= 0.6
+    raw = frame(ses, sp, "P")
+    so = {"P": [{"ex": ses[120], "factor": 0.6}]}
+    a = apply_spinoffs(raw, so)
+    assert np.allclose(a["close"], px * 0.6), "the factor must undo the spin-off step"
+    assert (a["volume"] == raw["volume"]).all(), "a spin-off leaves volume alone"
+    assert abs(spinoff_factor(60.0, 20.0, 2.0) - 0.6) < 1e-12
+    two = apply_spinoffs(frame(ses, px, "P"), {"P": [{"ex": ses[50], "factor": 0.5},
+                                                      {"ex": ses[120], "factor": 0.8}]})
+    assert np.isclose(two["close"][0], px[0] * 0.4) and np.isclose(two["close"][80], px[80] * 0.8)
+    # cuts: the old company's bars never come back from a fetch
+    cuts = {"Q": {"keep_from": ses[100], "archive": "Q~old"}}
+    assert apply_cuts(frame(ses, px, "Q"), cuts)["date"].min() == ses[100]
+    saved2 = (config.SPINOFFS, config.HISTORY_CUTS)
+    try:
+        config.SPINOFFS, config.HISTORY_CUTS = so, cuts
+        assert verify_corrections(frames={"P": a}, firsts={"Q": ses[100]}) == []
+        p = verify_corrections(frames={"P": raw}, firsts={"Q": ses[0]})
+        assert len(p) == 2 and "spin-off step" in p[0] and "cut" in p[1], p
+        # too short for a z: a -40% fall is a step, a 3% move is not; max_z widens by hand
+        short = frame(ses[110:130], sp[110:130], "P")
+        assert verify_corrections(frames={"P": short}, firsts={})[0].startswith("P: spin-off step")
+        assert not _is_step(np.log(1.03), float("nan")) and _is_step(np.log(0.6), float("nan"))
+        assert _is_step(0.1, 5.4) and not _is_step(0.1, 5.4, max_z=6.0)
+    finally:
+        config.SPINOFFS, config.HISTORY_CUTS = saved2
+
     print("bars selftest OK (clean join, new listing, step, overlap, gap, "
-          "spin-off, factor, verify pass/step/lost)")
+          "spin-off, factor, verify pass/step/lost, spin-off adjust/compound/verify, cut)")
     return 0
 
 
@@ -839,7 +1136,11 @@ def main() -> int:
                     help="join earlier history (default: config.HISTORY_JOINS)")
     ap.add_argument("--history-audit", action="store_true",
                     help="liquid names whose source history starts before ours")
-    ap.add_argument("--dry-run", action="store_true", help="--history: write nothing")
+    ap.add_argument("--corrections", action="store_true",
+                    help="apply config.SPINOFFS and HISTORY_CUTS to the stored series")
+    ap.add_argument("--corrections-audit", action="store_true",
+                    help="liquid names with an undeclared gap (reused symbol?)")
+    ap.add_argument("--dry-run", action="store_true", help="--history/--corrections: write nothing")
     ap.add_argument("--selftest", action="store_true")
     ap.add_argument("--years", type=float, default=None)
     ap.add_argument("--limit", type=int, default=0, help="cap #tickers (smoke test)")
@@ -860,6 +1161,17 @@ def main() -> int:
         for p in bad:
             log(f"  !! {p}")
         return 1 if bad else 0
+    if a.corrections:
+        bak = config.DATA / "_bak" / f"bars_1d_pre_corrections_{time.strftime('%Y%m%d_%H%M')}"
+        res = corrections(write=not a.dry_run, backup_dir=None if a.dry_run else bak)
+        bad = verify_corrections() if not a.dry_run else []
+        for p in bad:
+            log(f"  !! {p}")
+        return 1 if bad or any(r["action"] == "refuse" for r in res) else 0
+    if a.corrections_audit:
+        for line in corrections_audit():
+            print(line)
+        return 0
     if a.history_audit:
         print(history_audit().to_string(index=False))
         return 0
