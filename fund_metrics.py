@@ -886,8 +886,15 @@ def rank_pillars(m: pd.DataFrame, sector: pd.Series | None = None) -> pd.DataFra
         wts = pd.Series({f"{p}_score": config.FUND_WEIGHTS.get(p, 1.0)
                          for p in PILLARS if f"{p}_score" in out.columns})
         sub = out[pcols]
-        out["fund_score"] = (sub * wts).sum(axis=1, min_count=1) / (
-            sub.notna().mul(wts).sum(axis=1).replace(0, np.nan))
+        # AT LEAST FUND_MIN_PILLARS OF THE FOUR (2026-11-01). One pillar is not
+        # a blend: 504 names on 10-30 had a fund_score that WAS one pillar (433
+        # growth alone), ranked beside four-pillar names as if comparable.
+        # Withheld, not dropped: every pillar score and `fund_cov` (0.25 = one
+        # pillar) are still emitted for every row, so the name stays in Explore
+        # and on its profile, and it is re-scored every night.
+        out["fund_score"] = ((sub * wts).sum(axis=1, min_count=1) / (
+            sub.notna().mul(wts).sum(axis=1).replace(0, np.nan))).where(
+            sub.notna().sum(axis=1) >= config.FUND_MIN_PILLARS)
         out["fund_cov"] = sub.notna().mean(axis=1)
     return out
 
@@ -1129,6 +1136,20 @@ def selftest(verbose: bool = True) -> None:
                      f"{gr.at['OVER', 'growth_cov']}, want 8/12")
     if gr.loc[[f"F{i}" for i in range(10)], "growth_cov"].ne(1.0).any():
         fails.append("full-coverage names lost coverage")
+
+    # A FUND SCORE NEEDS FUND_MIN_PILLARS PILLARS, and a name below it keeps
+    # its pillar score and fund_cov -- withheld, never dropped (2026-11-01).
+    pm = gm[gm["ticker"].str.startswith("F")].reset_index(drop=True)
+    pm["roic"] = [np.nan] * 5 + list(np.linspace(0.05, 0.30, 5))
+    pr = rank_pillars(pm).set_index(pm["ticker"])
+    one = [f"F{i}" for i in range(5)]
+    two = [f"F{i}" for i in range(5, 10)]
+    if config.FUND_MIN_PILLARS >= 2 and pr.loc[one, "fund_score"].notna().any():
+        fails.append("a single pillar produced a fund_score")
+    if pr.loc[one, "growth_score"].isna().any() or pr.loc[one, "fund_cov"].ne(0.5).any():
+        fails.append("a one-pillar name lost its pillar score or fund_cov")
+    if pr.loc[two, "fund_score"].isna().any():
+        fails.append("two pillars did not produce a fund_score")
 
     for name, (pillar, direction, _) in REGISTRY.items():
         if pillar not in PILLARS:
