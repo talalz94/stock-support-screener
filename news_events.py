@@ -533,6 +533,117 @@ def upcoming_earnings(asof: str | None = None) -> pd.DataFrame:
     return pd.read_parquet(files[-1]) if files else pd.DataFrame()
 
 
+# ================================================================== page flags
+# The three filing types the study measured as WARNINGS (2026-11-01, vs similar stocks
+# and vs the stock's own non-event days), each shown for as long as its effect was
+# measured: 8-K item -> (short tag, sessions shown, study type, horizons to quote).
+WARN_ITEMS = {
+    "3.02": ("sold unregistered shares", 60, "unregistered_equity", (20, 60)),
+    "4.02": ("restated financials", 20, "restatement", (1, 5)),
+    "1.02": ("ended a material agreement", 20, "agreement_end", (5, 20)),
+}
+WARN_SHORT = {"3.02": "share sale", "4.02": "restated", "1.02": "deal ended"}
+EARN_SOON = 10                    # sessions: an earnings date this close is highlighted
+CAL_STALE_DAYS = 7                # a snapshot older than this says nothing about "next"
+STUDY_FILE = config.DATA / "_news_events_study_summary.json"
+_FLAG_CACHE: dict = {}
+
+
+def _study() -> dict:
+    try:
+        return json.loads(STUDY_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def measured(event_type: str, horizons=(20,)) -> str:
+    """The study's own numbers for one event type, as one plain sentence."""
+    res = [r for r in _study().get("results", []) if r.get("type") == event_type]
+    parts = []
+    for h in horizons:
+        r = next((x for x in res if x.get("h") == h), None)
+        if not r or r.get("mean_pp") is None:
+            continue
+        own = (f"; vs the stock's own days {r['vs_own_pp']:+.2f}pp (t {r['vs_own_t']:+.1f})"
+               if r.get("vs_own_pp") is not None else "")
+        parts.append(f"{h} session(s): {r['mean_pp']:+.2f}pp vs similar stocks (t {r['t']:+.1f}){own}")
+    if not parts:
+        return "not measured"
+    n = res[0].get("episodes")
+    return f"measured since 2016 on {n:,} filings -- " + "; ".join(parts)
+
+
+def flag_help() -> dict[str, str]:
+    """One line per flag for page legends, quoting the measured result."""
+    out = {}
+    for item, (tag, keep, et, hs) in WARN_ITEMS.items():
+        out[item] = f"8-K Item {item}, {tag} (shown {keep} sessions): {measured(et, hs)}"
+    beat = next((r for r in _study().get("results", []) if r.get("type") == "earnings_beat"), {})
+    miss = next((r for r in _study().get("results", []) if r.get("type") == "earnings_miss"), {})
+    out["earnings"] = (
+        "next earnings date from the latest calendar snapshot taken before the next session (Finnhub); "
+        f"highlighted within {EARN_SOON} sessions. Measured: the move is the reaction day "
+        f"(beat {beat.get('reaction_pp', float('nan')):+.2f}pp, miss {miss.get('reaction_pp', float('nan')):+.2f}pp "
+        "vs similar stocks) and nothing tradable follows the first close")
+    return out
+
+
+def _sec_url(cik: int, accession: str) -> str:
+    return (f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/"
+            f"{accession.replace('-', '')}/{accession}-index.htm")
+
+
+def page_flags(asof: str) -> dict[str, dict]:
+    """ticker -> {"warn": [[short, tag, session, url, help], ...], "earn": [date, hour, sessions] | None}.
+
+    POINT IN TIME: a warning needs its filing public by `asof`'s close and inside its
+    window; the earnings date comes from the newest calendar snapshot taken no later
+    than the next session's date, i.e. before it opened (none before 2026-11-01, when
+    snapshots began). Any
+    failure costs the flags, never the page."""
+    if asof in _FLAG_CACHE:
+        return _FLAG_CACHE[asof]
+    out: dict[str, dict] = {}
+    sess = _sessions()
+    pos = {s: i for i, s in enumerate(sess)}
+    ia = pos.get(asof)
+    helps = flag_help()
+    try:
+        e = _read_edgar()
+        e = e[(e.form == "8-K") & e.ticker.notna() & e.public_session.notna()]
+        e = e[e.public_session.astype(str) <= asof]
+        for item, (tag, keep, _et, _hs) in WARN_ITEMS.items():
+            lo = sess[max(0, ia - keep + 1)] if ia is not None else asof
+            hit = e[(e.public_session.astype(str) >= lo)
+                    & e["items"].astype(str).str.split(",").apply(lambda x, it=item: it in x)]
+            for r in hit.sort_values("public_session").itertuples(index=False):
+                out.setdefault(r.ticker, {"warn": [], "earn": None})["warn"].append(
+                    [WARN_SHORT[item], tag, str(r.public_session), _sec_url(r.cik, r.accession), helps[item]])
+    except Exception as exc:                                     # noqa: BLE001
+        log(f"warning flags unavailable: {exc!r}"[:160])
+    try:
+        # known before the NEXT session opened (a Friday page may use the weekend's)
+        nxt = (sess[ia + 1] if ia is not None and ia + 1 < len(sess)
+               else (pd.Timestamp(asof) + pd.Timedelta(days=1)).strftime("%Y-%m-%d"))
+        files = [f for f in sorted(CAL_DIR.glob("*.parquet")) if f.stem <= nxt] if CAL_DIR.exists() else []
+        if files and ia is not None and (pd.Timestamp(nxt) - pd.Timestamp(files[-1].stem)).days <= CAL_STALE_DAYS:
+            c = pd.read_parquet(files[-1], columns=["symbol", "date", "hour"])
+            c = c[(c.date > asof) | ((c.date == asof) & (c.hour == "amc"))].sort_values("date")
+            c = c.drop_duplicates("symbol")
+            s_arr = np.asarray(sess)
+            for sym, d, hr in zip(c.symbol.astype(str), c.date.astype(str), c.hour.fillna("").astype(str)):
+                j = int(np.searchsorted(s_arr, d, side="left"))     # the report day's session
+                if hr == "amc" and j < len(sess) and sess[j] == d:
+                    j += 1                                           # after the close: next session reacts
+                if j >= len(sess):
+                    continue
+                out.setdefault(sym, {"warn": [], "earn": None})["earn"] = [d, hr, j - ia]
+    except Exception as exc:                                     # noqa: BLE001
+        log(f"earnings dates unavailable: {exc!r}"[:160])
+    _FLAG_CACHE[asof] = out
+    return out
+
+
 # ================================================================== nightly
 def update(verbose: bool = True, wait_s: float = 0.0) -> dict:
     with store_lock.writer(ROOT, _label("update"), wait_s=wait_s, log=log):

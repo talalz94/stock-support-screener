@@ -44,6 +44,32 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-11-01 (night) — WARNING FILINGS AND NEXT EARNINGS ON EVERY STOCK LIST
+
+Asked for by the user after the news-event study. `news_events.page_flags(asof)` ->
+per ticker: WARNING filings (8-K 3.02 unregistered share sale, shown 60 sessions; 4.02
+restatement, 20; 1.02 ended material agreement, 20 -- the three types the study found
+negative) with the SEC link, and the NEXT EARNINGS date (Finnhub snapshot) with
+bmo/amc and sessions away. Every tooltip and legend quotes `_news_events_study_summary.json`
+(`flag_help()`), never a typed number.
+- **Point in time:** a warning needs its 8-K public by `asof`'s close and inside its
+  window; the earnings date comes from the newest calendar snapshot taken no later than
+  the NEXT session's date (a Friday page may use the weekend's; the 10-29 page gets none,
+  since the first snapshot was taken after 10-30 opened). Snapshots began 2026-11-01.
+- **Where:** candidates (red "&#9888; share sale / restated / deal ended" link, amber
+  "earnings mm-dd &middot; n" within 10 sessions, grey further out; chips "hide warning
+  filings" and "hide earnings <= 10 sessions"), floor, explore (compact map + legend),
+  each stock profile (new `events` block after insider: next earnings, warnings, last
+  10 filings of 90 days typed by item), and the bounce cards ("filings & earnings" line).
+- **10-30 counts:** 462 names with a warning, 3,343 with a next earnings date (2,823
+  within 10 sessions -- peak season). Candidates: 2 warnings, 34 earnings within 10.
+- **Step order:** `news_events` now runs right after `news` (5th), before `bounce`, so
+  every page reads that night's filings and calendar.
+- Checked: the page selftests (candidates also asserts no warning dated after the
+  session and the field shapes), the three page scripts pass `node --check`, explore's
+  tag function run under node, the candidates chips in the browser (84 -> 50 hiding
+  earnings, 48 hiding both, clear -> 84), IONQ's profile block read back.
+
 ## State at 2026-11-01 (late) — STOCK NEWS EVENTS: 500,430 SEC FILINGS TYPED AND MEASURED; NONE IS A BUY SIGNAL
 
 `news_events.py` (store + nightly step `news_events`) and `news_events_study.py`.

@@ -69,6 +69,26 @@ COLS = [
 IDX = {c[0]: i for i, c in enumerate(COLS)}
 N_FLAG = len(COLS)             # extra field after the columns: 1 = non-USD reporter
 N_BADGE = N_FLAG + 1           # and after it: the "insider buying at support" reason, "" when none
+N_WARN = N_BADGE + 1           # warning filings: [[short, tag, session, sec url, measured], ...]
+N_EARN = N_WARN + 1            # next earnings: [date, bmo/amc/"", sessions away] or null
+
+
+def _flags(asof: str) -> dict[str, dict]:
+    """ticker -> warning filings and next earnings (news_events.page_flags). A failure
+    costs the flags, never the page."""
+    try:
+        import news_events as NE
+        return NE.page_flags(asof)
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
+def _flag_help() -> dict[str, str]:
+    try:
+        import news_events as NE
+        return NE.flag_help()
+    except Exception:                                            # noqa: BLE001
+        return {}
 
 
 def _badges(asof: str) -> dict[str, str]:
@@ -171,6 +191,7 @@ def payload(asof: str) -> dict:
 
     rows = []
     badges = _badges(asof)
+    flags = _flags(asof)
     for r in sel.itertuples(index=False):
         d = r._asdict()
         sent = _num(d.get("sent_rank"))
@@ -186,6 +207,8 @@ def payload(asof: str) -> dict:
             _num(d.get("mktcap"), 0), _num(d.get("dollar_vol_20"), 0),
             1 if _num(d.get("reports_usd")) == 0 else 0,
             badges.get(_txt(d["ticker"]), ""),
+            flags.get(_txt(d["ticker"]), {}).get("warn") or [],
+            flags.get(_txt(d["ticker"]), {}).get("earn"),
         ])
     return {"asof": asof, "rows": rows, "dates": ses, "series": series,
             "dropped": dropped, "n_universe": int(trusted["ticker"].nunique())}
@@ -229,6 +252,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 -apple-system
 .cdb-AT{color:var(--pos);color:color-mix(in srgb,var(--pos) 80%,var(--ink));border-color:var(--pos)}  /* 4.48:1 on a hovered row without the mix */
 .cdm{color:var(--muted)}
 .cdins{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--blkbg);color:var(--blk)}
+.cdwarn{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--negbg);color:var(--neg);text-decoration:none;white-space:nowrap}
+.cdwarn:hover{text-decoration:underline}
+.cdearn{margin-left:5px;padding:0 6px;border-radius:9px;font-size:10.5px;font-weight:600;background:var(--warnbg);color:var(--warn);white-space:nowrap}
+.cdearn.later{background:transparent;color:var(--muted);border:1px solid var(--line);font-weight:500}
 .cddet td{background:var(--panel);padding:10px 14px;white-space:normal}
 .cddet .cdfacts{margin:6px 0 0;font-size:12.5px;max-width:860px}
 .cddet a{color:var(--ink);text-decoration:underline}
@@ -258,8 +285,11 @@ against 11.7%. Fewer disasters <i>and</i> fewer jackpots.</div>
 <div><b>Hype is a warning, sentiment is blank for about half.</b> Names that broke their level had <i>more</i>
 attention, not less, and news sentiment showed no reliable signal. Both are shown for context only.</div>
 <div><b>insider</b> after a ticker = @@BADGE_HELP@@</div>
-<div><b>History is flattered:</b> only 0.9% of it belongs to stocks that later vanished. I cannot see earnings
-dates or news here &mdash; check both before acting.</div>
+<div><b>&#9888; tags</b> = a recent SEC filing the news-event study measured as a WARNING (click it for the filing):
+<span class="cdm">@@WARN_HELP@@</span></div>
+<div><b>earnings</b> tag = @@EARN_HELP@@. A grey tag is further out.</div>
+<div><b>History is flattered:</b> only 0.9% of it belongs to stocks that later vanished. Unscheduled news is
+not shown here &mdash; check it before acting.</div>
 </div>
 
 <div class="cdbar">
@@ -270,6 +300,8 @@ dates or news here &mdash; check both before acting.</div>
   <button class="cdchip" data-b="NEAR">NEAR<span class="n" id="cdn_NEAR"></span></button>
   <button class="cdchip" id="cdliq">liquid only (&ge; $10M/day)</button>
   <button class="cdchip" id="cdins" title="@@BADGE_HELP@@">insider buying at support<span class="n" id="cdn_ins"></span></button>
+  <button class="cdchip" id="cdhw" title="leave out names with a warning filing">hide warning filings<span class="n" id="cdn_warn"></span></button>
+  <button class="cdchip" id="cdhe" title="leave out names reporting within @@EARN_SOON@@ sessions">hide earnings &le; @@EARN_SOON@@ sessions<span class="n" id="cdn_earn"></span></button>
   <button class="cdchip" id="cdclr">clear</button>
 </div>
 
@@ -280,7 +312,16 @@ dates or news here &mdash; check both before acting.</div>
 (function(){
 var R=@@ROWS@@, DATES=@@DATES@@, S=@@SERIES@@, K=@@KINDS@@, BAND_AT=@@BAND_AT@@, FLAG=@@FLAG@@;
 var $=function(s){return document.getElementById(s)};
-var sec='all', band='all', liq=false, ins=false, q='', sc=3, sd=1, open={}, BADGE=FLAG+1;
+var sec='all', band='all', liq=false, ins=false, hw=false, he=false, q='', sc=3, sd=1, open={}, BADGE=FLAG+1, WARN=FLAG+2, EARN=FLAG+3, SOON=@@EARN_SOON@@;
+var HR={bmo:'before the open',amc:'after the close'};
+function esc(v){return String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');}
+function soon(r){return r[EARN]!=null&&r[EARN][2]<=SOON;}
+function flags(r){
+  var h='',w=r[WARN]||[],i,e=r[EARN];
+  for(i=0;i<w.length;i++) h+='<a class="cdwarn" href="'+esc(w[i][3])+'" target="_blank" rel="noopener" title="'+esc(w[i][1]+' -- 8-K public '+w[i][2]+'. '+w[i][4])+'">&#9888; '+esc(w[i][0])+'</a>';
+  if(e) h+='<span class="cdearn'+(e[2]<=SOON?'':' later')+'" title="'+esc('Next earnings '+e[0]+(HR[e[1]]?', '+HR[e[1]]:', time not given')+'; the price reacts in '+e[2]+' session(s).')+'">earnings '+esc(e[0].slice(5))+' &middot; '+e[2]+'</span>';
+  return h;
+}
 function fmt(v,k){
   if(v==null) return '&ndash;';
   switch(k){
@@ -322,6 +363,8 @@ function ok(r){
   if(band!=='all'&&r[5]!==band) return false;
   if(liq&&!(r[18]>=1e7)) return false;
   if(ins&&!r[BADGE]) return false;
+  if(hw&&(r[WARN]||[]).length) return false;
+  if(he&&soon(r)) return false;
   if(q&&r[0].toLowerCase().indexOf(q)<0) return false;
   return true;
 }
@@ -347,7 +390,7 @@ function render(){
   });
   var h='';
   for(var i=0;i<m.length;i++){
-    var r=m[i], t=r[0], tick='<b>'+t+'</b>'+(r[FLAG]===1?'<span class="cdm" title="reports in a non-USD currency"> &dagger;</span>':'')+(r[18]!=null&&r[18]<1e7?'<span class="cdm" title="under $10M/day traded"> *</span>':'')+(r[BADGE]?'<span class="cdins" title="'+r[BADGE]+'">insider</span>':'');
+    var r=m[i], t=r[0], tick='<b>'+t+'</b>'+(r[FLAG]===1?'<span class="cdm" title="reports in a non-USD currency"> &dagger;</span>':'')+(r[18]!=null&&r[18]<1e7?'<span class="cdm" title="under $10M/day traded"> *</span>':'')+(r[BADGE]?'<span class="cdins" title="'+r[BADGE]+'">insider</span>':'')+flags(r);
     h+='<tr class="cdr'+(open[t]?' open':'')+'" data-t="'+t+'"><td>'+chart(t,150,40,false,r[4])+'</td><td>'+tick+'</td><td>'+(r[1]||'&ndash;')+'</td>';
     for(var j=2;j<K.length;j++){
       var b=(j==5)?'<span class="cdb cdb-'+r[5]+'">'+r[5]+'</span>':fmt(r[j],K[j]);
@@ -368,6 +411,8 @@ function render(){
   $('cdn_AT').textContent=R.filter(function(r){return r[5]==='AT'}).length;
   $('cdn_NEAR').textContent=R.filter(function(r){return r[5]==='NEAR'}).length;
   $('cdn_ins').textContent=R.filter(function(r){return r[BADGE]}).length;
+  $('cdn_warn').textContent=R.filter(function(r){return (r[WARN]||[]).length}).length;
+  $('cdn_earn').textContent=R.filter(soon).length;
 })();
 $('cdq').addEventListener('input',function(e){q=e.target.value.trim().toLowerCase();render();});
 $('cds').addEventListener('change',function(e){sec=e.target.value;render();});
@@ -375,8 +420,10 @@ document.querySelectorAll('.cdchip[data-b]').forEach(function(b){b.addEventListe
   band=b.dataset.b; document.querySelectorAll('.cdchip[data-b]').forEach(function(o){o.classList.toggle('on',o===b);}); render();});});
 $('cdliq').addEventListener('click',function(){liq=!liq;this.classList.toggle('on',liq);render();});
 $('cdins').addEventListener('click',function(){ins=!ins;this.classList.toggle('on',ins);render();});
+$('cdhw').addEventListener('click',function(){hw=!hw;this.classList.toggle('on',hw);render();});
+$('cdhe').addEventListener('click',function(){he=!he;this.classList.toggle('on',he);render();});
 $('cdclr').addEventListener('click',function(){
-  sec='all';band='all';liq=false;ins=false;q='';$('cdq').value='';$('cds').value='all';$('cdliq').classList.remove('on');$('cdins').classList.remove('on');
+  sec='all';band='all';liq=false;ins=false;hw=false;he=false;q='';$('cdq').value='';$('cds').value='all';$('cdliq').classList.remove('on');$('cdins').classList.remove('on');$('cdhw').classList.remove('on');$('cdhe').classList.remove('on');
   document.querySelectorAll('.cdchip[data-b]').forEach(function(o){o.classList.toggle('on',o.dataset.b==='all');});render();});
 $('cdbody').addEventListener('click',function(e){
   if(e.target.closest('a')) return;
@@ -390,6 +437,14 @@ render();
 })();
 </script></body></html>
 """
+
+
+def _earn_soon() -> int:
+    try:
+        import news_events as NE
+        return int(NE.EARN_SOON)
+    except Exception:                                            # noqa: BLE001
+        return 10
 
 
 def _badge_help() -> str:
@@ -421,7 +476,11 @@ def build(asof: str | None = None) -> tuple[Path, int]:
             .replace("@@ROWS@@", js(rows)).replace("@@DATES@@", js(dates))
             .replace("@@SERIES@@", js(series)).replace("@@KINDS@@", js(kinds))
             .replace("@@BAND_AT@@", str(Z.BAND_AT)).replace("@@FLAG@@", str(N_FLAG))
-            .replace("@@BADGE_HELP@@", ui.esc(_badge_help())))
+            .replace("@@BADGE_HELP@@", ui.esc(_badge_help()))
+            .replace("@@WARN_HELP@@", ui.esc(" | ".join(v for k, v in _flag_help().items() if k != "earnings"))
+                     or "news-event data unavailable")
+            .replace("@@EARN_HELP@@", ui.esc(_flag_help().get("earnings", "earnings data unavailable")))
+            .replace("@@EARN_SOON@@", str(_earn_soon())))
     config.REPORTS_ZONES.mkdir(parents=True, exist_ok=True)
     out = config.REPORTS_ZONES / "candidates.html"
     out.write_text(html, encoding="utf-8")
@@ -439,8 +498,11 @@ def selftest(asof: str | None = None) -> int:
     assert [IDX[k] for k in ("sector", "dist", "level", "band", "touches", "broke", "pct_hi", "fund",
                              "intcov", "fscore", "roic", "pe", "hype", "sent", "news", "vol")] \
         == [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18], "page script indexes are stale"
-    assert all(len(r) == N_BADGE + 1 for r in rows), "row width disagrees with the column list"
+    assert all(len(r) == N_EARN + 1 for r in rows), "row width disagrees with the column list"
     assert all(isinstance(r[N_BADGE], str) for r in rows), "badge field is not text"
+    assert all(isinstance(r[N_WARN], list) and all(len(w) == 5 for w in r[N_WARN]) for r in rows),         "warning field: a list of [short, tag, session, url, measured]"
+    assert all(r[N_EARN] is None or (len(r[N_EARN]) == 3 and r[N_EARN][2] >= 0) for r in rows),         "earnings field: [date, hour, sessions away >= 0] or null"
+    assert all(w[2] <= asof for r in rows for w in r[N_WARN]), "a warning filed after the session shown"
     assert len(dates) == SPARK_N and dates == sorted(dates), "date axis"
     assert all(len(v) == len(dates) for v in series.values()), "a series is not aligned to the date axis"
     for r in rows:

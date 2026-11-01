@@ -1640,6 +1640,12 @@ REGISTRY: tuple[Step, ...] = (
          timeout=900, desc="breadth, sector ETFs, FRED, GPR/EPU"),
     Step("news", _step_news, config.CADENCE_DAILY, timeout=600,
          desc="Alpaca news delta (the orchestrator owns this fetch)"),
+    # Before `bounce`: every page that shows a warning filing or the next earnings
+    # date (bounce cards, candidates, floor, explore, profiles) reads tonight's.
+    Step("news_events", _step_news_events, config.CADENCE_DAILY, timeout=1800,
+         session_indexed=False,
+         desc="stock news events: SEC 8-K items and deal/activist forms, PR Newswire "
+              "and FDA feeds, earnings-calendar snapshot"),
     Step("senti_cache", _step_senti_cache, config.CADENCE_DAILY,
          depends_on=("news",), timeout=600,
          desc="lexicon scores per article, cached once per day"),
@@ -1711,10 +1717,6 @@ REGISTRY: tuple[Step, ...] = (
          session_indexed=False,
          desc="corporate insider trades (SEC Form 4): new quarterly dataset if posted, "
               "then each new Form 4 from EDGAR"),
-    Step("news_events", _step_news_events, config.CADENCE_DAILY, timeout=1800,
-         session_indexed=False,
-         desc="stock news events: SEC 8-K items and deal/activist forms, PR Newswire "
-              "and FDA feeds, earnings-calendar snapshot"),
     Step("congress", _step_congress, config.CADENCE_DAILY, timeout=1800,
          session_indexed=False,
          desc="House members' trades from new Periodic Transaction Reports (Senate: no "

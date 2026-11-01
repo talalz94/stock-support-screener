@@ -478,6 +478,25 @@ def card_html(c: dict) -> str:
             snhtml = ('<div class="br"><div class="brh">news &middot; '
                       '<b>NO COVERAGE</b> in 30d</div></div>')
 
+    # Filings and earnings (news_events): a WARNING filing the event study measured,
+    # linked, and the next earnings date. Context only, like the news line.
+    ev = c.get("events") or {}
+    evhtml = ""
+    if ev.get("earn") or ev.get("warn"):
+        parts = []
+        e = ev.get("earn")
+        if e:
+            when = {"bmo": "before the open", "amc": "after the close"}.get(e[1], "time not given")
+            col = "warn" if e[2] <= 10 else "muted"
+            parts.append(f'<span>earnings <b style="color:var(--{col})">{_esc(e[0])}</b> '
+                         f'{when}, {int(e[2])} session(s)</span>')
+        for w in ev.get("warn") or []:
+            parts.append(f'<span><a href="{_esc(w[3])}" target="_blank" rel="noopener" '
+                         f'title="{_esc(w[4])}" style="color:var(--down)">&#9888; {_esc(w[1])}</a> '
+                         f'{_esc(w[2])}</span>')
+        evhtml = ('<div class="br"><div class="brh">filings &amp; earnings</div>'
+                  f'<div class="brv">{"".join(parts)}</div></div>')
+
     maxpts = {"support": 20, "bounce": 20, "retrace": 12, "run": 12, "volume": 9,
               "tightness": 7, "stage": 6, "liquidity": 6, "size": 8}
     bars = ""
@@ -510,7 +529,7 @@ def card_html(c: dict) -> str:
         f'{" &middot; " + _esc(c.get("sector")) if c.get("sector") else ""}</span>'
         f'</div><div class="chips">{"".join(chips)}</div>'
         f'{svg_html(c.get("chart"))}</div>'
-        f'<div><table class="m">{trs}</table>{snhtml}{brhtml}{bars}</div></div>')
+        f'<div><table class="m">{trs}</table>{snhtml}{evhtml}{brhtml}{bars}</div></div>')
 
 
 def sections_html(cards: list[dict], key: str = "bucket") -> str:
@@ -1008,6 +1027,13 @@ def build_payload(flags: pd.DataFrame, asof: str,
     # Sentiment badge inputs. Best-effort and never fatal: the bounce report
     # predates this module and must keep working without it.
     sent_by_ticker = _sentiment_lookup(asof)
+    # Warning filings and the next earnings date (news_events.page_flags), same rule:
+    # best-effort, read-only, never part of the score.
+    try:
+        import news_events as _NE
+        ev_flags = _NE.page_flags(asof)
+    except Exception:                                      # noqa: BLE001
+        ev_flags = {}
 
     cards: list[dict] = []
     if tagged is not None and not tagged.empty:
@@ -1073,6 +1099,8 @@ def build_payload(flags: pd.DataFrame, asof: str,
             if sent_by_ticker is not None:
                 card["sentiment"] = sent_by_ticker.get(
                     t, {"has_news": False})
+            if t in ev_flags:
+                card["events"] = ev_flags[t]
             ser = build_card_series(row, hist.get(t))
             if ser:
                 card["chart"] = ser
