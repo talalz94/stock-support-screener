@@ -44,6 +44,67 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-11-01 (afternoon) — GROWTH COVERAGE COUNTS ONLY INPUTS THAT CAN EXIST
+
+The user approved the coverage proposal in the 2026-11-01 (small hours) AZN section ("suggestion 2"). The growth
+pillar still needs 0.60 coverage, but measured over the inputs that CAN exist for the filer.
+`fund_metrics.compute` flags an input not applicable (`_na_<metric>`, never stored) and
+`rank_pillars` drops it from the denominator unless a value arrived anyway (provider overlay).
+Only the growth pillar carries flags; the other three are unchanged.
+
+    not applicable when                          names excused (of 273 gainers)
+    QoQ pair   no report 45-140 days earlier (`_q_ok` false):
+               semi-annual filers always, quarterly ones between quarters    162
+    CAGR pair  no frame three years back, or a non-positive end
+               (a CAGR is undefined)                                  rev 60, eps 119
+    gross_margin_chg / op_margin_chg   the line is filed in NEITHER
+               period (banks, insurers: no gross profit; LLY: no
+               operating income)                                      gross 206, op 111
+    never      rev, EPS, FCF, EBITDA, asset, book growth, mom_12_1 -- a gap counts against
+
+A FIRST CUT EXCUSED TOO MUCH, and two measurements caught it before anything was written:
+excusing every YoY input whose line was absent in both periods gave +374 with 17 names on 3-4
+inputs -- it excused DATA gaps (EPS without a tagged share count: 183 names); and starting the
+denominator as a copy of "present" dropped every unflagged missing input from it, so names
+scored on 1-2 inputs (+451). Both are pinned by `fund_metrics` selftest cases (THIN: 5 of 13
+with the QoQ pair flagged stays blank).
+
+MEASURED, 10-30 re-scored (11 steps; fundamental 328 s). Population: the 10-30 fundamental
+and dip rows, stored copy before vs re-score after.
+
+    growth_score   2,644 -> 2,917  (+273, 0 lost); gainers hold 5-7 inputs of 7-11 that can
+                   exist (5: 2, 6: 74, 7: 197). Existing scores do not move: only 7 changed by
+                   > 0.1, all names whose INPUT changed (DD, HON, XOM, MIDD, FDX, ANAB, REZI --
+                   mom_12_1 after 9418128's bar fixes, and one EPS overlay).
+    fund_score     2,894 -> 3,043  (+149, 0 lost) -- all 149 on the growth pillar ALONE, see
+                   below. Gainers' fund_score: median +0.2 (IQR -5.7..+6.6); others: 3 of
+                   2,770 moved > 1 point.
+    dip gate       632 -> 711      (+79, 0 left): 59 gained a growth score (LLY, BAC, BP,
+                   AEM, PSX, B, AU ...; 21 of them had no fund_score at all before), 20
+                   entered on rank shifts as both pools grew.
+
+    LLY  growth 72.5 on 7 of 10   fund 77.3 -> 74.9   fund_rank 98.3, growth_rank 94.7, gate 1
+    BAC  growth 52.9 on 7 of 9    fund 66.2 -> 59.5   78.1 / 55.9, gate 1
+    BP   growth 57.9 on 7 of 10   fund 57.6 -> 57.8   73.4 / 70.0, gate 1
+    AZN  growth 56.6 (unchanged)  fund 67.5           93.5 / 67.1, gate 1
+
+OPEN, FOR A DECISION -- A FUND SCORE ON ONE PILLAR. `fund_score` averages whatever pillars
+exist, minimum one. That predates this change -- 284 names had a growth-only fund_score
+before it -- and it now reaches 433 (504 on any single pillar). Those 21 gate
+entrants have no other pillar (BNS, CM, IBKR, EWBC, RGA, TPG, PJT ...); the gated set on one
+pillar went 92 of 632 -> 117 of 711. Requiring two pillars would remove them and the
+pre-existing ones alike; not done without a decision.
+
+validate after the re-score: 1 PROBLEM, `ttm:466/467` -- one of the 57 pre-existing
+52/53-week windows (previous section). `screen` also reports 1 FAIL that is not this change:
+"stored run covers the whole panel: 5,556 of 5,567" -- 11 series with no bounce record, the
+11 cuts 9418128 made in the bar store; the bounce step has not run since.
+
+NOT RE-SCORED: sessions before 10-30. The growth_score series steps up on 10-30 (+273 names),
+so a factor study across that date sees a population change; `rebuild_history.py` would make
+it consistent (heavy -- not run).
+
+
 ## State at 2026-11-01 — SPIN-OFF STEPS AND OTHER COMPANIES' PRICES REMOVED FROM 35 SERIES
 
 Zones were drawn across prices that did not belong to the stock: a parent's history
@@ -248,7 +309,7 @@ section): B readmits names whose growth is unknown, which turns the AND of the t
 one-leg gate for 12% of the band, and 17 of the 76 have 1-4 growth inputs. No forward-return
 comparison is offered: ~50 overlapping sessions since the pillar changed is not a test.
 
-### PROPOSED, NOT CHANGED: GROWTH-PILLAR COVERAGE
+### PROPOSED, NOT CHANGED: GROWTH-PILLAR COVERAGE -- APPROVED AND BUILT 2026-11-01 (AFTERNOON SECTION, TOP)
 
 0.60 of 13 inputs (8) counts inputs that are ABSENT BY DESIGN as missing. Of the 108
 fund-scored names at 7/13 on 10-30: 82 lack BOTH quarter-on-quarter inputs (withheld unless a
