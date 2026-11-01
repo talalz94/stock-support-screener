@@ -214,6 +214,9 @@ def build_panel_stats(interval: str = "1d") -> pd.DataFrame:
     out.index.name = "ticker"
     out = out.reset_index()
     out["ticker"] = out["ticker"].astype(str)
+    # Archived series (config.HISTORY_CUTS) are another company's past: kept in the
+    # store for studies, never a name the screen should consider.
+    out = out[~out["ticker"].str.contains(ARCHIVE_MARK, regex=False)]
     out["range_250_x"] = (out["hi250"] / out["lo250"].replace(0, pd.NA)).astype("float32")
     out["pct_of_250d_high"] = (
         out["last_close"] / out["hi250"].replace(0, pd.NA)).astype("float32")
@@ -250,6 +253,11 @@ def load_panel_stats() -> pd.DataFrame:
 
 # ------------------------------------------------------------------ history joins
 PRICE_COLS = ("open", "high", "low", "close", "vwap")
+# An archive ticker ("FLY~2021", config.HISTORY_CUTS) holds another company's bars
+# for studies. It is never part of the screen's panel: on 2026-11-01 the 11 archives
+# entered the panel stats and validate's "stored run covers the whole panel" FAILED
+# (5,556 of 5,567).
+ARCHIVE_MARK = "~"
 
 
 def apply_joins(df: pd.DataFrame, joins: dict | None = None) -> pd.DataFrame:

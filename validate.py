@@ -1269,12 +1269,47 @@ def check_insider(asof: str, quick: bool = False) -> None:
         record("insider", "House store readable", WARN, repr(exc)[:100])
 
 
+def check_news(asof: str, quick: bool = False) -> None:
+    """News-event store (news_events.py): WARN-ONLY freshness. The SEC watermark should
+    trail the session by a few business days at most; every kept 8-K should carry
+    its item codes (they are what types it); the feeds and the earnings calendar
+    are read each night and only their newest items exist, so a gap is lost data."""
+    try:
+        import news_events as EV
+        st = EV._state()
+        through = st.get("edgar_through")
+        lag = int(np.busday_count(through, asof)) if through else 99
+        record("news", "SEC event watermark current", WARN if lag > 4 else OK,
+               f"through {through} ({lag} business day(s) before {asof})")
+        e = EV._read_edgar()
+        k = e[e.form == "8-K"]
+        recent = k[k.filing_date.astype(str) >= (pd.Timestamp(asof) - pd.Timedelta(days=30)).strftime("%Y-%m-%d")]
+        noitem = int((recent["items"].astype(str) == "").sum())
+        record("news", "recent 8-Ks carry item codes", WARN if noitem else OK,
+               f"{noitem} of {len(recent)} 8-K(s) in 30 days without items")
+        if EV.WIRE_FILE.exists():
+            w = pd.read_parquet(EV.WIRE_FILE)
+            seen = pd.to_datetime(w.first_seen_utc, utc=True).max()
+            age = (pd.Timestamp.now(tz="UTC") - seen).total_seconds() / 3600 if pd.notna(seen) else 999
+            record("news", "press-release and FDA feeds read", WARN if age > 30 else OK,
+                   f"last read {age:.0f} h ago; {len(w)} item(s) stored")
+        else:
+            record("news", "press-release and FDA feeds read", WARN, "no wire store yet")
+        files = sorted(EV.CAL_DIR.glob("*.parquet")) if EV.CAL_DIR.exists() else []
+        last = files[-1].stem if files else None
+        days = (pd.Timestamp(asof) - pd.Timestamp(last)).days if last else 99
+        record("news", "earnings calendar snapshot", WARN if days > 3 else OK,
+               f"latest {last} ({len(files)} snapshot(s))")
+    except Exception as exc:                                     # noqa: BLE001
+        record("news", "events store readable", WARN, repr(exc)[:100])
+
+
 GROUPS = {"key": check_key, "time": check_time, "value": check_value,
           "config": check_config, "claims": check_claims,
           "coverage": check_coverage, "currency": check_currency,
           "cross": check_cross, "combo": check_combo, "feeds": check_feeds,
           "pages": check_pages, "screen": check_screen, "rows": check_rows,
-          "insider": check_insider}
+          "insider": check_insider, "news": check_news}
 
 
 def main() -> int:
