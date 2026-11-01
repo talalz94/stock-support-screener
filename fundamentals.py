@@ -328,6 +328,27 @@ def quarters(years: float) -> list[str]:
     return sorted(out)
 
 
+# THE FORMS WHOSE XBRL IS A STATEMENT SET -- one rule, applied by both ingests:
+# `fetch_quarter` here and `edgar.FORMS` for the per-filing path.
+#
+# 6-K WAS MISSING, AND IT IS HOW A FOREIGN PRIVATE ISSUER FILES AN INTERIM.
+# AstraZeneca reports twice a year: a 20-F, and its half-year statements on a
+# 6-K with inline XBRL (H1-2026: 0001104659-26-086846, filed 2026-07-27). Both
+# ingests dropped every 6-K, so its interims reached the store only through
+# companyfacts -- which carried the 2022-2025 ones and, on 2026-10-31, still
+# not 2026's. From 2026-07-29 the current frame stopped at FY2025 while the
+# year-back frame had H1-2025, so `fund_metrics`'s year-on-year guard (270-550
+# days) withheld every YoY growth input. The 2026q3 bulk set holds 373 6-Ks
+# from 367 ticker-map filers, every one with statement facts we read -- the
+# filer chose to tag its statements, so these are not 8-K-style extracts.
+STATEMENT_FORMS = ("10-K", "10-Q", "20-F", "40-F", "6-K")
+
+
+def statement_form(form) -> bool:
+    """10-K/10-KT/10-K/A, 10-Q(/A), 20-F(/A), 40-F(/A), 6-K(/A)."""
+    return str(form).startswith(STATEMENT_FORMS)
+
+
 def fetch_quarter(q: str, verbose: bool = True, session=None) -> pd.DataFrame:
     """One quarterly ZIP -> filtered facts joined to their filing metadata.
 
@@ -358,8 +379,8 @@ def fetch_quarter(q: str, verbose: bool = True, session=None) -> pd.DataFrame:
     # names differ from the US-GAAP set in TAGS. Accepting the forms is
     # necessary but may not be sufficient; `--coverage` reports how many
     # actually populate rather than assuming the count.
-    sub = sub[sub["form"].astype(str).str.startswith(
-        ("10-K", "10-Q", "20-F", "40-F"))]
+    # 6-K joined 2026-10-31 -- see STATEMENT_FORMS.
+    sub = sub[sub["form"].map(statement_form)]
 
     num = pd.read_csv(z.open("num.txt"), sep="\t", low_memory=False,
                       usecols=["adsh", "tag", "ddate", "qtrs", "uom", "value",
@@ -2516,8 +2537,9 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
             a = (ann_all.sort_values(["ddate", "filed"], kind="mergesort")
                         .groupby(["ticker", "concept", "tag"], observed=True)
                         .tail(1)[["ticker", "concept", "tag", "value",
-                                  "ddate"]]
-                        .rename(columns={"value": "_fy", "ddate": "_fy_end"}))
+                                  "ddate", "filed"]]
+                        .rename(columns={"value": "_fy", "ddate": "_fy_end",
+                                         "filed": "_fy_filed"}))
             y = y.merge(a, on=["ticker", "concept", "tag"], how="inner")
 
             # THE STUB MUST START AT THE FISCAL YEAR START, and this filter has
@@ -2551,7 +2573,7 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
                           .groupby(["ticker", "concept", "tag"], observed=True)
                           .tail(1)[["ticker", "concept", "tag", "qtrs",
                                     "ddate", "value", "_fy", "_fy_end",
-                                    "rank"]])
+                                    "_fy_filed", "rank"]])
                 prior = y[["ticker", "concept", "tag", "qtrs", "ddate",
                            "value"]].rename(
                     columns={"ddate": "_p_end", "value": "_p_val"})
@@ -2576,6 +2598,39 @@ def _ttm(flow: pd.DataFrame, with_window: bool = False) -> pd.DataFrame:
                     m = (m.sort_values("_p_end", kind="mergesort")
                            .groupby(["ticker", "concept", "tag"],
                                     observed=True).tail(1))
+
+                    # A COMPONENT CANNOT ROLL FORWARD IN PLACE OF THE TOTAL.
+                    #
+                    # For AGGREGATE_MAX_CONCEPTS the roll's annual leg must be
+                    # the LARGEST alias in its own annual filing. Otherwise the
+                    # complete-set rule above picks whichever tag an interim
+                    # happened to repeat, and its later end beats the total.
+                    # ALVO, measured 2026-10-31: its 20-F has
+                    # RevenueFromContractsWithCustomers 586.3M beside
+                    # RevenueFromSaleOfGoods 276.3M (product sales); its H1-2026
+                    # 6-K tags only the latter, so the roll read 276.3 + 105.9 -
+                    # 204.7 = 177.5M of product revenue as the company's year.
+                    # Dropped, the total annual stands. 1 of 236 revenue rolls
+                    # on 10-30's frame; 0 of 167 before 6-Ks were read.
+                    _agg = m["concept"].isin(AGGREGATE_MAX_CONCEPTS)
+                    if bool(_agg.any()):
+                        _top = (ann_all.groupby(["ticker", "concept", "ddate",
+                                                 "filed"], observed=True)["value"]
+                                .max().rename("_fy_top").reset_index()
+                                .rename(columns={"ddate": "_fy_end",
+                                                 "filed": "_fy_filed"}))
+                        m = m.merge(_top, on=["ticker", "concept", "_fy_end",
+                                              "_fy_filed"], how="left")
+                        _fy = m["_fy"].astype(float)
+                        _comp = (m["concept"].isin(AGGREGATE_MAX_CONCEPTS)
+                                 & (_fy < m["_fy_top"].astype(float)
+                                    - 1e-9 * _fy.abs()))
+                        if bool(_comp.any()):
+                            _log_once(f"_ttm: dropped {int(_comp.sum())} "
+                                      f"revenue roll(s) built on a component "
+                                      f"tag smaller than its annual total")
+                        m = m[~_comp]
+                if not m.empty:
                     roll = pd.DataFrame({
                         "ticker": m["ticker"].values,
                         "concept": m["concept"].values,
@@ -3191,10 +3246,91 @@ def _selftest_stub_not_level() -> None:
             invalidate_currency_cache()
 
 
+def _selftest_statement_forms() -> None:
+    """The bulk ingest keeps 6-K interims and still drops 8-K extracts, and a
+    semi-annual filer's 6-K rolls its year forward (AstraZeneca, 2026-10-31)."""
+    for form, want in (("10-K", True), ("10-KT", True), ("10-Q/A", True),
+                       ("20-F", True), ("40-F/A", True), ("6-K", True),
+                       ("6-K/A", True), ("8-K", False), ("DEF 14A", False),
+                       ("S-1", False), ("11-K", False), ("", False)):
+        assert statement_form(form) is want, f"statement_form({form!r}) != {want}"
+
+    # Through `fetch_quarter` itself, on an in-memory data set, so the filter
+    # it actually applies is the one tested.
+    subs = [("0000000001-26-000001", "10-Q"), ("0001104659-26-086846", "6-K"),
+            ("0000000003-26-000003", "8-K"), ("0000000004-26-000004", "6-K/A")]
+    sub = "adsh\tcik\tsic\tform\tperiod\tfy\tfp\tfiled\n" + "".join(
+        f"{a}\t{i}\t2834\t{f}\t20260630\t2026\tH1\t20260727\n"
+        for i, (a, f) in enumerate(subs, 1))
+    num = "adsh\ttag\tddate\tqtrs\tuom\tvalue\tsegments\tcoreg\n" + "".join(
+        f"{a}\tRevenue\t20260630\t2\tUSD\t{i}000\t\t\n"
+        for i, (a, _) in enumerate(subs, 1))
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("sub.txt", sub)
+        z.writestr("num.txt", num)
+
+    class _Resp:
+        status_code, content = 200, buf.getvalue()
+
+    class _Sess:
+        def get(self, *a, **k):
+            return _Resp()
+
+    got = fetch_quarter("2026q3", verbose=False, session=_Sess())
+    assert sorted(got["form"].astype(str)) == ["10-Q", "6-K", "6-K/A"], \
+        f"bulk form filter kept {sorted(got['form'].astype(str))}"
+
+    # AZN's filed revenue legs: 20-F years, 6-K halves (each 6-K repeats the
+    # prior half as its comparative). With the H1-2026 6-K the year rolls to
+    # 2026-06-30: 58,739 + 30,672 - 28,045 = 61,366M. Without it the newest
+    # period is FY2025 -- six months short of the year-back frame's H1-2025,
+    # which is exactly what withheld every year-on-year growth input.
+    rows = [("2025-02-18", "20-F", "2024-12-31", 4, 54_073e6),
+            ("2025-07-29", "6-K", "2025-06-30", 2, 28_045e6),
+            ("2025-07-29", "6-K", "2025-06-30", 1, 14_457e6),
+            ("2025-07-29", "6-K", "2024-06-30", 2, 25_617e6),
+            ("2025-07-29", "6-K", "2024-06-30", 1, 12_938e6),
+            ("2026-02-24", "20-F", "2025-12-31", 4, 58_739e6),
+            ("2026-02-24", "20-F", "2024-12-31", 4, 54_073e6),
+            ("2026-07-27", "6-K", "2026-06-30", 2, 30_672e6),
+            ("2026-07-27", "6-K", "2026-06-30", 1, 15_384e6),
+            ("2026-07-27", "6-K", "2025-06-30", 2, 28_045e6),
+            ("2026-07-27", "6-K", "2025-06-30", 1, 14_457e6)]
+    fl = pd.DataFrame(rows, columns=["filed", "form", "ddate", "qtrs", "value"]
+                      ).assign(ticker="AZN", concept="revenue", tag="Revenue",
+                               rank=6, cik=901832)
+    t = _ttm(fl, with_window=True)
+    assert (float(t["value"].iloc[0]), t["ddate"].iloc[0]) == (61_366e6, "2026-06-30"), \
+        f"AZN revenue_ttm {float(t['value'].iloc[0]):,.0f} @ {t['ddate'].iloc[0]}"
+    t = _ttm(fl[fl["filed"] < "2026-07-27"].copy(), with_window=True)
+    assert (float(t["value"].iloc[0]), t["ddate"].iloc[0]) == (58_739e6, "2025-12-31")
+
+    # ALVO: the 6-K repeats only the product-sales component, so the only
+    # complete roll is a component's. It must not replace the 20-F's total
+    # (old code: 276.271 + 105.939 - 204.733 = 177,477,000).
+    c, g = "RevenueFromContractsWithCustomers", "RevenueFromSaleOfGoods"
+    rows = [("2025-03-27", "20-F", "2024-12-31", c, 489.682e6),
+            ("2025-03-27", "20-F", "2024-12-31", g, 273.472e6),
+            ("2025-08-13", "6-K", "2025-06-30", c, 306.004e6),
+            ("2025-08-13", "6-K", "2025-06-30", g, 204.733e6),
+            ("2026-03-31", "20-F", "2025-12-31", c, 586.321e6),
+            ("2026-03-31", "20-F", "2025-12-31", g, 276.271e6),
+            ("2026-08-19", "6-K", "2026-06-30", g, 105.939e6),
+            ("2026-08-19", "6-K", "2025-06-30", g, 204.733e6)]
+    al = pd.DataFrame(rows, columns=["filed", "form", "ddate", "tag", "value"]).assign(
+        qtrs=lambda x: np.where(x["form"] == "20-F", 4, 2), ticker="ALVO",
+        concept="revenue", rank=lambda x: np.where(x["tag"] == c, 7, 8), cik=1898416)
+    t = _ttm(al, with_window=True)
+    assert (float(t["value"].iloc[0]), t["ddate"].iloc[0]) == (586.321e6, "2025-12-31"), \
+        f"ALVO revenue_ttm {float(t['value'].iloc[0]):,.0f} @ {t['ddate'].iloc[0]}"
+
+
 def selftest(verbose: bool = True) -> None:
     fails = []
     _selftest_ytd_rules()
     _selftest_stub_not_level()
+    _selftest_statement_forms()
     _selftest_merge_near_periods()
     _selftest_read_cache()
     _selftest_share_count()

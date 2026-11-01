@@ -146,6 +146,17 @@ DATED_PINS: list[tuple[str, str, str, float, float, str]] = [
     ("2026-10-09", "KR", "eps_diluted_ttm", 1.85, 0.02,
      "FY25 1.54 + H1-26 2.51 - H1-25 2.20 (10-Q 0001104659-26-108926, filed "
      "2026-09-18); H1 ends 08-15 and 08-16, rounded to 07-31 and 08-31"),
+    # --- A 6-K INTERIM MUST REACH THE STORE (2026-10-31). AZN files its half
+    # year on a 6-K; both ingests dropped 6-Ks and companyfacts never served
+    # this one, so its newest period stuck at FY2025 and every YoY growth input
+    # was withheld from 2026-07-29. IFRS tags Revenue / ProfitLoss / Assets.
+    ("2026-10-30", "AZN", "revenue_ttm", 61_366_000_000, 0.002,
+     "FY25 58,739M (20-F 0001104659-26-019130) + H1-26 30,672M - H1-25 "
+     "28,045M (6-K 0001104659-26-086846, filed 2026-07-27)"),
+    ("2026-10-30", "AZN", "net_income_ttm", 10_453_000_000, 0.002,
+     "FY25 10,233M + H1-26 5,589M - H1-25 5,369M (same filings)"),
+    ("2026-10-30", "AZN", "assets", 115_833_000_000, 0.002,
+     "balance sheet at 2026-06-30 (6-K 0001104659-26-086846)"),
 ]
 
 # Share counts that must stay DROPPED -- the filers contradict themselves.
