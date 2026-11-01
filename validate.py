@@ -712,6 +712,24 @@ def check_screen(asof: str, quick: bool) -> None:
         except Exception as exc:                                 # noqa: BLE001
             record("screen", "history joins", WARN, repr(exc)[:110])
 
+        # ---- spin-offs and reused symbols (bars.py --corrections). A refetch
+        # that skipped bars.apply_spinoffs would put HON's -50.9% spin-off day
+        # back under every level; a cut that came undone would draw Firefly's
+        # zones from Fly Leasing's prices. Shown to FAIL by bars.py --selftest.
+        try:
+            import bars as _B
+            probs = _B.verify_corrections(asof)
+            record("screen", "spin-offs and reused symbols hold", FAIL if probs else OK,
+                   "; ".join(probs)[:150] if probs else
+                   f"{sum(len(v) for v in config.SPINOFFS.values())} spin-off(s), "
+                   f"{len(config.HISTORY_CUTS)} cut(s): no step, no other company's bars")
+            undeclared = _B.corrections_audit()
+            record("screen", "no undeclared reused symbol", WARN if undeclared else OK,
+                   "; ".join(undeclared)[:150] if undeclared else
+                   "no liquid name has an undeclared gap of 20+ sessions")
+        except Exception as exc:                                 # noqa: BLE001
+            record("screen", "spin-offs and reused symbols", WARN, repr(exc)[:110])
+
         # The panel is the population. A stored run that does not cover it has
         # dropped names silently -- which is exactly what returning only the
         # pattern tier did until 2026-08-24.

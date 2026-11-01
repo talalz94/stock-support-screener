@@ -465,8 +465,13 @@ def screen_universe(asof_date: str | None = None, only: list[str] | None = None,
     if allrows.empty:
         return pd.DataFrame(), _panel_reject_rows(panel_rej, ps, asof_date)
 
-    passed = allrows[allrows.get("passed", False) == True].copy()   # noqa: E712
-    rejected = allrows[allrows.get("passed", False) != True].copy()  # noqa: E712
+    # `passed` is set only by the stage the pattern math reaches; when no name gets
+    # there (`--only MSFT`), the column is absent and `.get` returned a bare False,
+    # which indexed the frame by column name: KeyError. Absent = nobody passed.
+    ok = (allrows["passed"].fillna(False).astype(bool) if "passed" in allrows.columns
+          else pd.Series(False, index=allrows.index))
+    passed = allrows[ok].copy()
+    rejected = allrows[~ok].copy()
 
     if verbose:
         print("\n  funnel by stage:")

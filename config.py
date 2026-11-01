@@ -228,6 +228,10 @@ HISTORY_JOINS: dict[str, dict] = {
              "why": "Equity Residential renamed (SEC CIK 906107, former name to "
                     "2026-08-12). Joined series equals our stored EQR bars on all "
                     "2,502 shared days; join +0.58% (z +0.44)."},
+    "MSGK": {"join": "2026-10-14", "factor": 1.0, "asof": None,
+             "why": "MSG Sports renamed (the source maps MSGK back through MSGS: "
+                    "identical closes to 2026-10-26). Joined after its two spin-offs "
+                    "are adjusted (SPINOFFS['MSGK']), which made it refuse on 10-31."},
     "SKYD": {"join": "2026-10-06", "factor": 1.0, "asof": None,
              "why": "Paramount Skydance renamed (same CIK, former name to "
                     "2026-10-06). Joined series equals our stored PSKY bars on all "
@@ -250,6 +254,170 @@ JOIN_MAX_GAP = 3
 # joined 2026-10-31) -- exactly as an unchanged ticker would. It does not judge
 # whether the business changed. False = declared joins only.
 HISTORY_AUTO_JOIN = True
+
+# ---------------------------------------------------------------------------
+# SPIN-OFFS (2026-11-01). ADJUSTMENT = "split" leaves a pro-rata spin-off in the
+# parent's series as a one-day fall -- HON -50.9% on 2026-06-29 (Honeywell
+# Aerospace), FDX -17.8% on 2026-06-01 (FedEx Freight) -- and every support
+# level drawn across that day rests on prices that included the business that
+# left. Each entry is CHECKED BY HAND: `ratio` (spin-off shares per parent
+# share) from the spin-off's own Form 10 information statement, `factor` =
+# bars.spinoff_factor(parent, spin-off, ratio) on `on`, the first session both
+# closed regular-way, and the parent's move across `ex` after adjustment within
+# JOIN_MAX_Z of its own volatility (bars.corrections refuses otherwise). Prices
+# before `ex` are multiplied by `factor`; volume is untouched. Applied in
+# bars.fetch_many, so a refetch reproduces it; written to the store once by
+# `python bars.py --corrections`; validate's `screen` group FAILS if a step
+# comes back.
+SPINOFFS: dict[str, list[dict]] = {
+    "YUM": [
+        {"ex": "2016-11-01", "spinco": "YUMC", "ratio": "1", "factor": 0.69855,
+         "why": "YUMC Form 10: one share for every YUM share; -29.7% -> +0.7%"},
+    ],
+    "CNX": [
+        {"ex": "2017-11-29", "spinco": "CNR", "ratio": "1/8", "factor": 0.102881,
+         "why": "CONSOL Mining (now CNR) Form 10: one share per eight. The source scaled CNX's earlier prices x8 (the ratio read as a reverse split; raw 16.16 vs stored 129.28): /8, then the spin-off. -89.6% -> +1.5%"},
+    ],
+    "PNR": [
+        {"ex": "2018-05-01", "spinco": "NVT", "ratio": "1", "factor": 0.663607,
+         "why": "nVent Form 10: one share for each Pentair share; -33.4% -> +0.4%"},
+    ],
+    "TNL": [
+        {"ex": "2018-06-01", "spinco": "WH", "ratio": "1", "factor": 0.442376,
+         "why": "Wyndham Hotels Form 10: one share for each Wyndham Worldwide share; -55.1% -> +1.5%"},
+    ],
+    "ENSG": [
+        {"ex": "2019-10-01", "spinco": "PNTG", "ratio": "1/2", "factor": 0.841973,
+         "why": "Pennant Form 10: one share per two Ensign shares; -15.2% -> +0.7%"},
+    ],
+    "RTX": [
+        {"ex": "2020-04-03", "spinco": "CARR+OTIS", "ratio": "1+1/2", "factor": 0.275826,
+         "why": "Carrier/Otis Form 10s: one Carrier and 0.5 Otis per UTC share. The source scaled earlier prices x2 (raw 86.01 vs stored 172.02): /2, then both spin-offs. -71.0% -> +5.2%"},
+    ],
+    "SNX": [
+        {"ex": "2020-12-01", "spinco": "CNXC", "ratio": "1", "factor": 0.419954, "max_z": 6.0,
+         "why": "Concentrix Form 10: one share for each SYNNEX share. Raw prices: the combined value rose 12.9% that day, so the adjusted move is +12.9% (z 5.4): max_z 6 by hand"},
+    ],
+    "DTE": [
+        {"ex": "2021-07-01", "spinco": "DTM", "ratio": "1/2", "factor": 0.841899,
+         "why": "DT Midstream Form 10: one share per two DTE shares; -13.7% -> +2.5%"},
+    ],
+    "ZD": [
+        {"ex": "2021-10-08", "spinco": "CCSI", "ratio": "1/3", "factor": 0.84066,
+         "why": "Consensus Form 10: one share per three J2 Global shares; -20.1% -> -5.0%"},
+    ],
+    "ENOV": [
+        {"ex": "2022-04-05", "spinco": "ESAB", "ratio": "1", "factor": 0.610856,
+         "why": "ESAB Form 10: one share per three Colfax shares, with Colfax's 1-for-3 reverse split the same day: one per post-split share; -39.9% -> -1.6%"},
+    ],
+    "FTAI": [
+        {"ex": "2022-08-02", "spinco": "FIP", "ratio": "1", "factor": 0.867582,
+         "why": "FTAI Infrastructure Form 10: one share for every FTAI share; -21.7% -> -9.7%"},
+    ],
+    "ADEA": [
+        {"ex": "2022-10-03", "spinco": "XPER", "ratio": "2/5", "factor": 0.545606,
+         "why": "Xperi Inc. Form 10: four shares for every ten Xperi Holding (now Adeia) shares; -49.2% -> -6.8%"},
+    ],
+    "GE": [
+        {"ex": "2023-01-04", "spinco": "GEHC", "ratio": "1/3", "factor": 0.776864,
+         "why": "GE HealthCare Form 10: one share per three GE shares; -17.4% -> +6.3%"},
+        {"ex": "2024-04-02", "spinco": "GEV", "ratio": "1/4", "factor": 0.795883,
+         "why": "GE Vernova Form 10: one share per four GE shares; -22.2% -> -2.2%"},
+    ],
+    "MDU": [
+        {"ex": "2023-06-01", "spinco": "KNF", "ratio": "1/4", "factor": 0.692105,
+         "why": "Knife River Form 10: one share per four MDU shares; -32.6% -> -2.6%"},
+        {"ex": "2024-11-01", "spinco": "ECG", "ratio": "1/4", "factor": 0.535034,
+         "why": "MDU 8-K 2024-10-02: one Everus share per four MDU shares; -47.7% -> -2.2%"},
+    ],
+    "J": [
+        {"ex": "2024-09-30", "spinco": "AMTM", "ratio": "1", "factor": 0.802329,
+         "why": "Amentum Form 10: one share for every Jacobs share; -15.8% -> +4.9%"},
+    ],
+    "WDC": [
+        {"ex": "2025-02-24", "spinco": "SNDK", "ratio": "1/3", "factor": 0.75161,
+         "why": "WDC 8-K 2025-02-03: one-third of a Sandisk share per WDC share; -28.7% -> -5.1%"},
+    ],
+    "FTV": [
+        {"ex": "2025-06-30", "spinco": "RAL", "ratio": "1/3", "factor": 0.763325,
+         "why": "Fortive 8-K 2025-06-30: one Ralliant share per three Fortive shares; -27.2% -> -4.6%"},
+    ],
+    "DD": [
+        {"ex": "2025-11-03", "spinco": "Q", "ratio": "1/2", "factor": 0.416997,
+         "why": "DuPont 8-K 2025-10-15: one Qnity share per two DuPont shares (a later 1-for-3 reverse split scales both sides alike); -57.5% -> +1.9%"},
+    ],
+    "ANAB": [
+        {"ex": "2026-04-20", "spinco": "TRAX", "ratio": "1", "factor": 0.732566,
+         "why": "First Tracks Form 10: one share for every AnaptysBio share; -24.5% -> +3.0%"},
+    ],
+    "FDX": [
+        {"ex": "2026-06-01", "spinco": "FDXF", "ratio": "1/2", "factor": 0.819083,
+         "why": "FedEx Freight 8-K 2026-05-13: one share per two FedEx shares; -17.8% -> +0.4%"},
+    ],
+    "HON": [
+        {"ex": "2026-06-29", "spinco": "HONA", "ratio": "1", "factor": 0.508493,
+         "why": "Honeywell 8-K 2026-06-05: one Honeywell Aerospace share per two Honeywell shares, with a 1-for-2 reverse split the same day: one per post-split share; -50.9% -> -3.5%"},
+    ],
+    "MIDD": [
+        {"ex": "2026-07-07", "spinco": "MFP", "ratio": "1", "factor": 0.79188,
+         "why": "Midera Form 10: one share for every Middleby share; -22.3% -> -1.9%"},
+    ],
+    "REZI": [
+        {"ex": "2026-08-04", "spinco": "ADIG", "ratio": "1/2", "factor": 0.704062,
+         "why": "ADI Form 10: one share per two Resideo shares; -27.8% -> +2.6%"},
+    ],
+    "MSGK": [
+        {"ex": "2020-04-20", "spinco": "MSGE", "ratio": "1", "factor": 0.73633,
+         "why": "MSG Entertainment (2020, now Sphere) Form 10: one share per MSG share; -23.1% -> +4.4% (raw)"},
+        {"ex": "2026-10-27", "spinco": "MSGR", "ratio": "1/2", "factor": 0.774735,
+         "why": "MSG Sports 8-K 2026-10-09: one Rangers share per two MSG Sports shares; -20.5% -> +2.6% (raw)"},
+    ],
+}
+
+# HISTORY THAT BELONGS TO ANOTHER COMPANY (2026-11-01). A symbol reused by a new
+# issuer keeps the old company's bars under the same ticker, and zones drew
+# levels from them. Each entry: the current issuer (SEC CIK) first registered
+# after the old series ended, so nothing before `keep_from` is theirs. Those
+# bars move to `archive` (kept for studies, never shown as the current stock)
+# and every later fetch drops them. Found as gaps of 20+ sessions inside a
+# liquid name's series (bars.corrections_audit WARNs on any new one).
+HISTORY_CUTS: dict[str, dict] = {
+    "XE": {"keep_from": "2026-04-24", "archive": "XE~2017",
+           "why": "X-Energy (CIK 2088896): S-1 2026-03-20, 424B4 2026-04-27. "
+                  "Stored XE bars to 2017-09-05 are another company's."},
+    "FLY": {"keep_from": "2025-08-07", "archive": "FLY~2021",
+            "why": "Fly Leasing to 2021-08-02; Firefly Aerospace (CIK 1860160) "
+                   "424B4 2025-08-08."},
+    "CAI": {"keep_from": "2025-06-18", "archive": "CAI~2021",
+            "why": "CAI International to 2021-11-22; Caris Life Sciences "
+                   "(CIK 2019410) first registered 2025-05-23."},
+    "CCXI": {"keep_from": "2026-02-09", "archive": "CCXI~2022",
+             "why": "ChemoCentryx to 2022-10-19; Churchill Capital Corp XI "
+                    "(CIK 2074973) 424B4 2025-12-17, shares from 2026-02-09."},
+    "WLTH": {"keep_from": "2025-12-12", "archive": "WLTH~2023",
+             "why": "Old WLTH to 2023-06-12; Wealthfront (CIK 1524566) first "
+                    "registered 2025-09-29."},
+    "NIQ": {"keep_from": "2025-07-23", "archive": "NIQ~2023",
+            "why": "Old NIQ to 2023-06-23; NIQ Global Intelligence (CIK 2054696) "
+                   "first registered 2025-06-27."},
+    "JAN": {"keep_from": "2026-03-20", "archive": "JAN~2024",
+            "why": "Old JAN to 2024-07-12; Janus Living (CIK 2100805) first "
+                   "registered 2026-03-20."},
+    "LIFE": {"keep_from": "2026-01-29", "archive": "LIFE~2024",
+             "why": "Old LIFE to 2024-06-04; Ethos Technologies (CIK 1788451) "
+                    "first registered 2025-09-26."},
+    "XPER": {"keep_from": "2022-10-03", "archive": "XPER~2022",
+             "why": "Xperi Inc. (spun off 2022-10-03) took the ticker; the earlier "
+                    "XPER bars are Xperi Holding's, now ADEA (identical closes)."},
+    "MSGE": {"keep_from": "2023-04-21", "archive": "MSGE~2023",
+             "why": "MSG Entertainment (spun off 2023-04-21) took the ticker; the "
+                    "earlier MSGE bars are the old MSG Entertainment's, now SPHR."},
+    "NBIS": {"keep_from": "2024-10-21", "archive": "NBIS~2024",
+             "why": "Same registrant (CIK 1513845, formerly Yandex N.V.), but it "
+                    "sold its Russian businesses in 2024 and the series breaks "
+                    "2024-08-19 -> 2024-10-21: the earlier prices are Yandex's."},
+}
+CORRECTIONS_LEDGER = DATA / "_corrections_ledger.json"
 
 # ~2520 sessions. IND_WARMUP + STRUCT_WIN needs 890, so the screener never used
 # more than 4y -- this is set for the FACTOR WORK, not the screen. Raised 4 -> 10

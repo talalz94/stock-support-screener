@@ -176,6 +176,38 @@ def write(df: pd.DataFrame, interval: str = "1d",
     return written
 
 
+def drop_rows(pairs: list[tuple[str, str]], interval: str = "1d") -> int:
+    """Delete each (ticker, before) pair's bars dated before `before`, all pairs
+    in ONE pass over the month files. Returns rows deleted.
+
+    `write` merges and can never delete, so a reused symbol's other company
+    (bars.corrections moves them to an archive ticker first) needs this. Each
+    touched month is rewritten whole and swapped in atomically, like `write`.
+    """
+    if not pairs:
+        return 0
+    last = max(b for _, b in pairs)[:7]
+    n = 0
+    for m in months(interval):
+        if m > last:
+            break
+        path = part_path(m, interval)
+        df = pd.read_parquet(path)
+        t, d = df["ticker"].astype(str), df["date"].astype(str)
+        kill = pd.Series(False, index=df.index)
+        for ticker, before in pairs:
+            kill |= (t == ticker) & (d < before)
+        if not kill.any():
+            continue
+        keep = _typed(df[~kill].reset_index(drop=True))
+        tmp = path.with_suffix(".parquet.tmp")
+        keep.to_parquet(tmp, compression=config.COMPRESSION,
+                        compression_level=config.COMPRESSION_LEVEL, index=False)
+        atomic_replace(tmp, path)
+        n += int(kill.sum())
+    return n
+
+
 def read(interval: str = "1d", start: str | None = None, end: str | None = None,
          tickers: list[str] | None = None,
          columns: list[str] | None = None) -> pd.DataFrame:
