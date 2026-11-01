@@ -44,6 +44,64 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-11-01 (late) — STOCK NEWS EVENTS: 500,430 SEC FILINGS TYPED AND MEASURED; NONE IS A BUY SIGNAL
+
+`news_events.py` (store + nightly step `news_events`) and `news_events_study.py`.
+Data in data/news_events/ (local). NOT `events.py`: that name is the weekly severity
+calibration -- this session overwrote it by mistake and restored it from git within the
+hour; nothing in the nightly chain imported it meanwhile (only the weekly `events` step,
+skipped this week, and status.py).
+
+**Sources, each checked before use (2026-11-01).**
+- SEC submissions JSON: every filing with `items` (8-K item codes) and
+  `acceptanceDateTime` to the second; filings ABOUT a company appear in its own file
+  (WBD: 90 x 425, SC TO-T, SC 14D9, DEFM14A, S-4, SCHEDULE 13D). Backfill 2016 -> now:
+  5,392 companies read, 0 failed, 22 min, **500,430 filings from 5,039 companies**
+  (427,138 8-K; 23,463 425; ~32,000 13D incl. the post-2024 "SCHEDULE 13D" names; 4,912
+  S-4; 1,424 tender-offer forms; 773 merger proxies). Nightly: daily index for settled
+  days + the latest-filings feed for today (`type=` is a prefix match; read to the end),
+  then each named company's file; a day is settled only when every kept filing resolved.
+- PR Newswire subject RSS (M&A, FDA approvals) and FDA press releases: 20 items span ~1
+  day / ~1 week / ~7 weeks, so the 2-hourly runs miss nothing; newest items only, so
+  recorded from today. Tickers from "(NYSE: X)" tags (9 of 20 M&A items); first-word name
+  match ONLY in the FDA-approval feed ("Falcon Capital" matched FBYD in the M&A feed).
+  GlobeNewswire 403s automated requests -- not bypassed. Business Wire M&A feed: empty.
+- Finnhub earnings calendar (free key): upcoming dates, EPS/revenue estimates, bmo/amc;
+  a response is CAPPED AT 1,500 ROWS (read one day per call); NO history (July: 0 rows),
+  so stored as dated snapshots from today (`upcoming_earnings(asof)` = what was known
+  then). First snapshot: 4,266 rows, 10-26..11-27, 682 with actual EPS, 0 capped days.
+  A second call batch inside 20 minutes was throttled (40 s -> 5 min); nightly once.
+
+**Study** (`data/_news_events_study_summary.json`): 445,718 filings since 2016-06 ->
+607,595 typed events (8-K split by item; earnings also by Benzinga beat/miss from the
+stored headlines: 49,796 beat, 25,266 miss of 126,561), 4,997 tickers. Entry at the first
+close after acceptance; reaction day measured separately; excess vs the same liquidity
+fifth; t across quarters; one episode per ticker per 60 sessions; split halves at
+2021-07-01; CHANCE BASELINE = the same stock's own non-event days (5 placebo dates within
+a year, 10+ sessions from any event of that type) -> `vs_own`.
+- 34 of 128 peer-relative tests reach |t| >= 2 (6.4 expected), but MOST VANISH vs own
+  days: frequent 8-K filers (small, financing-heavy) lag their peers regardless of event.
+- Earnings: the move is the reaction day (beat +1.60pp, miss -2.81pp); nothing after the
+  first close -- no post-earnings drift; a slight bounce after misses (60d vs own +0.94pp,
+  t 2.45, halves 1.02/1.89 -- weak).
+- Negative, survives vs own: unregistered equity sale (8-K 3.02) 20d -3.44pp vs peers
+  (t -5.18), 60d -6.52pp, vs own 60d -3.64pp t -2.87, strongest since 2021 (halves
+  -1.43/-8.59); restatement (4.02) next day -0.69pp, vs own t -3.40, both halves (355);
+  termination of a material agreement (1.02) 5d vs own -0.57pp t -2.97; 8.01 other events
+  20d vs own -0.51pp t -3.12 (second half only); new debt (2.03) 20d vs own -0.26pp.
+- delisting notices (+6.1pp 60d vs own) and bankruptcies (13 episodes) are survivorship.
+- Latency, earnings: Benzinga's first earnings headline vs the 8-K acceptance on 96,502
+  matched filings -- Benzinga first 53.1%, median 40 s earlier, p10 1.4 h earlier (press
+  release before the 8-K), p90 38 min later.
+NOTHING ENTERS A SCORE. Candidates for the user to decide: a WARNING badge on pages for
+a recent 3.02 / 4.02 / 1.02 filing; earnings dates from the calendar shown before entry.
+
+**Validate:** new `news` group (WARN-only): watermark within 4 business days, recent
+8-Ks carry items, feeds read within 30 h, calendar snapshot within 3 days.
+**Fixed alongside:** the 11 archive tickers from the spin-off work had entered the
+screen's panel stats -> `screen: stored run covers the whole panel` FAILED (5,556 of
+5,567) in the 16:40 validate; `bars.build_panel_stats` now drops `~` tickers (5,556).
+
 ## State at 2026-11-01 (evening) — A FUND SCORE NEEDS TWO OF THE FOUR PILLARS
 
 User decision, after the coverage change below showed 149 new fund scores on the growth
@@ -4465,7 +4523,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-01 04:26 — do not edit by hand._
+_Generated 2026-11-01 16:47 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -4482,39 +4540,39 @@ _Generated 2026-11-01 04:26 — do not edit by hand._
 | `provider` | daily | 65.1 min | 65.1 min | 71.0 min | 120.0 min | 55 |
 | `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 15 |
 | `sec_gap` | weekly | 6.4 min | 5.4 min | 12.1 min | 20.0 min | 14 |
-| `sec_edgar` | daily | 2.6 min | 34s | 4.3 min | 30.0 min | 20 |
-| `insider` | daily | 2.0 min | 87s | 2.0 min | 30.0 min | 5 |
-| `congress` | daily | 11s | 17s | 17.2 min | 30.0 min | 5 |
-| `fundamental` | daily | 66.2 min | 3.2 min | 66.2 min | 180.0 min | 68 |
+| `sec_edgar` | daily | 8s | 30s | 4.3 min | 30.0 min | 21 |
+| `insider` | daily | 35s | 61s | 2.0 min | 30.0 min | 6 |
+| `congress` | daily | 3s | 14s | 30s | 30.0 min | 6 |
+| `fundamental` | daily | 4.7 min | 3.5 min | 66.2 min | 180.0 min | 70 |
 | `events` | weekly | 37.7 min | 10.7 min | 590.9 min ⚠ | 30.0 min | 15 |
 | `leaderboard` | weekly | 91.0 min | 40.7 min | 91.0 min ⚠ | 90.0 min | 16 |
-| `dip` | daily | 2.2 min | 18s | 2.2 min | 15.0 min | 68 |
+| `dip` | daily | 70s | 19s | 2.2 min | 15.0 min | 70 |
 | `insider_score` | daily | 7.9 min | 7.2 min | 9.2 min | 30.0 min | 5 |
-| `combo` | daily | 2.2 min | 19s | 2.2 min | 15.0 min | 67 |
-| `candidates` | daily | 13.6 min | 6s | 13.6 min ⚠ | 5.0 min | 25 |
-| `floor` | daily | 4.2 min | 56s | 4.2 min | 15.0 min | 19 |
+| `combo` | daily | 60s | 19s | 2.2 min | 15.0 min | 69 |
+| `candidates` | daily | 25s | 6s | 13.6 min ⚠ | 5.0 min | 27 |
+| `floor` | daily | 74s | 56s | 4.2 min | 15.0 min | 21 |
 | `insider_pages` | daily | 12s | 8s | 12s | 15.0 min | 5 |
-| `sectors` | daily | 5.0 min | 3.5 min | 5.0 min | 30.0 min | 18 |
-| `validate` | daily | 27.0 min | 7.1 min | 27.0 min | 60.0 min | 54 |
-| `explore` | daily | 75s | 9s | 75s | 5.0 min | 76 |
-| `snapshots` | daily | 36s | 5s | 36s | 5.0 min | 89 |
-| `profiles` | daily | 16.4 min | 22.3 min | 16.4 min ⚠ | 15.0 min | 71 |
+| `sectors` | daily | 1.6 min | 3.2 min | 5.0 min | 30.0 min | 20 |
+| `validate` | daily | 14.3 min | 7.1 min | 27.0 min | 60.0 min | 56 |
+| `explore` | daily | 21s | 9s | 75s | 5.0 min | 78 |
+| `snapshots` | daily | 0s | 4s | 36s | 5.0 min | 90 |
+| `profiles` | daily | 5.8 min | 21.6 min | 16.4 min ⚠ | 15.0 min | 73 |
 | `watchlists` | daily | 6s | 6s | 6s | 10.0 min | 1 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 79 |
-| `dashboard` | daily | 5s | 0s | 5s | 2.0 min | 83 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 98 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 80 |
+| `dashboard` | daily | 1s | 0s | 5s | 2.0 min | 85 |
+| `docs` | daily | 1s | 0s | 11s | 5.0 min | 100 |
 
-**Daily total ≈ 120.2 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 119.0 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-01 04:26 — do not edit by hand._
+_Generated 2026-11-01 16:47 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 249.9 | 2016-09 → 2026-10 |
+| bars 1d | 122 | 250.4 | 2016-09 → 2026-10 |
 | bars 1h | 4 | 0.8 | 2026-07 → 2026-10 |
 | bars ETF | 124 | 2.9 | 2016-07 → 2026-10 |
 | news | 123 | 174.4 | 2016-08 → 2026-10 |
@@ -4523,11 +4581,11 @@ _Generated 2026-11-01 04:26 — do not edit by hand._
 | fundamentals | 70 | 344.1 | 2009q2 → 2026q3 |
 | short volume | 75 | 57.0 | 2020-08 → 2026-10 |
 | flags | 65 | 5.5 | 2026-07-31 → 2026-10-30 |
-| rejects | 22 | 8.3 | 2026-10-01 → 2026-10-30 |
+| rejects | 21 | 7.9 | 2026-10-02 → 2026-10-30 |
 | zones | 46 | 25.9 | 2026-08-27 → 2026-10-30 |
 | fundamentals (companyfacts) | 131 | 74.9 | 1980q3 → 2028q3 |
 | fundamentals (EDGAR filings) | 21 | 0.8 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 41 | 180.1 | — |
+| loose (macro, universe, jobs, study) | 41 | 180.2 | — |
 
 **`data/` total ≈ 1,469 MB.** `reports/` is a further 124 MB across 386 pages.
 
@@ -4537,7 +4595,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-01 04:26 — do not edit by hand._
+_Generated 2026-11-01 16:47 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -4552,7 +4610,7 @@ _Generated 2026-11-01 04:26 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-01 04:26 — do not edit by hand._
+_Generated 2026-11-01 16:47 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
