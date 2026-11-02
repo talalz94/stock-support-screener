@@ -44,6 +44,31 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## State at 2026-11-02 — JOBS CHECKED, THE APP TASK MADE LATE-PROOF, A 20-DAY REVIEW SCHEDULED
+
+**Every job, checked 2026-11-02 05:10:**
+- Windows task `Screener-Orchestrator`: 05:00 daily + every 2 h for 12 h + 23:30 daily,
+  StartWhenAvailable (a missed start runs at wake), runs on battery, one instance, 12 h
+  limit; last result 0. Last night: 7 ran, 0 failed (no new session: Monday).
+- Orchestrator: 35 steps (README lists them from the registry). `news_events` 5th,
+  before `bounce`; `watchlists` re-measures saved lists nightly.
+- Claude-app task `gainers-at-support-tracking` (copies the watchlist numbers to the
+  claude.ai dashboard -- only Claude can write there): was 09:23 Tue-Sat, which the app
+  missed whenever it was closed (10-29, 10-30 never fired; 10-31 fired at 17:01). Now
+  **every 2 hours 06:23-22:23, every day**, so a late-opened app catches up within 2 h
+  or at once (the app runs one catch-up on launch). Most runs stop at
+  "VERDICT: stop -- no new session" after one command. Saved in auto mode (the user).
+- Claude-app one-time task `gainers-at-support-20-day-review` fires **2026-11-23 10:23**:
+  after the 20th session (11-20) it measures the 10-23 list vs the liquid market AND vs a
+  plain baseline (every other eligible stock AT/NEAR support on 10-23), writes
+  `data/watchlists/gainers_at_support_20261023/evaluation_20.json` and reminds the user
+  in plain terms. Its permission mode was NOT saved as auto -- the user may need to
+  approve its first steps (or set auto on it in the app).
+- Sessions: 5 finished helper sessions and 3 old tracking runs archived.
+- **Open:** `fundamentals.py` holds the growth session's uncommitted DEBT-ALIAS change
+  (more `debt`/`debt_st` tags; 989 of 3,312 names had no debt figure on 10-30). That
+  session (local_04281b25) was asked to verify and commit it, or revert it.
+
 ## State at 2026-11-01 (night) — WARNING FILINGS AND NEXT EARNINGS ON EVERY STOCK LIST
 
 Asked for by the user after the news-event study. `news_events.page_flags(asof)` ->
@@ -4549,7 +4574,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-01 16:47 — do not edit by hand._
+_Generated 2026-11-02 05:08 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -4557,6 +4582,7 @@ _Generated 2026-11-01 16:47 — do not edit by hand._
 | `bars` | daily | 71s | 51s | 37.0 min ⚠ | 10.0 min | 62 |
 | `macro` | daily | 82s | 1.6 min | 8.3 min | 15.0 min | 62 |
 | `news` | daily | 18s | 5s | 23s | 10.0 min | 62 |
+| `news_events` | daily | 4.0 min | 2.7 min | 4.0 min | 30.0 min | 2 |
 | `senti_cache` | daily | 24s | 3s | 50s | 10.0 min | 62 |
 | `sentiment` | daily | 1.6 min | 16s | 3.2 min | 15.0 min | 63 |
 | `bounce` | daily | 82s | 40s | 1.6 min | 15.0 min | 63 |
@@ -4566,9 +4592,9 @@ _Generated 2026-11-01 16:47 — do not edit by hand._
 | `provider` | daily | 65.1 min | 65.1 min | 71.0 min | 120.0 min | 55 |
 | `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 15 |
 | `sec_gap` | weekly | 6.4 min | 5.4 min | 12.1 min | 20.0 min | 14 |
-| `sec_edgar` | daily | 8s | 30s | 4.3 min | 30.0 min | 21 |
-| `insider` | daily | 35s | 61s | 2.0 min | 30.0 min | 6 |
-| `congress` | daily | 3s | 14s | 30s | 30.0 min | 6 |
+| `sec_edgar` | daily | 5s | 28s | 4.3 min | 30.0 min | 22 |
+| `insider` | daily | 2.8 min | 87s | 2.8 min | 30.0 min | 7 |
+| `congress` | daily | 9s | 11s | 30s | 30.0 min | 7 |
 | `fundamental` | daily | 4.7 min | 3.5 min | 66.2 min | 180.0 min | 70 |
 | `events` | weekly | 37.7 min | 10.7 min | 590.9 min ⚠ | 30.0 min | 15 |
 | `leaderboard` | weekly | 91.0 min | 40.7 min | 91.0 min ⚠ | 90.0 min | 16 |
@@ -4581,20 +4607,20 @@ _Generated 2026-11-01 16:47 — do not edit by hand._
 | `sectors` | daily | 1.6 min | 3.2 min | 5.0 min | 30.0 min | 20 |
 | `validate` | daily | 14.3 min | 7.1 min | 27.0 min | 60.0 min | 56 |
 | `explore` | daily | 21s | 9s | 75s | 5.0 min | 78 |
-| `snapshots` | daily | 0s | 4s | 36s | 5.0 min | 90 |
+| `snapshots` | daily | 1s | 4s | 36s | 5.0 min | 91 |
 | `profiles` | daily | 5.8 min | 21.6 min | 16.4 min ⚠ | 15.0 min | 73 |
 | `watchlists` | daily | 6s | 6s | 6s | 10.0 min | 1 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 80 |
+| `retention` | daily | 2s | 0s | 2s | 5.0 min | 81 |
 | `dashboard` | daily | 1s | 0s | 5s | 2.0 min | 85 |
-| `docs` | daily | 1s | 0s | 11s | 5.0 min | 100 |
+| `docs` | daily | 0s | 0s | 11s | 5.0 min | 101 |
 
-**Daily total ≈ 119.0 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 122.0 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-01 16:47 — do not edit by hand._
+_Generated 2026-11-02 05:08 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -4604,16 +4630,16 @@ _Generated 2026-11-01 16:47 — do not edit by hand._
 | news | 123 | 174.4 | 2016-08 → 2026-10 |
 | sentiment cache | 123 | 12.0 | 2016-08 → 2026-10 |
 | scores | 122 | 331.8 | 2016-09 → 2026-10 |
-| fundamentals | 70 | 344.1 | 2009q2 → 2026q3 |
+| fundamentals | 70 | 345.4 | 2009q2 → 2026q3 |
 | short volume | 75 | 57.0 | 2020-08 → 2026-10 |
 | flags | 65 | 5.5 | 2026-07-31 → 2026-10-30 |
-| rejects | 21 | 7.9 | 2026-10-02 → 2026-10-30 |
+| rejects | 20 | 7.5 | 2026-10-05 → 2026-10-30 |
 | zones | 46 | 25.9 | 2026-08-27 → 2026-10-30 |
-| fundamentals (companyfacts) | 131 | 74.9 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 21 | 0.8 | 2009q4 → 2026q3 |
+| fundamentals (companyfacts) | 131 | 75.8 | 1980q3 → 2028q3 |
+| fundamentals (EDGAR filings) | 21 | 0.6 | 2009q4 → 2026q3 |
 | loose (macro, universe, jobs, study) | 41 | 180.2 | — |
 
-**`data/` total ≈ 1,469 MB.** `reports/` is a further 124 MB across 386 pages.
+**`data/` total ≈ 1,470 MB.** `reports/` is a further 124 MB across 387 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -4621,7 +4647,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-01 16:47 — do not edit by hand._
+_Generated 2026-11-02 05:08 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -4636,7 +4662,7 @@ _Generated 2026-11-01 16:47 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-01 16:47 — do not edit by hand._
+_Generated 2026-11-02 05:08 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
