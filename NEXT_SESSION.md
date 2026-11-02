@@ -44,6 +44,107 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
+## IDEAS QUEUE — PARKED BY THE USER, NOT BUILT (design and ask before building)
+
+### NARRATIVE SCORE (asked for 2026-11-02)
+**What:** a score for which stories are likely to drive a stock or sector: sector and
+industry trends, policy (regulation, budgets, tariffs, rates), technology cycles, and
+seasonality, each now, in the near future and further out. It needs an AI (Claude)
+reading the latest information. So: a skill with a fixed rubric, run automatically every
+N days, writing a dated, structured result that the screener reads like any other
+module and can finally bundle into the multi-criteria ranking.
+**Constraints to settle first:**
+1. **It cannot be backtested.** The model already knows how any past date turned out,
+   so the only honest test is FORWARD: store each run as a dated snapshot (like the
+   earnings calendar, `news_events.upcoming_earnings(asof)`) and measure it months
+   later against outcomes. It gets no weight in combo until then (the house rule).
+2. **Inputs:** our own stores first (sector scores, news events, Benzinga headlines,
+   insider and House trades, FRED macro, the seasonality study -- measured NOT
+   predictive, so context only), then web research, every claim with its source.
+   No paid sources; no scraping against a site's terms.
+3. **Output:** per sector and sub-industry (and per stock for the shortlist): themes,
+   direction (+/-), horizon (now / ~3 months / ~12 months), confidence, evidence links,
+   run date; a numeric -2..+2 per horizon. A stock's score = its group's score + its own
+   exposure.
+4. **Where it runs:** a Claude-app scheduled task (the app must be open: schedule often
+   with a cheap "already done this period" exit, as `gainers-at-support-tracking` does;
+   see the 2026-11-02 section), writing `data/narrative/<date>.json`; the screener reads
+   the newest snapshot <= asof.
+5. **Risks:** narratives follow price (an echo of momentum, not a cause); run-to-run churn
+   (fixed rubric, change only on new evidence); token cost per run; stale views when the
+   app is closed.
+6. **Evaluation:** after 3-6 months of snapshots, test like every module (IC vs forward
+   returns, against the validated sector score as the baseline); until then shown only.
+
+## State at 2026-11-02 (morning) — STOCKS THAT KEEP RUNNING MOVE MORE BOTH WAYS AT SUPPORT; ONLY "WINS BACK ITS DIPS" LEANS UP
+
+**Asked:** is a stock that is often among the daily top gainers more likely to go up at a
+key level? Then: frequency, not one huge jump -- names (AI ones) that go up, come down and
+go up again through the year. `big_movers_study.py`, design fixed before any result (its
+docstring). **Nothing in the screener or the lists changed.**
+
+**Population:** 52 dates, every 42nd session 2018-01-02 .. 2026-07-14 (40-session level
+windows never overlap); 69,989 liquid name-dates (close >= $5, 20-day median $20M+),
+**41,975 at support** (nearest zone 0-6% below the close; ~800 a date). Outcomes from the
+next close: excess vs the same liquidity fifth at 20 / 60 sessions; FAIL = a close <= 90%
+of the level within 40 sessions, HIT = a close >= 115%. At-support baseline (per-date
+means): excess_20 -0.16pp, FAIL 27.1%, HIT 33.9%. 118 tests carry a t: ~6 expected at
+|t| >= 2 by chance.
+
+**Scores -- all count DAYS or separate runs, never size:** `gain_days` (top-20 gainer days
+in 252, the 10-23 list's ranking); up/down tilt; `rally_count` (separate 20%+ rallies,
+each ended by a 10% pullback: one +200% run = 1); `recovery_rate` (share of 15%+ dips won
+back to the prior 63-session high within 63 sessions; >= 2 dips: half the at-support
+names); `burst_months` (of 12, months with a top-20 day); `peer_rally_count` (the same
+sub-industry). Sanity check on 10-30: AXTI 17 rallies, 8 of 9 dips won back; AMD 6, 3 of
+4; MSTR 7, 0 of 3; SMCI 6, 0 of 3; KO 0.
+
+**Top third minus bottom third, per date, t across the 52 dates:**
+
+| score | excess 20 (t) | excess 60 (t) | FAIL top vs bottom | HIT top vs bottom |
+|---|---|---|---|---|
+| gain_days | +0.29pp (0.47) | +1.11 (1.08) | 41.8% vs 19.0% | 46.3% vs 25.9% |
+| rally_count | +0.99 (1.34) | +2.04 (1.58) | 42.9% vs 18.9% | 48.1% vs 25.5% |
+| rally_count, volatility-neutral | +0.35 (0.84) | +0.98 (1.36) | +10.0pt (10.7) | +8.5pt (9.6) |
+| **recovery_rate** | +1.00 (1.95) | **+2.67 (2.68)** | 39.3% vs 34.9% | 46.1% vs 38.2% |
+| recovery_rate, volatility-neutral | +0.67 (1.44) | **+2.08 (2.65)** | **-0.05pt (-0.04)** | +3.4pt (2.42) |
+| recovery_rate, momentum-neutral | +0.58 (1.31) | +1.73 (2.58) | +4.2pt (3.81) | +5.8pt (6.25) |
+| burst_months top20 (>= 2 up days) | +0.55 (0.75) | +1.69 (1.35) | 47.5% vs 29.0% | 51.9% vs 36.3% |
+| gain_days, the same names | +0.43 (0.56) | +1.19 (0.95) | 48.6% vs 28.7% | 51.9% vs 36.3% |
+| tilt fifth e63 | +0.27 (0.67) | +0.91 (1.42) | 38.1% vs 32.9% | 43.5% vs 38.2% |
+| peer_rally_count | +0.69 (1.46) | +1.59 (2.08) | 33.6% vs 20.6% | 41.3% vs 25.6% |
+| volatility 63 (reference) | +1.20 (1.54) | +2.07 (1.59) | 41.5% vs 15.1% | 47.8% vs 20.0% |
+| momentum 12-1 (reference) | +0.25 (0.47) | +1.20 (1.57) | 28.8% vs 30.7% | 37.2% vs 36.1% |
+
+**What it means:**
+1. **A frequent gainer at support is a volatile stock at support.** It rallies 15% off the
+   level far more often and breaks 10% under it far more often (pooled: rally_count 5+
+   HIT 57.7% / FAIL 45.6%; 0 rallies 18.7% / 13.6%), and on average earns no more
+   (gain_days positive on 26 of 52 dates, median -0.14pp). Rank corr with 63-day
+   volatility: rally_count 0.67, gain_days 0.54. What the counts measure reliably
+   (t 10-13) is RISK -- wider stops or smaller positions for the busiest names.
+2. **Spreading the runs over the year adds nothing:** burst_months and gain_days on the
+   same names give the same answer.
+3. **recovery_rate is the one asymmetric score** (corr 0.15 with volatility, 0.60 with
+   momentum): at equal volatility, more hits and no more breaks; +2.67pp over 60 sessions
+   (t 2.52 allowing for the 60-session windows overlapping; +2.67 / +2.66pp in the two
+   halves; +2.33pp t 2.31 without 2020; it survives the volatility and the momentum
+   neutralising). At 20 sessions +1.00pp, t 1.95 (35 of 52 dates positive) -- just short.
+   The walk-forward chose it on pre-2022 dates (t 1.92) and got +0.61pp, t 0.87 after
+   2022 -- no better than gain_days there (+0.61, t 0.68); its top third +0.38pp vs the
+   plain at-support +0.05pp. **A lead at 60 sessions, not a rule.**
+4. The theme score (peer_rally_count) is weak (+1.59pp at 60, t 2.08; today's
+   sub-industry map) and the tilt is volatility (vol-neutral FAIL/HIT t 1.96/2.40).
+
+**Proposed, NOT built (the user asked "suggest first"):** show `rally_count` and "dips won
+back" as context columns on the Gainers at support list and in each saved list folder,
+so the 11-23 review and later ones can split the outcomes by them; judge recovery_rate
+FORWARD at 60 sessions on the saved lists before it gets any ranking weight.
+
+Files: `data/_big_movers_study.json` (summary; definitions inside),
+`data/_big_movers_events.parquet` (the 69,989 scored name-dates; `--summarise` re-reads
+it). The run took 614s (10 min), not the hour first guessed.
+
 ## State at 2026-11-02 — JOBS CHECKED, THE APP TASK MADE LATE-PROOF, A 20-DAY REVIEW SCHEDULED
 
 **Every job, checked 2026-11-02 05:10:**
