@@ -157,6 +157,20 @@ DATED_PINS: list[tuple[str, str, str, float, float, str]] = [
      "FY25 10,233M + H1-26 5,589M - H1-25 5,369M (same filings)"),
     ("2026-10-30", "AZN", "assets", 115_833_000_000, 0.002,
      "balance sheet at 2026-06-30 (6-K 0001104659-26-086846)"),
+    # --- DEBT FALLBACK TAGS (2026-11-02): names that tagged none of the old
+    # debt aliases get a figure, and a name that had one keeps it EXACTLY.
+    ("2026-10-30", "WMB", "debt_lt", 28_121_000_000, 0.002,
+     "LongTermDebtAndCapitalLeaseObligations at 2026-06-30 (10-Q 0000107263-26-000026)"),
+    ("2026-10-30", "WMB", "debt_st", 2_197_000_000, 0.002,
+     "LongTermDebtAndCapitalLeaseObligationsCurrent, same filing"),
+    ("2026-10-30", "DASH", "debt_lt", 2_728_000_000, 0.002,
+     "ConvertibleLongTermNotesPayable at 2026-09-30 (10-Q 0001792789-26-000070)"),
+    ("2026-10-30", "APH", "debt_lt", 17_170_100_000, 0.002,
+     "LongTermDebtAndCapitalLeaseObligations at 2026-09-30 (10-Q 0001104659-26-120646)"),
+    # The case that broke a first cut: TMUS tags LongTermDebtNoncurrent only in
+    # its 10-K and a 1,136M finance lease in every 10-Q; the lease must not win.
+    ("2026-10-30", "TMUS", "debt_lt", 81_147_000_000, 0.002,
+     "LongTermDebtNoncurrent at 2025-12-31 (10-K 0001283699-26-000010)"),
 ]
 
 # Share counts that must stay DROPPED -- the filers contradict themselves.

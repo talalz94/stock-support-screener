@@ -243,9 +243,32 @@ TAGS: dict[str, list[str]] = {
     "inventory": ["InventoryNet"],
     "receivables": ["AccountsReceivableNetCurrent", "ReceivablesNetCurrent"],
     "payables": ["AccountsPayableCurrent", "AccountsPayableAndAccruedLiabilitiesCurrent"],
+    # DEBT IS WHATEVER SIDE OF THE BALANCE SHEET THE TAG NAMES (2026-11-01).
+    # On 10-30, 989 of 3,312 universe names had NO debt figure at all, so every
+    # debt input (debt/equity, EV ratios, ROIC, interest cover) was blank and a
+    # pillar fell just under coverage: WMB tags LongTermDebtAndCapitalLease-
+    # Obligations 28,121M + ...Current 2,197M, DASH ConvertibleLongTermNotes-
+    # Payable 2,728M, CPRT only a 2.7M finance lease. Appended AFTER the existing
+    # aliases, so a name that already had debt keeps its tag. Only tags whose
+    # NAME fixes the side: totals spanning current and noncurrent (SeniorNotes,
+    # NotesPayable, DebtLongtermAndShorttermCombinedAmount) would double-count
+    # the current part against debt_st, and bank funding lines (Subordinated-
+    # Debt, OtherBorrowings) are a separate decision. Finance leases come LAST:
+    # a debt-free filer's only financing liability. Still not covered: GM, which
+    # tags its debt only by business group (Automotive, GM Financial).
     "debt_lt": ["LongTermDebtNoncurrent", "LongTermDebt",
-                "LongtermBorrowings"],                               # IFRS
-    "debt_st": ["LongTermDebtCurrent", "ShortTermBorrowings", "DebtCurrent"],
+                "LongtermBorrowings",                                # IFRS
+                "LongTermDebtAndCapitalLeaseObligations",
+                "ConvertibleDebtNoncurrent", "ConvertibleLongTermNotesPayable",
+                "LongTermNotesPayable", "SeniorLongTermNotes",
+                "LongTermLineOfCredit", "OtherLongTermDebtNoncurrent",
+                "SecuredLongTermDebt", "UnsecuredLongTermDebt",
+                "FinanceLeaseLiabilityNoncurrent"],
+    "debt_st": ["LongTermDebtCurrent", "ShortTermBorrowings", "DebtCurrent",
+                "LongTermDebtAndCapitalLeaseObligationsCurrent",
+                "ConvertibleDebtCurrent", "ConvertibleNotesPayableCurrent",
+                "NotesPayableCurrent", "LoansPayableCurrent", "CommercialPaper",
+                "OtherShortTermBorrowings", "FinanceLeaseLiabilityCurrent"],
     "retained": ["RetainedEarningsAccumulatedDeficit"],
     "ppe": ["PropertyPlantAndEquipmentNet",
             "PropertyPlantAndEquipment",                             # IFRS
@@ -275,6 +298,51 @@ TAGS: dict[str, list[str]] = {
 }
 
 WANTED = {t for alts in TAGS.values() for t in alts}
+
+# FALLBACK TIERS: where an alias list's later entries are COMPONENTS or narrower
+# definitions, they are used only by a filer with NO primary debt row anywhere in
+# the frame, and then the earliest tier it has. Alias rank alone is not enough, because `_latest` takes
+# the newest PERIOD first: TMUS tags LongTermDebtNoncurrent (81,147M) only in its
+# 10-K and FinanceLeaseLiabilityNoncurrent in every 10-Q, so the newest row -- a
+# 1,136M lease -- became its long-term debt; CRWV 24,859M -> 221M, KMX's "other"
+# debt beat its total. Measured 2026-11-02 before this rule: 462 names that had
+# debt changed. Each value names the first tag of tiers 2, 3, 4 in TAGS order:
+# the ...AndCapitalLeaseObligations totals, named components, finance leases.
+ALIAS_TIERS = {
+    "debt_lt": ("LongTermDebtAndCapitalLeaseObligations",
+                "ConvertibleDebtNoncurrent", "FinanceLeaseLiabilityNoncurrent"),
+    "debt_st": ("LongTermDebtAndCapitalLeaseObligationsCurrent",
+                "ConvertibleDebtCurrent", "FinanceLeaseLiabilityCurrent"),
+}
+_TIER = {(c, t): sum(i >= TAGS[c].index(s) for s in starts)
+         for c, starts in ALIAS_TIERS.items() for i, t in enumerate(TAGS[c])}
+
+
+def _alias_tiers(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop rows of a fallback tier wherever the filer has an earlier tier."""
+    if df.empty or "concept" not in df.columns:
+        return df
+    m = df["concept"].isin(ALIAS_TIERS).values
+    if not m.any():
+        return df
+    pos = np.flatnonzero(m)
+    sub = df.iloc[pos]
+    tier = np.array([_TIER.get((c, str(t)), 0)
+                     for c, t in zip(sub["concept"], sub["tag"])])
+    key = next((k for k in ("ticker", "cik") if k in df.columns), None)
+    who = [sub[key].values] if key else [np.zeros(len(sub))]
+    t = pd.Series(tier)
+    # ONE FAMILY: a filer with a primary row in debt_lt OR debt_st uses no
+    # fallback in either. Per concept alone, a filer whose LongTermDebt total
+    # already includes the current part picked up ConvertibleDebtCurrent as
+    # debt_st and counted the same notes twice (IRWD 199.5M -> 399.4M; 284 names
+    # that had debt changed, 2026-11-02). So only a filer with NO primary debt
+    # row gains a figure, and every name that had one keeps it exactly.
+    has0 = (t == 0).groupby(who).transform("any").values
+    best = t.groupby(who + [sub["concept"].values]).transform("min").values
+    keep = np.ones(len(df), dtype=bool)
+    keep[pos[((tier > 0) & has0) | (tier > best)]] = False
+    return df[keep]
 
 # ONE TAG, TWO CONCEPTS -- the only such case, so it is explicit, not an alias.
 #
@@ -1663,6 +1731,7 @@ def history(ticker: str, freq: str = "A", periods: int = 20) -> pd.DataFrame:
             tag_to_concept.setdefault(t, concept)
     raw = raw.assign(concept=raw["tag"].map(tag_to_concept)).dropna(
         subset=["concept"])
+    raw = _alias_tiers(raw)
     raw = _add_shared_concepts(raw)
     if raw.empty:
         return pd.DataFrame()
@@ -2039,6 +2108,7 @@ def facts_asof(asof: str, tickers: list[str] | None = None,
     df["concept"] = df["tag"].map(lambda t: pref.get(t, (None, 99))[0])
     df["rank"] = df["tag"].map(lambda t: pref.get(t, (None, 99))[1])
     df = df[df["concept"].notna()]
+    df = _alias_tiers(df)
     df = _add_shared_concepts(df)
 
     # ONLY A STOCK CONCEPT IS AN INSTANT, whatever `qtrs` says.
@@ -3246,6 +3316,60 @@ def _selftest_stub_not_level() -> None:
             invalidate_currency_cache()
 
 
+def _selftest_debt_aliases() -> None:
+    """The 2026-11-01 debt aliases rank AFTER the old ones, so a name that had
+    debt keeps its tag; a name filing only a new one gets a debt figure."""
+    assert TAGS["debt_lt"][:3] == ["LongTermDebtNoncurrent", "LongTermDebt",
+                                   "LongtermBorrowings"], TAGS["debt_lt"][:3]
+    assert TAGS["debt_st"][:3] == ["LongTermDebtCurrent", "ShortTermBorrowings",
+                                   "DebtCurrent"], TAGS["debt_st"][:3]
+    assert TAGS["debt_lt"][-1] == "FinanceLeaseLiabilityNoncurrent"
+    assert TAGS["debt_st"][-1] == "FinanceLeaseLiabilityCurrent"
+    for c, al in TAGS.items():
+        if c not in ("debt_lt", "debt_st"):
+            dup = set(al) & set(TAGS["debt_lt"] + TAGS["debt_st"])
+            assert not dup, f"debt alias also under {c}: {dup}"
+    rank = {t: r for r, t in enumerate(TAGS["debt_lt"])}
+    rows = [("OLD", "LongTermDebtNoncurrent", 5_000e6),
+            ("OLD", "FinanceLeaseLiabilityNoncurrent", 40e6),
+            ("WMB", "LongTermDebtAndCapitalLeaseObligations", 28_121e6),
+            ("CPRT", "FinanceLeaseLiabilityNoncurrent", 2.7e6)]
+    df = pd.DataFrame([(t, "debt_lt", g, rank[g], "2026-06-30", "2026-08-03", v, 0,
+                        "10-Q") for t, g, v in rows],
+                      columns=["ticker", "concept", "tag", "rank", "ddate", "filed",
+                               "value", "qtrs", "form"])
+    got = _latest(df, ["ticker", "concept"]).set_index("ticker")["value"]
+    assert got["OLD"] == 5_000e6, f"an existing debt tag lost to a lease: {got['OLD']:,}"
+    assert got["WMB"] == 28_121e6 and got["CPRT"] == 2.7e6, got.to_dict()
+
+    # A NEWER fallback row must not beat an OLDER primary one: TMUS's total is
+    # only in its 10-K, its 10-Qs tag only the finance lease; KMX's "other" debt
+    # sits on a newer date than its total. Through the tier filter, as read.
+    rows = [("TMUS", "LongTermDebtNoncurrent", "2025-12-31", 81_147e6),
+            ("TMUS", "FinanceLeaseLiabilityNoncurrent", "2026-09-30", 1_136e6),
+            ("KMX", "LongTermDebt", "2026-05-31", 17_561e6),
+            ("KMX", "OtherLongTermDebtNoncurrent", "2026-08-31", 1_663.3e6),
+            ("DASH", "ConvertibleLongTermNotesPayable", "2026-06-30", 2_700e6),
+            ("DASH", "FinanceLeaseLiabilityNoncurrent", "2026-09-30", 50e6)]
+    df = pd.DataFrame([(t, "debt_lt", g, rank[g], d, "2026-10-28", v, 0, "10-Q")
+                       for t, g, d, v in rows],
+                      columns=["ticker", "concept", "tag", "rank", "ddate", "filed",
+                               "value", "qtrs", "form"])
+    got = _latest(_alias_tiers(df), ["ticker", "concept"]).set_index("ticker")["value"]
+    assert got["TMUS"] == 81_147e6, f"a newer lease beat TMUS's total: {got['TMUS']:,}"
+    assert got["KMX"] == 17_561e6, f"a newer component beat KMX's total: {got['KMX']:,}"
+    assert got["DASH"] == 2_700e6, f"a lease beat DASH's notes: {got['DASH']:,}"
+    assert len(_alias_tiers(df.drop(columns="ticker").assign(cik=1))) == 2   # by cik too
+    # ...and a primary row in EITHER concept blocks fallbacks in both: IRWD's
+    # LongTermDebt total already holds the notes ConvertibleDebtCurrent repeats.
+    ir = pd.DataFrame([("IRWD", "debt_lt", "LongTermDebt", 1, 199.5e6),
+                       ("IRWD", "debt_st", "ConvertibleDebtCurrent", 4, 199.9e6)],
+                      columns=["ticker", "concept", "tag", "rank", "value"]).assign(
+        ddate="2026-06-30", filed="2026-08-06", qtrs=0, form="10-Q")
+    kept = _alias_tiers(ir)
+    assert list(kept["concept"]) == ["debt_lt"], f"IRWD counted twice: {kept.to_dict('records')}"
+
+
 def _selftest_statement_forms() -> None:
     """The bulk ingest keeps 6-K interims and still drops 8-K extracts, and a
     semi-annual filer's 6-K rolls its year forward (AstraZeneca, 2026-10-31)."""
@@ -3331,6 +3455,7 @@ def selftest(verbose: bool = True) -> None:
     _selftest_ytd_rules()
     _selftest_stub_not_level()
     _selftest_statement_forms()
+    _selftest_debt_aliases()
     _selftest_merge_near_periods()
     _selftest_read_cache()
     _selftest_share_count()
