@@ -8,7 +8,8 @@ news-event warnings and the next earnings date.
 DEFINITION (fixed before any result was seen, as on 10-23):
   universe     close >= $5 and 20-day average dollar volume >= $20M on the session
   gain_days    sessions in the last 252 where the stock was among the market-wide top-20
-               daily % gainers (same eligibility, on the prior close)
+               daily % gainers (same eligibility, on the prior close); loss_days the same
+               for the top-20 daily LOSERS; *_rank among every liquid name (1 = most often)
   attractive   the nearest support zone 0-6% below the close (Zones page, AT/NEAR)
   list         up to 10 per sector, ranked by gain_days, then fund score
 Added since: sector score/rank (validated out of sample), combo_h20 label, warning filings
@@ -41,8 +42,12 @@ def build(asof: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     ret = C.pct_change(fill_method=None).where(elig)
     last = ret.index[-252:]
     top = ret.loc[last].rank(axis=1, ascending=False, method="first") <= 20
-    gain_days, elig_days = top.sum(), elig.loc[last].sum()
+    bot = ret.loc[last].rank(axis=1, ascending=True, method="first") <= 20
+    gain_days, loss_days, elig_days = top.sum(), bot.sum(), elig.loc[last].sum()
     liq = (C.loc[asof] >= 5) & (dv20.loc[asof] >= 20e6)
+    # ranks among every liquid name today (1 = most often in the daily top-20)
+    gain_rank = gain_days[liq[liq].index].rank(ascending=False, method="min")
+    loss_rank = loss_days[liq[liq].index].rank(ascending=False, method="min")
     hi1y = C.loc[last].max()
 
     z = pd.read_parquet(config.DATA / "zones" / f"{asof}.parquet")
@@ -80,7 +85,9 @@ def build(asof: str) -> tuple[pd.DataFrame, pd.DataFrame]:
             "ticker": t, "name": u["name"].get(t, ""), "sector": sector,
             "sector_rank": sec["rank"].get(sector), "sector_score": sec["score"].get(sector),
             "subind": g.at[t, "subind"] if t in g.index else "",
-            "gain_days": int(gain_days.get(t, 0)), "elig_days": int(elig_days.get(t, 0)),
+            "gain_days": int(gain_days.get(t, 0)), "gain_rank": int(gain_rank.get(t, 0)),
+            "loss_days": int(loss_days.get(t, 0)), "loss_rank": int(loss_rank.get(t, 0)),
+            "elig_days": int(elig_days.get(t, 0)),
             "price": round(float(C.at[asof, t]), 2), "level": round(float(r.level), 2),
             "above_level_pct": round(float(r.dist_pct) * 100, 1), "band": r.band, "tests": int(r.touches),
             "level_failed_pct": round(float(r.dd_break_rate) * 100, 1) if pd.notna(r.dd_break_rate) else np.nan,
