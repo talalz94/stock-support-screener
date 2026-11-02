@@ -7,6 +7,8 @@ again -- bounce better at support?
                                             data/_big_movers_events.parquet
     python big_movers_study.py --summarise  re-reads the events file, rewrites the summary
     python big_movers_study.py --smoke      6 dates x 120 names, writes nothing (code check)
+    python big_movers_study.py --trades     the bounce trade on the saved events (~1 min);
+                                            data/_big_movers_trades.json and .parquet
 
 Asked 2026-11-02: "a stock that is more in the daily gainers list is more likely to go up
 at key levels?" Measured on 2026-10-30 first: how often a liquid stock was a top-20 daily
@@ -78,6 +80,31 @@ DESIGN, fixed before any result was seen:
   CAVEATS survivorship (vanished names are under-represented: flatters the volatile);
           a split error in the store would show as a false burst on both sides; early
           dates have fewer years of bars for their zones.
+
+THE BOUNCE TRADE (`--trades`; added 2026-11-02 when the user said the aim is a quick %
+profit off the level, not a hold -- designed after the 20/60-session results above were
+seen, before any trade result):
+
+  ENTRY   the next session's OPEN (the list is built after the close; backtest.py's rule).
+  EXIT    a bracket on daily bars: target +X% and stop -X% from the entry; a gap through
+          either side fills at that open; a day reaching both counts as the STOP (the
+          order inside a day is unknowable from daily bars); otherwise the close of
+          session N. No commissions or slippage beyond the gaps.
+          PRIMARY b5_10: +/-5%, 10 sessions. Also b3_5, b3_10, b8_10, b5_5, b5_20, and
+          lv5_10: +5% target, stop 3% under the support level (no trade when the open is
+          already under it).
+  GROUPS  at support: the score's top third vs its bottom third (per date, ties
+          together); the LIST RULE (up to 10 per sector by gain_days, as the 10-23 list);
+          every at-support name; every liquid name (any stock, any day). LEVEL VALUE: hot
+          names (the score's top third among ALL liquid names that date) at support
+          minus the same hot names elsewhere.
+  MEASURE average trade return (pp: the expectancy), win rate (target first), stop
+          rate; t across dates (10-session trades from dates 42 apart never overlap);
+          halves before / from 2022.
+  PRIMARY gain_days (the list's own ranking) and rally_count -> the b5_10 trade return:
+          hot minus cold at support, and hot at support minus hot elsewhere.
+  WALK-FORWARD the score chosen on pre-2022 dates by its b5_10 hot-minus-cold t, tested
+          after 2022 against the list rule, every at-support name and every liquid name.
 """
 from __future__ import annotations
 
@@ -111,6 +138,15 @@ MIN_SIDE = 10
 SMOKE_DATES, SMOKE_NAMES = 6, 120
 OUT = config.DATA / "_big_movers_study.json"
 OUT_EVENTS = config.DATA / "_big_movers_events.parquet"
+# the bounce trade: name -> (target, stop, sessions); stop "level" = 3% under the level
+BRACKETS = {"b5_10": (0.05, 0.05, 10), "b3_5": (0.03, 0.03, 5), "b3_10": (0.03, 0.03, 10),
+            "b8_10": (0.08, 0.08, 10), "b5_5": (0.05, 0.05, 5), "b5_20": (0.05, 0.05, 20),
+            "lv5_10": (0.05, "level", 10)}
+PRIMARY = "b5_10"
+LEVEL_STOP = 0.03
+LIST_PER_SECTOR = 10
+TRADES_OUT = config.DATA / "_big_movers_trades.json"
+TRADES_EVENTS = config.DATA / "_big_movers_trades.parquet"
 
 
 def earnings_rows(dates: np.ndarray, ticks: np.ndarray) -> set[tuple[int, int]]:
@@ -553,7 +589,210 @@ def summarise(ev: pd.DataFrame) -> dict:
     return out
 
 
+# ------------------------------------------------------------------- the bounce trade
+def load_ohlc():
+    """The store as wide float64 arrays with the OPEN too (ZL.load reads no open)."""
+    import store
+    frames = []
+    for m in store.months("1d"):
+        d = pd.read_parquet(store.part_path(m), columns=["ticker", "date", "open", "high", "low", "close"])
+        d["ticker"] = d["ticker"].astype(str)
+        frames.append(d)
+    df = pd.concat(frames, ignore_index=True)
+    dates = np.array(sorted(df["date"].astype(str).unique()))
+    ticks = np.array(sorted(df["ticker"].unique()))
+    di = np.searchsorted(dates, df["date"].astype(str).to_numpy())
+    ti = np.searchsorted(ticks, df["ticker"].to_numpy())
+    W = {}
+    for c in ("open", "high", "low", "close"):
+        a = np.full((len(dates), len(ticks)), np.nan, dtype=np.float32)
+        a[di, ti] = df[c].to_numpy(dtype=np.float32)
+        W[c] = a
+    return dates, ticks, W
+
+
+def bracket(P: dict, tgt: np.ndarray, stp: np.ndarray, n: int):
+    """First exit of a target/stop bracket entered at the open of row 0 of the paths.
+    A gap through either side fills at that open; a day reaching both is the STOP;
+    otherwise the last close within n sessions. -> (exit price, kind: 1 target,
+    -1 stop, 0 time, sessions held)."""
+    O, H, L, C = (P[c][:n] for c in ("open", "high", "low", "close"))
+    cols = np.arange(O.shape[1])
+    with np.errstate(invalid="ignore"):
+        gap_dn = np.zeros(O.shape, dtype=bool)
+        gap_up = np.zeros(O.shape, dtype=bool)
+        gap_dn[1:] = O[1:] <= stp
+        gap_up[1:] = O[1:] >= tgt
+        hit_s, hit_t = L <= stp, H >= tgt
+    anyx = gap_dn | gap_up | hit_s | hit_t
+    has = anyx.any(axis=0)
+    d = np.where(has, anyx.argmax(axis=0), 0)
+    gd, gu, hs = gap_dn[d, cols], gap_up[d, cols], hit_s[d, cols]
+    px = np.where(gd | gu, O[d, cols], np.where(hs, stp, tgt))
+    kind = np.where(gd | (hs & ~gu), -1, 1)
+    fin = np.isfinite(C)
+    last = np.where(fin.any(axis=0), C.shape[0] - 1 - np.argmax(fin[::-1], axis=0), 0)
+    px = np.where(has, px, C[last, cols])
+    kind = np.where(has, kind, 0)
+    held = np.where(has, d + 1, last + 1)
+    return px, kind, held
+
+
+def trades(verbose=True) -> pd.DataFrame:
+    """Every saved name-date traded with every bracket; writes TRADES_EVENTS."""
+    t0 = time.time()
+    ev = pd.read_parquet(OUT_EVENTS)
+    dates, ticks, W = load_ohlc()
+    di = {d: i for i, d in enumerate(dates)}
+    ti = {t: j for j, t in enumerate(ticks)}
+    nmax = max(b[2] for b in BRACKETS.values())
+    parts = []
+    for D, g in ev.groupby("date"):
+        i = di[D]
+        js = g.ticker.map(ti).to_numpy()
+        P = {c: W[c][i + 1:i + 1 + nmax][:, js].astype(np.float64) for c in ("open", "high", "low", "close")}
+        entry = P["open"][0]
+        good = np.isfinite(entry) & (entry > 0)
+        res = {"date": D, "ticker": g.ticker.to_numpy()}
+        for name, (tg, sp, n) in BRACKETS.items():
+            if sp == "level":
+                stp = g.level.to_numpy(dtype=float) * (1 - LEVEL_STOP)
+                ok = good & np.isfinite(stp) & (entry > stp)
+            else:
+                stp, ok = entry * (1 - sp), good
+            px, kind, held = bracket(P, entry * (1 + tg), stp, n)
+            res[f"{name}_ret"] = np.where(ok, px / entry - 1.0, np.nan)
+            res[f"{name}_win"] = np.where(ok, (kind == 1).astype(float), np.nan)
+            res[f"{name}_stop"] = np.where(ok, (kind == -1).astype(float), np.nan)
+            res[f"{name}_held"] = np.where(ok, held.astype(float), np.nan)
+        parts.append(pd.DataFrame(res))
+    tv = ev.merge(pd.concat(parts, ignore_index=True), on=["date", "ticker"], how="left")
+    tv.to_parquet(TRADES_EVENTS, index=False)
+    if verbose:
+        print(f"trades: {len(tv):,} name-dates x {len(BRACKETS)} brackets; {time.time() - t0:.0f}s", flush=True)
+    return tv
+
+
+def list_rule(at: pd.DataFrame) -> pd.DataFrame:
+    """The 10-23 list's selection on each date: up to 10 per sector by gain_days."""
+    import sectors
+    sec = sectors.groups().drop_duplicates("ticker").set_index("ticker")["sector"]
+    a = at.assign(sector=at.ticker.map(sec).fillna("Other"))
+    a = a.sort_values(["date", "sector", "gain_days", "ticker"], ascending=[True, True, False, True])
+    return a.groupby(["date", "sector"], group_keys=False).head(LIST_PER_SECTOR)
+
+
+def level_value(tv: pd.DataFrame, score: str, outcome: str, gate: str | None = None) -> dict:
+    """Hot names (the score's top third among ALL liquid names that date) at support
+    minus the same-hot names elsewhere: what the level adds. top = at support."""
+    per = []
+    for d, g in _subset(tv, score, outcome, gate).groupby("date"):
+        x = g[score]
+        hot = x > x.quantile(2 / 3)
+        if hot.sum() < 2 * MIN_SIDE:
+            hot = x >= x.quantile(2 / 3)
+        a, b = g[hot & g.at_support], g[hot & ~g.at_support]
+        if len(a) < MIN_SIDE or len(b) < MIN_SIDE:
+            continue
+        ya, yb = a[outcome].astype(float).mean(), b[outcome].astype(float).mean()
+        per.append((d, ya - yb, ya, yb, int(hot.sum())))
+    return _report(per)
+
+
+def vs_base(sel: pd.DataFrame, base: pd.DataFrame, outcome: str) -> dict:
+    """Per date: the selected names' mean minus the base group's mean."""
+    a = sel[sel[outcome].notna()].groupby("date")[outcome].mean()
+    b = base[base[outcome].notna()].groupby("date")[outcome].mean()
+    j = pd.concat([a.rename("a"), b.rename("b")], axis=1).dropna()
+    per = [(d, r.a - r.b, r.a, r.b, 0) for d, r in j.iterrows()]
+    return _report(per)
+
+
+def _trade_row(df: pd.DataFrame, k: str) -> dict:
+    return {"trade_pp": _per_date_mean(df, f"{k}_ret"), "win_pct": _per_date_mean(df, f"{k}_win"),
+            "stop_pct": _per_date_mean(df, f"{k}_stop"),
+            "held_median": float(df[f"{k}_held"].median()) if df[f"{k}_held"].notna().any() else None,
+            "trades": int(df[f"{k}_ret"].notna().sum())}
+
+
+def summarise_trades(tv: pd.DataFrame) -> dict:
+    at = tv[tv.at_support]
+    lr = list_rule(at)
+    out = {"measured_on": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+           "dates": int(tv.date.nunique()), "trades_at_support": int(at[f"{PRIMARY}_ret"].notna().sum()),
+           "brackets": {k: list(v) for k, v in BRACKETS.items()}, "primary": PRIMARY}
+    out["groups_per_date_mean"] = {k: {"all_liquid": _trade_row(tv, k), "at_support": _trade_row(at, k),
+                                       "list_rule": _trade_row(lr, k)} for k in BRACKETS}
+    scores = {"gain_days": (None,), "rally_count": (None,), "recovery_rate": ("dips",),
+              "tilt fifth e63": ("A_fifth_w252",), "burst_months top20": ("top20_up_w252",)}
+    col = {"gain_days": "gain_days", "rally_count": "rally_count", "recovery_rate": "recovery_rate",
+           "tilt fifth e63": "T_fifth_e63", "burst_months top20": "top20_up_months"}
+    tests = {}
+    for k in BRACKETS:
+        for nm, (gate,) in scores.items():
+            for o in ("ret", "win") if k == PRIMARY else ("ret",):
+                tests[f"{k} {o}: AT hot minus cold, {nm}"] = spread(at, col[nm], f"{k}_{o}", gate)
+                tests[f"{k} {o}: hot AT support minus hot ELSEWHERE, {nm}"] = level_value(tv, col[nm], f"{k}_{o}", gate)
+            if k == PRIMARY:
+                tests[f"{k} ret: AT hot minus cold, {nm}, vol-neutral"] = spread_neutral(at, col[nm], f"{k}_ret", gate)
+        for o in ("ret", "win"):
+            tests[f"{k} {o}: list rule minus every at-support name"] = vs_base(lr, at, f"{k}_{o}")
+            tests[f"{k} {o}: every at-support name minus every liquid name"] = vs_base(at, tv, f"{k}_{o}")
+            tests[f"{k} {o}: list rule minus every liquid name"] = vs_base(lr, tv, f"{k}_{o}")
+    out["tests"] = tests
+    out["buckets_pooled_" + PRIMARY] = {
+        nm: _trade_buckets(at, c, e, l, g) for nm, c, e, l, g in (
+            ("gain_days", "gain_days", [-0.5, 0.5, 4.5, 14.5, 1e9], ["0", "1-4", "5-14", "15+"], None),
+            ("rally_count", "rally_count", [-0.5, 0.5, 2.5, 4.5, 1e9], ["0", "1-2", "3-4", "5+"], None),
+            ("recovery_rate (>= 2 dips)", "recovery_rate", [-0.01, 0.34, 0.66, 1.0], ["0-33%", "34-66%", "67-100%"], "dips"))}
+    out["buckets_pooled_elsewhere_" + PRIMARY] = {
+        "gain_days": _trade_buckets(tv[~tv.at_support], "gain_days", [-0.5, 0.5, 4.5, 14.5, 1e9], ["0", "1-4", "5-14", "15+"], None),
+        "rally_count": _trade_buckets(tv[~tv.at_support], "rally_count", [-0.5, 0.5, 2.5, 4.5, 1e9], ["0", "1-2", "3-4", "5+"], None)}
+    pre, post = at[at.date < SPLIT], at[at.date >= SPLIT]
+    train = {nm: spread(pre, col[nm], f"{PRIMARY}_ret", gate).get("t") for nm, (gate,) in scores.items()}
+    best = max((k for k, v in train.items() if v is not None), key=lambda k: train[k], default=None)
+    wf = {"train_t": train, "chosen": best}
+    if best:
+        gate = scores[best][0]
+        wf["test_hot_minus_cold"] = spread(post, col[best], f"{PRIMARY}_ret", gate)
+        e = _subset(post, col[best], f"{PRIMARY}_ret", gate)
+        hot = pd.concat([g[_sides(g[col[best]], MIN_SIDE)[0]] for _, g in e.groupby("date")
+                         if len(g) >= 30 and _sides(g[col[best]], MIN_SIDE) is not None])
+        wf["test_hot_third"] = _trade_row(hot, PRIMARY)
+        wf["test_list_rule"] = _trade_row(lr[lr.date >= SPLIT], PRIMARY)
+        wf["test_every_at_support"] = _trade_row(post, PRIMARY)
+        wf["test_every_liquid"] = _trade_row(tv[tv.date >= SPLIT], PRIMARY)
+    out["walk_forward"] = wf
+    n = sum(1 for v in tests.values() if v.get("t") is not None)
+    out["tests_with_t"] = n
+    out["expected_abs_t_ge_2_by_chance"] = round(n * 0.05, 1)
+    return out
+
+
+def _trade_buckets(df, score, edges, labels, gate):
+    e = df[df[score].notna()]
+    if gate:
+        e = e[e[gate] >= MIN_BURSTS]
+    grp = pd.cut(e[score], edges, labels=labels, include_lowest=True)
+    out = []
+    for lab in labels:
+        x = e[grp == lab]
+        r = x[f"{PRIMARY}_ret"].dropna()
+        out.append({"group": lab, "trades": int(len(r)),
+                    "trade_pp": _pp(r.mean()) if len(r) else None,
+                    "win_pct": _pp(x[f"{PRIMARY}_win"].mean()) if len(r) else None,
+                    "stop_pct": _pp(x[f"{PRIMARY}_stop"].mean()) if len(r) else None})
+    return out
+
+
 def main() -> int:
+    if "--trades" in sys.argv:
+        tv = pd.read_parquet(TRADES_EVENTS) if "--summarise" in sys.argv and TRADES_EVENTS.exists() else trades()
+        s = summarise_trades(tv)
+        TRADES_OUT.write_text(json.dumps(s, indent=1, default=str), encoding="utf-8")
+        print(json.dumps({k: s[k] for k in ("dates", "trades_at_support", "tests_with_t",
+                                            "expected_abs_t_ge_2_by_chance")}))
+        return 0
     smoke = "--smoke" in sys.argv
     if "--summarise" in sys.argv and OUT_EVENTS.exists():
         ev = pd.read_parquet(OUT_EVENTS)

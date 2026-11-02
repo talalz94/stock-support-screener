@@ -205,6 +205,47 @@ Files: `data/_big_movers_study.json` (summary; definitions inside),
 `data/_big_movers_events.parquet` (the 69,989 scored name-dates; `--summarise` re-reads
 it). The run took 614s (10 min), not the hour first guessed.
 
+### THE BOUNCE TRADE -- the user's actual use: a quick % off the level, not a hold
+
+**Rule** (`big_movers_study.py --trades`, fixed before any trade result, 18s): buy at the
+next OPEN; sell at +5% or stop at -5% (a gap fills at that open; a day touching both is
+the stop), else exit at the 10th close; no costs. Grid: +/-3% x5 / x10, +/-8% x10, +/-5%
+x5 / x20, and +5% with the stop 3% under the level.
+
+**+/-5%, 10 sessions, pooled** (41,975 at-support trades):
+
+| top-20 gainer days, past year | +5% first | -5% first | neither | per trade |
+|---|---|---|---|---|
+| 15+, at support | 52.0% | 46.3% | 1.7% | +0.36% |
+| 5-14, at support | 48.3% | 42.7% | 9.0% | +0.30% |
+| 1-4, at support | 40.2% | 33.0% | 26.8% | +0.45% |
+| 0, at support | 33.9% | 27.2% | 38.9% | +0.45% |
+| 15+, NOT at support | 45.8% | 52.3% | 1.9% | **-0.33%** |
+| 5-14, NOT at support | 46.8% | 45.4% | 7.8% | +0.03% |
+
+Per-date baselines: every liquid name +0.42% a trade (40.0% / 33.1%); every at-support
+name +0.49% (39.9% / 31.7%); the list rule (<= 10 per sector by gain_days) +0.41% (44.8% /
+38.1%, median 3 sessions held).
+
+1. **The level helps HOT stocks.** Hot names (the score's top third among all liquid
+   names) at support minus the same-hot names elsewhere: rally_count +0.39pp a trade
+   (t 3.57; halves 2.10 / 3.17), burst months +0.42 (3.34), gain_days +0.24 (2.30). For the
+   cold third only +0.11 (t 1.07): the difference +0.28pp, t 2.70 (halves 1.93 / 1.85).
+   It holds at +/-3% and at +/-5% over 5 or 20 sessions; not at +/-8%.
+2. **Hot does not beat calm AT the level:** hot minus cold at support -0.25pp (gain_days
+   t -1.38, rally_count -1.27; volatility-neutral -0.10 / +0.05). Hot trades are near
+   50/50 and fast (median 2 sessions vs 8; st.dev 5.4% vs 4.4%). Walk-forward: every
+   candidate's pre-2022 t was negative (gain_days chosen); after 2022 its hot third made
+   +0.05% a trade (46.1% / 46.2%) vs every at-support +0.35%, the list rule +0.23%,
+   every liquid +0.29%.
+3. **The list rule** makes no more per trade than every at-support name (-0.08pp,
+   t -0.99): it wins more (44.8% vs 39.9%) and stops more (38.1% vs 31.7%).
+4. Before costs; 2018-2026's drift makes "any liquid stock, any two weeks" +0.42%.
+
+**Next tests to pre-register (not run):** entries AT the level (<= 2.5%) vs NEAR; a
+market filter (SPY over its 50-day); skip an earnings date inside the hold; the
+level-stop bracket by band. Files: `data/_big_movers_trades.json`, `.parquet`.
+
 ## State at 2026-11-02 — JOBS CHECKED, THE APP TASK MADE LATE-PROOF, A 20-DAY REVIEW SCHEDULED
 
 **Every job, checked 2026-11-02 05:10:**
@@ -4735,7 +4776,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-02 05:08 — do not edit by hand._
+_Generated 2026-11-02 11:33 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -4756,32 +4797,32 @@ _Generated 2026-11-02 05:08 — do not edit by hand._
 | `sec_edgar` | daily | 5s | 28s | 4.3 min | 30.0 min | 22 |
 | `insider` | daily | 2.8 min | 87s | 2.8 min | 30.0 min | 7 |
 | `congress` | daily | 9s | 11s | 30s | 30.0 min | 7 |
-| `fundamental` | daily | 4.7 min | 3.5 min | 66.2 min | 180.0 min | 70 |
+| `fundamental` | daily | 60.7 min | 3.6 min | 66.2 min | 180.0 min | 71 |
 | `events` | weekly | 37.7 min | 10.7 min | 590.9 min ⚠ | 30.0 min | 15 |
 | `leaderboard` | weekly | 91.0 min | 40.7 min | 91.0 min ⚠ | 90.0 min | 16 |
-| `dip` | daily | 70s | 19s | 2.2 min | 15.0 min | 70 |
+| `dip` | daily | 21s | 19s | 2.2 min | 15.0 min | 71 |
 | `insider_score` | daily | 7.9 min | 7.2 min | 9.2 min | 30.0 min | 5 |
-| `combo` | daily | 60s | 19s | 2.2 min | 15.0 min | 69 |
-| `candidates` | daily | 25s | 6s | 13.6 min ⚠ | 5.0 min | 27 |
-| `floor` | daily | 74s | 56s | 4.2 min | 15.0 min | 21 |
+| `combo` | daily | 28s | 19s | 2.2 min | 15.0 min | 70 |
+| `candidates` | daily | 14s | 6s | 13.6 min ⚠ | 5.0 min | 28 |
+| `floor` | daily | 30s | 55s | 4.2 min | 15.0 min | 22 |
 | `insider_pages` | daily | 12s | 8s | 12s | 15.0 min | 5 |
-| `sectors` | daily | 1.6 min | 3.2 min | 5.0 min | 30.0 min | 20 |
-| `validate` | daily | 14.3 min | 7.1 min | 27.0 min | 60.0 min | 56 |
-| `explore` | daily | 21s | 9s | 75s | 5.0 min | 78 |
+| `sectors` | daily | 41s | 3.2 min | 5.0 min | 30.0 min | 21 |
+| `validate` | daily | 6.4 min | 7.1 min | 27.0 min | 60.0 min | 57 |
+| `explore` | daily | 24s | 9s | 75s | 5.0 min | 79 |
 | `snapshots` | daily | 1s | 4s | 36s | 5.0 min | 91 |
-| `profiles` | daily | 5.8 min | 21.6 min | 16.4 min ⚠ | 15.0 min | 73 |
+| `profiles` | daily | 5.9 min | 21.4 min | 16.4 min ⚠ | 15.0 min | 74 |
 | `watchlists` | daily | 6s | 6s | 6s | 10.0 min | 1 |
 | `retention` | daily | 2s | 0s | 2s | 5.0 min | 81 |
-| `dashboard` | daily | 1s | 0s | 5s | 2.0 min | 85 |
-| `docs` | daily | 0s | 0s | 11s | 5.0 min | 101 |
+| `dashboard` | daily | 0s | 0s | 5s | 2.0 min | 86 |
+| `docs` | daily | 6s | 0s | 11s | 5.0 min | 102 |
 
-**Daily total ≈ 122.0 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 121.9 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-02 05:08 — do not edit by hand._
+_Generated 2026-11-02 11:33 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -4796,11 +4837,11 @@ _Generated 2026-11-02 05:08 — do not edit by hand._
 | flags | 65 | 5.5 | 2026-07-31 → 2026-10-30 |
 | rejects | 20 | 7.5 | 2026-10-05 → 2026-10-30 |
 | zones | 46 | 25.9 | 2026-08-27 → 2026-10-30 |
-| fundamentals (companyfacts) | 131 | 75.8 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 21 | 0.6 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 41 | 180.2 | — |
+| fundamentals (companyfacts) | 131 | 74.9 | 1980q3 → 2028q3 |
+| fundamentals (EDGAR filings) | 21 | 0.8 | 2009q4 → 2026q3 |
+| loose (macro, universe, jobs, study) | 42 | 197.4 | — |
 
-**`data/` total ≈ 1,470 MB.** `reports/` is a further 124 MB across 387 pages.
+**`data/` total ≈ 1,487 MB.** `reports/` is a further 125 MB across 388 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -4808,7 +4849,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-02 05:08 — do not edit by hand._
+_Generated 2026-11-02 11:33 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -4823,7 +4864,7 @@ _Generated 2026-11-02 05:08 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-02 05:08 — do not edit by hand._
+_Generated 2026-11-02 11:33 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
