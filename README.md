@@ -124,6 +124,14 @@ report type has a folder with `latest.html` in it (dated copies beside it).
   rare buyers measured to matter; Ross's screen did not. "insider" after a ticker on
   Candidates / Floor retest / Explore = rare or small-company buying (or a House $50K+
   purchase) at an AT/NEAR support level -- that combination is unmeasured
+- **Warning and earnings tags** on Candidates / Floor retest / Explore / the bounce cards /
+  each stock profile: a red "&#9888; share sale / restated / deal ended" links to a recent
+  SEC filing of a type the news-event study measured as negative (shown 60 / 20 / 20
+  sessions); an amber "earnings mm-dd &middot; n" is the next earnings date, n sessions away
+  (grey beyond 10). Tooltips quote `data/_news_events_study_summary.json`
+- `reports\watchlist\index.html` — **Watchlists**: saved lists (a `track.json` in
+  `data/watchlists/<name>/`) re-measured every night from their entry close against the
+  liquid market; the "Gainers at support" list of 10-23 is the first
 - `reports\insider\house.html` — **House trades**: members' Periodic Transaction Reports,
   $50,001+ stock purchases highlighted (the one House result that held). No Senate (no
   automated access), paper filings unread. Local only: 5 U.S.C. 13107(c)
@@ -234,10 +242,13 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **31 steps**, in this order: `universe, bars, macro, news, senti_cache,
-  sentiment, bounce, zones, shortvol, hype, provider, sec_facts, sec_gap,
-  sec_edgar, insider, congress, fundamental, events, leaderboard, dip, combo, candidates, floor,
-  sectors, validate, explore, snapshots, profiles, retention, dashboard, docs`. `insider` and
+- **35 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
+  shortvol, hype, provider, sec_facts, sec_gap, sec_edgar, insider, congress,
+  fundamental, events, leaderboard, dip, insider_score, combo, candidates, floor,
+  insider_pages, sectors, validate, explore, snapshots, profiles, watchlists,
+  retention, dashboard, docs`. `news_events` (SEC filings by type, press-release and FDA feeds, earnings
+  calendar) runs before `bounce` so every page shows that night's warning filings and
+  earnings dates; `watchlists` re-measures saved lists. `insider` and
   `congress` (insider and House trades) are independent: nothing depends on them, so a failure
   there stops nothing else. The SEC steps come before
   `fundamental` so a newly fetched filing is scored the same night; `sec_edgar`
@@ -281,6 +292,13 @@ python orchestrator.py --step NAME   # one step, repeatable; bypasses the retry 
   also the dated log from 2026-08-13 onward.
 
 ---
+
+- **One job runs in the Claude desktop app, not here**: `gainers-at-support-tracking` copies
+  the nightly watchlist numbers to the claude.ai dashboard (only Claude can write there).
+  The app runs scheduled tasks only while it is open, and on 10-29/10-30 it never fired, so
+  it is scheduled every 2 hours (06:23-22:23) and catches up when the app opens; most runs
+  find nothing new and stop. Nothing is lost when it is late: the measuring is the
+  orchestrator's `watchlists` step, and the local Watchlists page is always current.
 
 ## Sentiment & news (score module 1)
 
@@ -444,9 +462,12 @@ as bankruptcy text and asserts no metric moves.
 | `congress.py` | House members' trades from Periodic Transaction Reports (PDFs) in `data/congress/`; paper filings counted, not read; no Senate (its site refuses automated access); the `congress` step. `--backfill`, `--update`, `--reparse`, `--selftest` |
 | `event_returns.py` | the shared event-study measurement: entry the session after an event, excess vs the same-day liquidity fifth, t across quarters, one episode per ticker per window |
 | `insider_study.py` / `congress_study.py` | do insider / House purchases predict returns? 20 and 9 declared signals at 20/40/60 sessions; `data/_insider_study_summary.json`, `data/_congress_study_summary.json` |
-| `watchlist_track.py` | tracks a saved watchlist from its entry date (the "Gainers at support" list), statuses fixed in the module, per-session history |
+| `watchlist_track.py` | tracks a saved watchlist from its entry date (the "Gainers at support" list), statuses fixed in the module, per-session history; `--refresh` / `--mark-uploaded` for the claude.ai copy |
+| `watchlist_page.py` | the `watchlists` step: re-measures every `data/watchlists/*/track.json` list nightly and draws `reports/watchlist/` |
+| `news_events.py` | stock news EVENTS in `data/news_events/`: every SEC filing by type since 2016 (8-K items, deal and activist forms, acceptance to the second), PR Newswire M&A / FDA-approval and FDA press feeds, a daily Finnhub earnings-calendar snapshot (point in time); `page_flags(asof)` feeds the warning and earnings tags. The `news_events` step. `--backfill`, `--update`, `--stats`, `--selftest`. NOT `events.py` (severity calibration) |
+| `news_events_study.py` | what each event type predicts, vs the liquidity fifth AND the same stock's own non-event days, split halves; `data/_news_events_study_summary.json`. Nothing qualified as a buy signal; 3.02 / 4.02 / 1.02 are warnings |
 | `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
-| **`orchestrator.py`** | **THE scheduled entry point** — 27-step registry, watermark catch-up, `data/_jobs.parquet` |
+| **`orchestrator.py`** | **THE scheduled entry point** — 35-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |
 
 ---
