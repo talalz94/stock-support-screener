@@ -46,6 +46,10 @@ minutes and belongs on demand, not in the chain.
 
 ## IDEAS QUEUE — PARKED BY THE USER, NOT BUILT (design and ask before building)
 
+**Remind the user of these whenever they ask for an update** (their instruction,
+2026-11-02: "remind me whenever I ask for an update or something, dont schedule it"),
+and ask whether to start the bounce-trade tests. No scheduled reminder exists for them.
+
 ### NARRATIVE SCORE (asked for 2026-11-02)
 **What:** a score for which stories are likely to drive a stock or sector: sector and
 industry trends, policy (regulation, budgets, tariffs, rates), technology cycles, and
@@ -75,6 +79,74 @@ module and can finally bundle into the multi-criteria ranking.
    app is closed.
 6. **Evaluation:** after 3-6 months of snapshots, test like every module (IC vs forward
    returns, against the validated sector score as the baseline); until then shown only.
+
+### BOUNCE-TRADE REFINEMENTS (planned 2026-11-02; NOT RUN -- the user will refine first)
+**Base:** `big_movers_study.py --trades` (the 11-02 morning section): the saved events,
+buy at the next open, PRIMARY bracket b5_10 (+5% target / -5% stop / 10 sessions; a gap
+fills at the open; a day touching both is the stop). These rules are fixed now, before
+any result.
+0. **More dates first.** 52 dates are thin for a regime split. Re-run the events at
+   `STEP = 10` (about 220 dates from 2018-01; 10-session trades never overlap at that
+   spacing, while the 40-session FAIL/HIT columns would, so keep the 42-step file for
+   those): about 45 min, into `_big_movers_events_s10.parquet`.
+1. **Closer to the level:** AT (0-2.5% above the zone) minus NEAR (2.5-6%), for every
+   at-support name and for the hot third (rally_count, gain_days); and the level-stop
+   bracket (+5%, stop 3% under the level) by band -- an AT entry has the nearer stop.
+2. **Market uptrend:** signal dates with SPY's close (macro's ETF store,
+   `macro.fetch_etfs`) above its 50-day average minus the dates below it; the stock's
+   sector ETF (`macro.SECTOR_ETF_FOR`) the same way as a secondary.
+3. **No earnings inside the hold:** drop names with an 8-K Item 2.02 public between the
+   entry and the 10th session. The filing date stands in for the announced date, which
+   companies publish weeks ahead (the Finnhub snapshots only begin 2026-11-01). Report
+   the share of stops that were gaps, with and without.
+4. **Dips won back, inside the hot names:** within the hot third (all-liquid cutoffs, as
+   `level_value`), recovery_rate's top third minus its bottom third (>= 2 dips).
+**Rules:** per date, t across dates, halves before / from 2022; baselines on the same
+dates -- every at-support name, the list rule, every liquid name; count the tests and the
+~5% expected at |t| >= 2 by chance. A filter is kept only if it holds in both halves.
+Filters are combined only after each passes alone, and a combination is chosen on
+pre-2022 dates and judged after 2022 (walk-forward). Code: a `--refine` mode in
+`big_movers_study.py` reading the trades file (about 1 min after step 0).
+
+### RELATIVE STRENGTH VS THE MARKET AND THE SECTOR (planned 2026-11-02; NOT BUILT)
+**The idea, in the user's words:** a stock's line should roughly follow its index and its
+sector; one that has been ABOVE its sector is a healthy sign. Nothing like it exists yet
+(checked 2026-11-02: no relative-strength metric anywhere in the code).
+**Benchmarks -- every piece exists:** the market = SPY from macro's ETF store (QQQ, IWM
+there too); the sector and the sub-industry = equal-weight indexes of liquid members from
+`sectors.group_returns` (eligible the prior day, >= MIN_MEMBERS), with the stock itself
+left out; the sector ETF (`macro.SECTOR_ETF_FOR`) as a cross-check.
+**Candidate metrics** (pick before testing; windows 21 / 63 / 126 / 252 sessions):
+- excess return vs the sector and vs the market (log-return difference);
+- the RS line (stock / benchmark, 100 at the window start): above its own 50-day
+  average, and its slope;
+- time above: the share of the last 63 / 126 sessions the stock's rebased line sat
+  above its sector's;
+- an RS-line 52-week high (the classic "leader" sign, often before price makes one);
+- residual (beta-adjusted) return vs the market from a 252-session regression: did it
+  do better than its beta says it should.
+**Where it shows:** a "vs market and sector" chart on the stock profile (the stock, its
+sector and the market rebased to 100 a year ago, plus the RS line and its 50-day
+average) with its numbers (1m / 3m / 6m / 1y vs each, % of time above); a "vs sector 3m"
+column and a leading / lagging badge on the lists (candidates, floor, explore, Gainers at
+support).
+**How it is judged before any weight** (the house rule): as a factor -- IC vs forward 20
+/ 60-session excess returns, split halves; and at support -- the bounce trade (b5_10)
+and excess_20 by RS third, for every at-support name and for the hot third ("a leader
+pulling back to support"). Baselines: plain 12-1 momentum (already measured at support:
++0.25pp excess_20, t 0.47 -- weak) and the validated sector score. In the literature:
+industry momentum explains much of stock momentum (Moskowitz & Grinblatt 1999); residual
+momentum is steadier than raw (Blitz, Huij & Martens 2011); 1-month strength tends to
+reverse. Caveats: today's sub-industry map; survivorship.
+
+### ONE FILTERING PIPELINE ACROSS ALL METRICS (the user's next step, 2026-11-02)
+The user will come back to refine every metric and build a comprehensive analysis
+pipeline that filters stocks on many criteria. Starting points: a catalogue of every
+metric with its measured evidence (IC, at-support and bounce-trade effect, halves,
+walk-forward -- most of it already sits in the studies' JSON files); `combo` (only
+measured metrics enter, 100 dates of evidence each); the saved lists and the
+`watchlists` step for forward checks. Every composite filter is judged like the rest:
+chosen on early dates, tested on later ones, against the plain at-support rule.
 
 ## State at 2026-11-02 (late morning) — DEBT FALLBACK TAGS: 244 NAMES GAIN A DEBT FIGURE, AND NO NAME THAT HAD ONE IS MOVED BY IT
 
