@@ -76,6 +76,66 @@ module and can finally bundle into the multi-criteria ranking.
 6. **Evaluation:** after 3-6 months of snapshots, test like every module (IC vs forward
    returns, against the validated sector score as the baseline); until then shown only.
 
+## State at 2026-11-02 (late morning) — DEBT FALLBACK TAGS: 244 NAMES GAIN A DEBT FIGURE, AND NO NAME THAT HAD ONE IS MOVED BY IT
+
+Why: on 10-30, 989 of 3,312 universe names had NO debt figure, so every debt input
+(debt/equity, net debt/EBITDA, EV ratios, ROIC, interest cover) was blank and pillars fell
+just under coverage -- under the two-pillar rule above, the reason GM, WMB, DASH, CPRT lost
+their fund_score. What they file, read from SEC: WMB LongTermDebtAndCapitalLeaseObligations
+28,121M + ...Current 2,197M (+ CommercialPaper 475M); DASH ConvertibleLongTermNotesPayable
+2,728M; CPRT nothing but a 2.7M finance lease (debt-free); GM ONLY by business group
+(Automotive 15.5B, GM Financial 75.2B long-term, a VIE subset inside it) -- no consolidated
+total, and we read non-dimensional rows only, so GM is NOT covered. Of the 900 no-debt
+filers in the 2026q3 bulk set, 384 tag some debt-like line, most often the
+...AndCapitalLeaseObligations pair (59/51), finance leases (52/45), convertibles, notes.
+
+FIX (`fundamentals.TAGS`, `ALIAS_TIERS`, `_alias_tiers` -- in `facts_asof` and `history()`):
+side-specific tags appended to debt_lt / debt_st, used ONLY by a filer with no primary debt
+row (either concept) anywhere in the 12-quarter frame, and then its earliest tier: the
+...AndCapitalLeaseObligations totals, then named components (convertible notes, long-term
+notes, lines of credit, other), then finance leases. Left out on purpose: totals spanning
+both sides (SeniorNotes, NotesPayable, DebtLongtermAndShorttermCombinedAmount -- they would
+double-count against debt_st) and bank funding lines (SubordinatedDebt, OtherBorrowings).
+
+TWO CUTS FAILED FIRST, both caught by measuring names that already had debt:
+* alias RANK alone: `_latest` takes the newest PERIOD before the preferred alias, so 462
+  names changed -- TMUS 87.5B -> 7.5B (its total only in the 10-K, a 1,136M lease in every
+  10-Q), CRWV 24.9B -> 0.2B, KMX's "other" debt beat its total.
+* tiers PER CONCEPT: 284 changed -- a LongTermDebt total that already holds the current part
+  picked up ConvertibleDebtCurrent as debt_st (IRWD 199.5M -> 399.4M). Hence one family.
+
+DATA. Bulk re-ingested 22 quarters (only change: +140,216 debt-tag rows; old copy
+`data/fundamentals_pre20261101`); EDGAR rebuilt since 10-01 (old copies
+`data/fundamentals_edgar_pre20261101`, `..._rebuilt20261101`).
+A COMPANYFACTS REFETCH OF THE 1,208 OVERLAPPING CIKs WAS DONE AND REVERTED. After it
+companyfacts won recent partitions for those names and (a) it carries NOTE-level facts: KNX
+LongTermDebt 231.9M against a 1.75B total; (b) `_cf_qtrs` drops 52/53-week year-to-dates --
+PEP's 36-week YTD is 252 days, outside the 264-284 band -- so PEP's EPS fell back to the Q1
+roll, 7.95 -> 6.37, and its pin failed. Restored from `data/fundamentals_cf_pre20261101`; the
+refetched copy is `data/fundamentals_cf_refetched20261102`. (b) is LATENT for any 52/53-week
+filer the weekly `sec_gap` refetches -- open.
+
+MEASURED, facts as of 10-30, before vs after: names with any debt figure 2,323 -> 2,567 of 3,312 (+244,
+213 non-financial; 0 lost); debt_lt 2,138 -> 2,347, debt_st 1,581 -> 1,736; names that HAD a
+figure and changed: 0. Largest gains: SCHW 36.6B, WMB 30.3B, CP 25.8B, CSX 18.8B, APH 17.9B,
+LVS 15.4B, PSKY, NCLH, SYY, HLT, THC, LUMN, DVA, WCN, ACI, SIRI, LYV, CAH, AKAM 7.6B. Still
+none: GM (business groups), CPRT (debt-free; its lease rows are not in the frame it reads).
+regression_pins 48/48 (WMB, DASH, APH and TMUS added); fundamentals and edgar selftests OK
+(`_selftest_debt_aliases`: rank, a newer lease must not beat TMUS's total, KMX's component
+must not beat its total, IRWD's notes not counted twice).
+
+RE-SCORED 10-30 (11 steps, 0 failed; fundamental 3,644 s -- the off-cycle Finnhub refetch):
+value pillar 1,612 -> 1,761, safety 1,917 -> 1,985, quality 2,321 -> 2,363, growth unchanged;
+fund_score 2,539 -> 2,596 (+57, 0 lost: SCHW, WMB 43.1, DASH 51.1, STT, LYV, RVMD, ACGL, L,
+THC ...); kept names moved > 1 point: 133 of 2,539 (median 0.04 -- peers' sector ranks shift
+as 244 names gain debt inputs); dip gate 587 -> 593; candidates 84 -> 88; validate: only the
+known `ttm:392/393` window. Commit bb233ea (fundamentals.py, regression_pins.py), not pushed.
+
+OPEN: GM (business-group debt only); bank funding tags; totals spanning both sides; debt_st
+is still ONE alias (WMB's 475M commercial paper is not added to its 2,197M); IR reads
+ShortTermBorrowings 0 over DebtCurrent 700M in one filing (alias order, pre-existing);
+`_cf_qtrs` and 52/53-week YTDs.
+
 ## State at 2026-11-02 (morning) — STOCKS THAT KEEP RUNNING MOVE MORE BOTH WAYS AT SUPPORT; ONLY "WINS BACK ITS DIPS" LEANS UP
 
 **Asked:** is a stock that is often among the daily top gainers more likely to go up at a
