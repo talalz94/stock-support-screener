@@ -411,10 +411,29 @@ def _fill_missing_sic(m: pd.DataFrame, verbose: bool = True) -> pd.DataFrame:
     return out
 
 
-def load_sector_map() -> pd.DataFrame:
-    if config.SECTOR_MAP_FILE.exists():
-        return pd.read_parquet(config.SECTOR_MAP_FILE)
-    return pd.DataFrame(columns=["ticker", "cik", "sic", "sector", "sector_etf"])
+def load_sector_map(raw: bool = False) -> pd.DataFrame:
+    """ticker -> SIC and sector. The file holds the SIC-derived sectors exactly as built; the
+    corrections from industry_map.py (Finnhub's industry label, applied 2026-11-08: SIC codes put
+    KLA in Healthcare and Applied Materials in Industrials) are laid over it here, on every read,
+    so a rebuild of the file never undoes them. `raw=True` returns the file untouched."""
+    if not config.SECTOR_MAP_FILE.exists():
+        return pd.DataFrame(columns=["ticker", "cik", "sic", "sector", "sector_etf"])
+    m = pd.read_parquet(config.SECTOR_MAP_FILE)
+    if raw:
+        return m
+    try:
+        import industry_map
+        o = industry_map.overrides()
+    except Exception:                                            # noqa: BLE001
+        return m
+    if len(o):
+        sec = o.set_index("ticker")["sector"]
+        hit = m["ticker"].isin(sec.index)
+        m = m.copy()
+        m.loc[hit, "sector"] = m.loc[hit, "ticker"].map(sec)
+        if "sector_etf" in m.columns:
+            m.loc[hit, "sector_etf"] = m.loc[hit, "sector"].map(lambda v: SECTOR_ETF_FOR.get(v, "SPY"))
+    return m
 
 
 # ===========================================================================

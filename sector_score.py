@@ -33,7 +33,13 @@ import calendar_us
 import config
 import sectors as S
 
-COMPOSITE = ("rs21", "breadth200")
+# The walk-forward pick of sector_study.py (components with |t| >= 2 on the first half of the
+# dates, judged on the second). 2026-10-20 on the SIC map: rs21 + breadth200 (out of sample
+# IC 0.141, t 4.10). 2026-11-08, after industry_map.py corrected 931 sectors (KLA was in
+# Healthcare, REITs in Financials): the same rule picks breadth200 + fund (out of sample IC
+# 0.082, t 2.51); the old pair still holds on the corrected groups (IC 0.088, t 2.31) but rs21
+# fell to t 1.82 on the first half, so by the rule it is out.
+COMPOSITE = ("breadth200", "fund")
 OUT = config.DATA / "sectors"
 SEASON = config.DATA / "_season_study_summary.json"
 STUDY = config.DATA / "_sector_study_summary.json"

@@ -100,6 +100,18 @@ def groups() -> pd.DataFrame:
     m = macro.load_sector_map().drop_duplicates("ticker")[["ticker", "sic", "sector"]].copy()
     m["sector"] = m["sector"].where(m["sector"].astype(str).str.len() > 0, "Other").fillna("Other")
     m["subind"] = [subindustry(s, sec) for s, sec in zip(m["sic"], m["sector"])]
+    # The sub-industry of a name whose sector industry_map.py corrected: SIC ranges cannot tell a
+    # chip-equipment maker (KLAC, SIC 3827) from an optical-instrument one, so the corrected
+    # sub-industry rides with the corrected sector (macro.load_sector_map applies the sector).
+    try:
+        import industry_map
+        o = industry_map.overrides()
+        if len(o):
+            sub = o.set_index("ticker")["subind"]
+            hit = m["ticker"].isin(sub.index)
+            m.loc[hit, "subind"] = m.loc[hit, "ticker"].map(sub)
+    except Exception:                                            # noqa: BLE001
+        pass
     return m[["ticker", "sector", "subind"]].reset_index(drop=True)
 
 
