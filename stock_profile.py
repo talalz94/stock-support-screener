@@ -1612,6 +1612,61 @@ def build(ticker: str, verbose: bool = True,
     return out
 
 
+# ------------------------------------------------------------ pages built because a list named them
+# The shortlist is the list a reader acts on, so its names get a page every night (2026-11-09):
+# before that only bounce-flagged names had one and every shortlist link went to the search.
+# Every page on disk is rebuilt nightly, so a page built ONLY because the shortlist named it is
+# removed LISTED_KEEP_SESSIONS sessions after the name last appeared there; otherwise each day's
+# newcomers would add to that bill for good. A page that exists for any other reason (a bounce
+# flag, a request from the stock search) is never touched here.
+LISTED = config.DATA / "_profile_listed.json"
+LISTED_KEEP_SESSIONS = 20
+
+
+def shortlist_names(asof: str) -> list[str]:
+    """The default shortlist's first `n` names for `asof`; [] when none was built."""
+    import shortlist as SL
+    cfg = SL.recipes()
+    f = SL.DIR / asof / f"{cfg['default']}.csv"
+    if not f.exists():
+        return []
+    x = pd.read_csv(f, usecols=["ticker", "rank"]).sort_values("rank", kind="stable")
+    return x.ticker.astype(str).head(int(cfg["n"])).tolist()
+
+
+def listed_pages(asof: str, flagged: list[str]) -> tuple[list[str], list[str]]:
+    """(the shortlist's names, to build tonight; pages removed because their name left it)."""
+    import json
+    names = shortlist_names(asof)
+    try:
+        reg = json.loads(LISTED.read_text(encoding="utf-8")) if LISTED.exists() else {}
+    except (OSError, ValueError):
+        reg = {}
+    on_disk = {p.stem for p in OUT_DIR.glob("*.html") if p.stem != "index" and "_" not in p.stem}
+    flagged = set(flagged)
+    for t in names:
+        if t in flagged:
+            reg.pop(t, None)                 # a bounce flag keeps a page for good, as before
+        elif t in reg or t not in on_disk:
+            reg[t] = asof                    # listed tonight: its clock restarts
+    pos = {s: i for i, s in enumerate(calendar_us.all_sessions())}
+    removed = []
+    for t, last in sorted(reg.items()):
+        if t in flagged:
+            reg.pop(t)
+            continue
+        if t in names or asof not in pos or last not in pos:
+            continue                         # listed, or an age that cannot be counted: keep
+        if pos[asof] - pos[last] > LISTED_KEEP_SESSIONS:
+            page = OUT_DIR / f"{t}.html"
+            if page.exists():
+                page.unlink()
+                removed.append(t)
+            reg.pop(t)
+    LISTED.write_text(json.dumps(reg, indent=1, sort_keys=True), encoding="utf-8")
+    return names, removed
+
+
 def write_index(verbose: bool = True) -> Path:
     """`reports/stock/index.html` -- every built profile, searchable.
 
@@ -1841,6 +1896,16 @@ if(!LIVE){
   h.parentNode.insertBefore(b, h);
 }
 
+// The menu's ticker box lands here as ?t=TICKER (2026-11-08): a built page opens at once;
+// otherwise the search is filled in, so the name shows with its build option instead of a
+// dead link.
+(function(){
+  var t = (new URLSearchParams(location.search).get('t') || '').toUpperCase();
+  if (!t) return;
+  if ((window.BUILT || []).indexOf(t) >= 0) { location.replace(encodeURIComponent(t) + '.html'); return; }
+  q.value = t;
+})();
+
 apply();
 """
 
@@ -1926,8 +1991,10 @@ def selftest(verbose: bool = True) -> None:
     _probe = OUT_DIR / "AAPL.html"
     if _probe.exists():
         _html = _probe.read_text(encoding="utf-8")
-        _js = re.search(r"<script>(.*?)</script>", _html, re.S)
-        assert _js and "winToggle" in _js.group(1), (
+        # EVERY inline script: since 2026-11-09 the menu's own script comes first on every page,
+        # so reading only the first one failed this check on a page whose handler was there.
+        _js = re.findall(r"<script>(.*?)</script>", _html, re.S)
+        assert any("winToggle" in s and "getElementById" in s for s in _js), (
             "the chart window handler is NOT in the rendered <script>; the "
             "buttons will render and do nothing")
         assert 'data-win="MAX"' in _html, "chart windows missing from the page"

@@ -1206,8 +1206,9 @@ def write_index() -> "object":
     nothing linked them, so "check today and previous days" meant knowing the
     filename convention.
 
-    Renamed from index.html on 2026-08-07: `index.html` is now the master hub
-    written by dashboard.py, which is what a browser opens by default when
+    Renamed from index.html on 2026-08-07: `reports/index.html` was the master hub
+    written by dashboard.py (since 2026-11-08 it is Today, today_page.py, and the
+    hub is system.html), which is what a browser opens by default when
     pointed at reports/. Two writers on one filename is the kind of collision
     that shows up as a page that mysteriously reverts.
     """
@@ -1226,43 +1227,28 @@ def write_index() -> "object":
         top = ""
         if tagged is not None and not tagged.empty and "score" in tagged:
             top = ", ".join(tagged.nlargest(5, "score")["ticker"].astype(str))
+        links = [f'<a href="{d}.{ext}">{label}</a>'
+                 for ext, label, path in (("html", "report", rep), ("csv", "csv", csv)) if path.exists()]
         rows.append(
-            f'<tr><td><b>{d}</b></td><td>{len(fl)}</td>'
+            f'<tr><td class="lab"><b>{d}</b></td><td>{len(fl)}</td>'
             + "".join(f'<td>{counts.get(b, 0) or ""}</td>'
                       for b in config.BUCKET_ORDER)
-            + f'<td class="tk">{_esc(top)}</td>'
-            f'<td>{"<a href=" + d + ".html>report</a>" if rep.exists() else ""}'
-            f'{" &middot; <a href=" + d + ".csv>csv</a>" if csv.exists() else ""}'
-            f'</td></tr>')
+            + f'<td class="lab tk">{_esc(top)}</td>'
+            f'<td class="lab">{" &middot; ".join(links)}</td></tr>')
 
+    # The shared page since 2026-11-08: the menu, the theme and the dead-link audit (which
+    # reads quoted hrefs only) now reach this page too. It had its own template and no menu.
+    import ui
     head = "".join(f"<th>{b}</th>" for b in config.BUCKET_ORDER)
-    html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Support Bounce Screen &middot; all sessions</title><style>
-:root{{--bg:#f7f8fa;--panel:#fff;--ink:#12161c;--muted:#5b6572;--line:#e2e6ec;--accent:#2f6feb}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#0e1116;--panel:#161b22;--ink:#e6edf3;--muted:#8b949e;--line:#262c36;--accent:#589bff}}}}
-body{{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}}
-.wrap{{max-width:1080px;margin:0 auto;padding:22px 16px 60px}}
-h1{{font-size:19px;margin:0 0 4px}}.sub{{color:var(--muted);font-size:12.5px;margin-bottom:16px}}
-table{{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel);
-border:1px solid var(--line);border-radius:8px;overflow:hidden}}
-th{{text-align:left;color:var(--muted);font-weight:500;font-size:11.5px;
-padding:8px 10px;border-bottom:1px solid var(--line)}}
-td{{padding:7px 10px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}}
-tr:last-child td{{border-bottom:none}}
-td.tk{{color:var(--muted);font-size:12px}}
-a{{color:var(--accent);text-decoration:none}}a:hover{{text-decoration:underline}}
-.note{{color:var(--muted);font-size:11.5px;margin-top:14px}}
-</style></head><body><div class="wrap">
-<h1>Support Bounce Screen &middot; all sessions</h1>
-<div class="sub">{len(rows)} session(s) recorded &middot;
-<a href="latest.html">newest report</a> &middot;
-<a href="../index.html">status hub</a></div>
-<table><thead><tr><th>session</th><th>flags</th>{head}
-<th>top by score</th><th></th></tr></thead><tbody>{"".join(rows)}</tbody></table>
-<div class="note">Counts are per bucket. A session with no row was never screened
-(the job did not run, or the market was closed).</div>
-</div></body></html>"""
+    body = (f'<div class="scroll"><table><thead><tr><th class="lab">session</th><th>flags</th>{head}'
+            f'<th class="lab">top by score</th><th class="lab"></th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>'
+            '<div class="note">Counts are per bucket. A session with no row was never screened '
+            '(the job did not run, or the market was closed).</div>')
+    html = ui.page("Support Bounce Screen · all sessions", body,
+                   subtitle=f'{len(rows)} session(s) recorded &middot; <a href="latest.html">newest report</a>',
+                   active="bounce", depth=1,
+                   head="<style>.tk{color:var(--muted);font-size:12px}</style>")
     p = config.REPORTS_BOUNCE / "index.html"
     p.write_text(html, encoding="utf-8")
     return p

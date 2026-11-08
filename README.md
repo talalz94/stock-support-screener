@@ -97,13 +97,16 @@ python daily_run.py --dry-run       # bounce screener alone, ~60-90s
 python daily_run.py
 ```
 
-Then open **`reports\index.html`** — the status hub. Bookmark that one: it shows
-whether each job step ran, what it produced, and what broke, and it links every
-page below. It reads the job table and file sizes only, so opening it never
-costs anything and never triggers work. Every page has the same top nav; each
-report type has a folder with `latest.html` in it (dated copies beside it).
+Then open **`reports\index.html`** — **Today**: the market's mood, the Shortlist's top
+names with their trade plan, the watchlists, this week's earnings and warning filings,
+and one line saying whether the data is current. Bookmark that one. Every page has the
+same menu (Today, then Lists / Research / Stocks / System, and a ticker box); each report
+type has a folder with `latest.html` in it (dated copies beside it).
 
-- **`reports\index.html`** — status hub (job steps, stores, run history)
+- **`reports\index.html`** — Today (`today_page.py`), the home page since 2026-11-08
+- **`reports\system.html`** — Status: job steps, stores, run history (`dashboard.py`). It
+  reads the job table and file sizes only, so opening it never costs anything and never
+  triggers work. Until 2026-11-08 this was `index.html`.
 - `reports\explore\latest.html` — every stock x every metric, sortable and filterable
 - `reports\bounce\latest.html` — the support-bounce screen and every stock it analysed
 - `reports\zones\latest.html` — **Zones**: every support level below every stock, with a
@@ -245,10 +248,13 @@ independently of touch count: four touches in one week is one event, not four.
 - **37 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
   shortvol, hype, provider, sec_facts, sec_gap, sec_edgar, insider, congress,
   fundamental, events, leaderboard, dip, insider_score, combo, candidates, floor,
-  insider_pages, sectors, validate, explore, snapshots, profiles, watchlists,
-  narrative, shortlist, retention, dashboard, docs`. `narrative` writes the weekly AI narrative task's
+  insider_pages, sectors, narrative, shortlist, validate, explore, snapshots, profiles,
+  watchlists, retention, dashboard, docs`. `narrative` writes the weekly AI narrative task's
   inputs and checks its answers; `shortlist` builds every ranking's list of names at support with the
-  tested trade plan and scores the forward ledger. `news_events` (SEC filings by type, press-release and FDA feeds, earnings
+  tested trade plan and scores the forward ledger. Both run BEFORE `explore`, whose support and
+  trade-plan columns read that night's shortlist (until 2026-11-09 they ran after it, so Explore
+  showed the previous session's plan). `dashboard` builds Today (`reports/index.html`, the home
+  page) and Status (`reports/system.html`, the job table). `news_events` (SEC filings by type, press-release and FDA feeds, earnings
   calendar) runs before `bounce` so every page shows that night's warning filings and
   earnings dates; `watchlists` re-measures saved lists. `insider` and
   `congress` (insider and House trades) are independent: nothing depends on them, so a failure
@@ -478,7 +484,8 @@ as bankruptcy text and asserts no metric moves.
 | `news_events_study.py` | what each event type predicts, vs the liquidity fifth AND the same stock's own non-event days, split halves; `data/_news_events_study_summary.json`. Nothing qualified as a buy signal; 3.02 / 4.02 / 1.02 are warnings |
 | `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
 | **`orchestrator.py`** | **THE scheduled entry point** — 37-step registry, watermark catch-up, `data/_jobs.parquet` |
-| **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |
+| **`dashboard.py`** | **the status hub**, `reports/system.html` — read-only, never triggers work |
+| **`today_page.py`** | **Today**, `reports/index.html` (the home page) — market, shortlist top 5, watchlists, this week, narrative |
 
 ---
 

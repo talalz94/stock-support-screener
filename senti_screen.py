@@ -317,7 +317,7 @@ border-radius:4px;vertical-align:middle;overflow:hidden}}
 <h1>Sentiment screen &middot; {esc(asof)}</h1>
 <div class="meta">generated {esc(payload['generated'])} &middot;
 {payload['n_with_news']} name(s) with company news &middot; ranked by severity
-&middot; <a href="../index.html">status hub</a></div>
+&middot; <a href="../system.html">Status</a></div>
 {cov_warn}
 <div class="hdr">
   <div class="stat">market regime<b>{esc(payload['regime'])}</b></div>

@@ -15,7 +15,7 @@ the hub still works as a plain file with copy-able commands, and when you WANT
 buttons you start this and get them. Nothing depends on it running.
 
 That is progressive enhancement, and it is load-bearing here: if this server is
-not running, `reports/index.html` opened over file:// behaves exactly as before.
+not running, `reports/system.html` opened over file:// behaves exactly as before.
 
 SECURITY, BECAUSE THIS EXECUTES CODE ON REQUEST
 -------------------------------------------------
@@ -658,11 +658,16 @@ def main() -> int:
         dashboard.build(verbose=False)      # make sure there is a page to serve
     except Exception as exc:                                     # noqa: BLE001
         _log(f"could not rebuild the hub ({exc!r}); serving whatever exists")
+    try:
+        import today_page
+        today_page.build(verbose=False)     # the landing page, so it is never older than the hub
+    except Exception as exc:                                     # noqa: BLE001
+        _log(f"could not rebuild Today ({exc!r}); serving whatever exists")
 
     url = f"http://{HOST}:{a.port}/index.html"
     srv = ThreadingHTTPServer((HOST, a.port), Handler)
     _log(f"serving {config.REPORTS} at {url}")
-    _log("buttons on the hub are live while this runs. Ctrl-C to stop.")
+    _log("buttons on the Status page (system.html) are live while this runs. Ctrl-C to stop.")
     if a.idle_exit:
         # NOT a daemon. It lives while it is being used and exits on its own,
         # which is the honest way to have working buttons without a process

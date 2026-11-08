@@ -176,6 +176,47 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-09 — UI PHASE 1: A "TODAY" HOME, A GROUPED MENU ON ALL 432 PAGES, NO DEAD LINKS
+
+**Asked:** "yes mock up the Today page and menu first and continue building and checking, no bugs please".
+
+**Built:**
+- **Today** (`today_page.py` -> `reports/index.html`, the home page):
+  - **Data line:** whether the data is current, the last run, failing steps.
+  - **Market:** SPY against its 50- and 200-day averages, VIX, breadth, the strongest and weakest sectors. A reading that lags the session is shown with its own date: FRED posts the VIX a day late, so 11-06 shows "reading of Thu Nov 5".
+  - **Lists:** the Shortlist's top 5 with the trade plan (an earnings note sits under the ticker); the watchlists against the market.
+  - **This week:** earnings by report slot, shortlist names in bold, and recent warning filings for listed names.
+  - **Narrative:** a placeholder until the first checked run.
+  - **Layout:** explanations sit behind an (i). Each card fails on its own. 1,292 px tall at 1280 px wide, against 6,100 px for the old job-table home.
+- **The job table moved to `reports/system.html`** ("Status", under System). The `dashboard` step builds both pages; `serve.py` builds both at start-up.
+- **Menu:** Today plus four groups (Lists, Research, Stocks, System) as native dropdowns with one-line hints, and a ticker box. On a phone the box moves into the Stocks menu, so the bar is one line (44 px). Dropdowns open just under the bar, however tall it is. The ticker box goes to `stock/index.html?t=T`, which opens T's page or offers to build it.
+- **`ui.refresh_nav()` / `python ui.py --renav`:** swaps the current menu and its styles into every page already written. It keeps each page's session picker and highlighted entry, and fixes "status hub" body links. 409 of 412 pages had the old menu (most are dated snapshots no step rebuilds). It runs in the `dashboard` step each night; unchanged pages are not rewritten (3.7 s with nothing to do; 46-51 s when every page changes). Writes are atomic and skip a page something else rewrote meanwhile.
+- **Dead links: 336 -> 0** (`status.py --pages`, 432 pages):
+  - `ui.stock_href()` links a built page directly, else the stock list.
+  - Over file://, the menu script routes script-drawn stock links (Explore, Candidates, Floor, Insiders, Sectors, Shortlist) through the stock list. The local server already builds a missing page on request.
+- **The Shortlist's top 20 get stock pages nightly** (139 pages now; about 2 s each after loading). The `profiles` step measured 463 s for all 139, against its 900 s limit (207-454 s for 119 before).
+  - A page built only for the shortlist is deleted 20 sessions after the name leaves it (`data/_profile_listed.json`, `stock_profile.listed_pages`).
+  - Pages built for a bounce flag or on request are never touched.
+- **ORDER BUG FIXED:** `narrative` and `shortlist` now run right after `sectors`, before `explore` and `profiles`. Explore's support, trade-plan and strength columns read "the newest shortlist build on or before the session". With the shortlist running after explore, every night's Explore would have shown the previous session's buy limits, targets and stops as current. It had not bitten yet: the shortlist began 11-06 and Explore was rebuilt by hand after it.
+- **Phones:**
+  - **Explore:** the table was 139 px wide beside the strategy rail, so the rail now stacks below it. The filter bar is no longer sticky (it held 200 of 812 px). Rule rows wrap; one had pushed the page 24 px sideways.
+  - **Stock pages:** the radar grid's 9 px overflow was a stale build; the code fix was already in, and all pages are rebuilt.
+- **The bounce archive** (`bounce/index.html`) uses the shared page and menu.
+- **The Status page's bare `details` / `summary` rules** (meant for tracebacks in its step table) also restyled the menu: its bar was 6 px taller than on every other page. They are now scoped to table cells, and the menu sets its own margin.
+- **`stock_profile.selftest` read only the first `<script>`.** The menu's script now comes first on every page, so the check failed on a page whose chart handler was present. It now checks every inline script.
+
+**Checked:**
+- In the browser at 1280, 768 and 375 px: no sideways scroll on any of 19 page types, or on 10 stock pages. The menu bar is 44-45 px; it is 81 px on a phone only where a page has a session picker (Explore, stock pages). No console errors.
+- The menu opens and closes (one at a time; outside click and Escape close it). Typing "aapl" in the phone menu opens AAPL's page. Every (i) note opens inside the screen.
+- `ui.selftest`: now includes a menu-refresh test on an old page, a current page and a page with no menu, with a second run that must change nothing.
+- `stock_profile`, `report`, `watchlist_page` and `narrative` selftests: pass. All 10 touched modules import with warnings as errors.
+- Every Today figure was recomputed independently: SPY -3.97% vs 50-day and +0.67% vs 200-day, matching `trade_rules_study.regimes` m1=1, m2=0; VIX 28.18; breadth 37.8%.
+
+**Next (the plan's remaining phases):**
+- **Stock page:** tabs; column presets per table; collapsible sections; (i) instead of paragraphs; plain labels.
+- **Customising:** a gear panel (browser-saved, with export and import).
+- **Polish:** a dark-mode toggle; lighter heavy pages (Insider 743 KB, House 956 KB, Zones 896 KB).
+
 ## State at 2026-11-08 (evening) — UI/UX AUDIT: MEASURED, PLAN PROPOSED, AWAITING THE USER
 
 **Asked:** "its too cluttered with so much info, I want it better organized in a professional way with room to customize ... snappy, ui/ux should be friendly and bug free" -- analysis first.
@@ -5037,7 +5078,7 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-08 00:48 — do not edit by hand._
+_Generated 2026-11-09 02:20 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
@@ -5045,7 +5086,7 @@ _Generated 2026-11-08 00:48 — do not edit by hand._
 | `bars` | daily | 80s | 54s | 5.2 min | 10.0 min | 67 |
 | `macro` | daily | 2.0 min | 1.6 min | 3.8 min | 15.0 min | 67 |
 | `news` | daily | 18s | 5s | 31s | 10.0 min | 67 |
-| `news_events` | daily | 3.2 min | 4.4 min | 531.0 min ⚠ | 30.0 min | 8 |
+| `news_events` | daily | 4.0 min | 4.0 min | 531.0 min ⚠ | 30.0 min | 9 |
 | `senti_cache` | daily | 9s | 3s | 12s | 10.0 min | 67 |
 | `sentiment` | daily | 40s | 18s | 40s | 15.0 min | 68 |
 | `bounce` | daily | 1.9 min | 41s | 1.9 min | 15.0 min | 68 |
@@ -5055,9 +5096,9 @@ _Generated 2026-11-08 00:48 — do not edit by hand._
 | `provider` | daily | 64.5 min | 65.0 min | 64.5 min | 120.0 min | 60 |
 | `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 16 |
 | `sec_gap` | weekly | 2.9 min | 5.2 min | 12.1 min | 20.0 min | 15 |
-| `sec_edgar` | daily | 7s | 43s | 581.1 min ⚠ | 30.0 min | 28 |
-| `insider` | daily | 31s | 2.0 min | 4.6 min | 30.0 min | 13 |
-| `congress` | daily | 3s | 9s | 11s | 30.0 min | 13 |
+| `sec_edgar` | daily | 7s | 37s | 581.1 min ⚠ | 30.0 min | 29 |
+| `insider` | daily | 28s | 1.9 min | 3.9 min | 30.0 min | 14 |
+| `congress` | daily | 2s | 8s | 11s | 30.0 min | 14 |
 | `fundamental` | daily | 3.8 min | 3.7 min | 7.3 min | 180.0 min | 76 |
 | `events` | weekly | 8.0 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 16 |
 | `leaderboard` | weekly | 36.6 min | 40.0 min | 91.0 min ⚠ | 90.0 min | 17 |
@@ -5070,20 +5111,22 @@ _Generated 2026-11-08 00:48 — do not edit by hand._
 | `sectors` | daily | 70s | 2.6 min | 5.8 min | 30.0 min | 26 |
 | `validate` | daily | 9.7 min | 7.1 min | 23.8 min | 60.0 min | 62 |
 | `explore` | daily | 7s | 9s | 9s | 5.0 min | 84 |
-| `snapshots` | daily | 16s | 4s | 16s | 5.0 min | 97 |
+| `snapshots` | daily | 0s | 4s | 16s | 5.0 min | 98 |
 | `profiles` | daily | 5.9 min | 21.3 min | 58.5 min ⚠ | 15.0 min | 79 |
 | `watchlists` | daily | 3s | 3s | 5s | 10.0 min | 6 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 87 |
+| `narrative` | daily | 10s | 10s | 10s | 10.0 min | 1 |
+| `shortlist` | daily | 2.3 min | 2.3 min | 2.3 min | 15.0 min | 1 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 88 |
 | `dashboard` | daily | 1s | 0s | 9s | 2.0 min | 91 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 108 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 109 |
 
-**Daily total ≈ 121.6 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 123.5 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-08 00:48 — do not edit by hand._
+_Generated 2026-11-09 02:20 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
@@ -5096,13 +5139,13 @@ _Generated 2026-11-08 00:48 — do not edit by hand._
 | fundamentals | 70 | 345.4 | 2009q2 → 2026q3 |
 | short volume | 76 | 57.3 | 2020-08 → 2026-11 |
 | flags | 70 | 5.9 | 2026-07-31 → 2026-11-06 |
-| rejects | 21 | 7.9 | 2026-10-09 → 2026-11-06 |
+| rejects | 20 | 7.6 | 2026-10-12 → 2026-11-06 |
 | zones | 51 | 28.7 | 2026-08-27 → 2026-11-06 |
 | fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
 | fundamentals (EDGAR filings) | 23 | 1.9 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 43 | 217.3 | — |
+| loose (macro, universe, jobs, study) | 48 | 312.2 | — |
 
-**`data/` total ≈ 1,522 MB.** `reports/` is a further 135 MB across 410 pages.
+**`data/` total ≈ 1,617 MB.** `reports/` is a further 137 MB across 412 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -5110,7 +5153,7 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-08 00:48 — do not edit by hand._
+_Generated 2026-11-09 02:20 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
@@ -5125,7 +5168,7 @@ _Generated 2026-11-08 00:48 — do not edit by hand._
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-08 00:48 — do not edit by hand._
+_Generated 2026-11-09 02:20 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

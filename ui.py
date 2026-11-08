@@ -2,6 +2,7 @@
 The shared visual system for every report page.
 
     python ui.py --selftest
+    python ui.py --renav        bring every page already in reports/ to the current menu
 
 WHY THIS EXISTS
 -----------------
@@ -31,6 +32,59 @@ import html as _html
 import math
 import re
 import sys
+
+# The menu's own rules, kept apart so `refresh_nav()` can bring an already-written page's
+# menu up to date: the markers let it find and replace exactly this block.
+NAV_CSS = """/* nav:start */
+/* ---- nav: the same on every page ---- */
+.nav{position:sticky;top:0;z-index:50;background:var(--panel);
+border-bottom:1px solid var(--line);margin-bottom:18px}
+.nav .inner{max-width:1400px;margin:0 auto;padding:0 16px;display:flex;
+gap:2px;align-items:center;flex-wrap:wrap}
+.nav a{padding:11px 13px;font-size:13px;color:var(--muted);font-weight:500;
+border-bottom:2px solid transparent;white-space:nowrap}
+.nav a:hover{color:var(--ink);text-decoration:none}
+.nav a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.nav .brand{font-weight:700;color:var(--ink);padding:11px 14px 11px 0;
+font-size:13px;letter-spacing:.02em}
+.nav .spacer{margin-left:auto}
+.nav select{margin:0 0 0 8px}
+/* grouped menu (2026-11-08): five groups, native <details> so it works by keyboard,
+   by touch and with scripting off; one line on a phone instead of four */
+.nav details.dd{position:relative;margin:0}
+/* a page's own bare `summary{...}` rule must not restyle the menu */
+.nav details.dd>summary{list-style:none;cursor:pointer;padding:11px 12px;font-size:13px;
+color:var(--muted);font-weight:500;border-bottom:2px solid transparent;white-space:nowrap;
+user-select:none}
+.nav details.dd>summary::-webkit-details-marker{display:none}
+.nav details.dd>summary::after{content:"";display:inline-block;margin-left:5px;
+border:4px solid transparent;border-top-color:currentColor;transform:translateY(2px)}
+.nav details.dd>summary:hover,.nav details.dd[open]>summary{color:var(--ink)}
+.nav details.dd.on>summary{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
+.nav details.dd .menu{position:absolute;top:100%;left:0;min-width:190px;background:var(--panel);
+border:1px solid var(--line);border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.12);
+padding:6px;z-index:60}
+.nav details.dd .menu a{display:block;padding:7px 10px;border-radius:6px;border-bottom:0;color:var(--ink)}
+.nav details.dd .menu a:hover{background:var(--grid)}
+.nav details.dd .menu a.on{color:var(--accent);background:var(--grid)}
+.nav details.dd .menu .hint{display:block;font-size:11px;color:var(--muted);font-weight:400}
+.nav form.find{margin:0 0 0 6px;display:flex}
+.nav form.find input{width:110px;padding:5px 8px;font-size:12.5px;border:1px solid var(--line);
+border-radius:7px;background:var(--bg);color:var(--ink)}
+.nav form.find.in-menu{margin:2px 2px 6px}
+.nav form.find.in-menu input{width:100%;font-size:14px;padding:7px 9px}
+@media (max-width:700px){
+  .nav .brand,.nav form.find.inline,.nav .spacer{display:none}
+  .nav .inner{padding:0 6px;gap:0}
+  .nav a.top,.nav details.dd>summary{padding:11px 7px}
+  /* full width, just under the bar however tall it is: a page's session picker takes a
+     second row on a phone, and a menu pinned at 44px opened over it */
+  .nav details.dd{position:static}
+  .nav details.dd .menu{position:absolute;left:8px;right:8px;top:calc(100% + 4px);min-width:0}
+  .nav select{margin:0 0 7px 7px;max-width:calc(100% - 14px)}
+}
+/* nav:end */
+"""
 
 # ===========================================================================
 # Colour + type. ONE vocabulary.
@@ -63,19 +117,26 @@ h3{font-size:14px;margin:0 0 4px}
 .muted{color:var(--muted)}
 .note{color:var(--muted);font-size:11.5px;margin-top:10px;max-width:96ch}
 
-/* ---- nav: the same on every page ---- */
-.nav{position:sticky;top:0;z-index:50;background:var(--panel);
-border-bottom:1px solid var(--line);margin-bottom:18px}
-.nav .inner{max-width:1400px;margin:0 auto;padding:0 16px;display:flex;
-gap:2px;align-items:center;flex-wrap:wrap}
-.nav a{padding:11px 13px;font-size:13px;color:var(--muted);font-weight:500;
-border-bottom:2px solid transparent;white-space:nowrap}
-.nav a:hover{color:var(--ink);text-decoration:none}
-.nav a.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:600}
-.nav .brand{font-weight:700;color:var(--ink);padding:11px 14px 11px 0;
-font-size:13px;letter-spacing:.02em}
-.nav .spacer{margin-left:auto}
-.nav select{margin:0 0 0 8px}
+""" + NAV_CSS + """
+/* ---- info popover (2026-11-08): one small (i) instead of a paragraph of notes ---- */
+.info{display:inline-block;position:relative;vertical-align:middle;margin-left:4px}
+.info>summary{list-style:none;cursor:pointer;width:16px;height:16px;border-radius:50%;
+border:1px solid var(--line);font-size:10px;font-weight:700;text-align:center;line-height:14px;
+color:var(--muted);text-transform:none;letter-spacing:0}
+.info>summary::-webkit-details-marker{display:none}
+.info>summary:hover,.info[open]>summary{color:var(--accent);border-color:var(--accent)}
+.info .tip{position:absolute;z-index:45;top:21px;left:-8px;width:min(330px,82vw);
+background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:10px 12px;
+box-shadow:0 8px 24px rgba(0,0,0,.14);font-size:12px;line-height:1.5;color:var(--ink);
+font-weight:400;text-transform:none;letter-spacing:0;white-space:normal}
+/* ---- dashboard tiles and grids (Today page) ---- */
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.tile{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:10px 12px;min-width:0}
+.tile .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tile .v{font-size:19px;font-weight:650;margin-top:2px;white-space:nowrap}
+.tile .s{font-size:11.5px;color:var(--muted)}
+.cols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;align-items:start}
+.cols2>*{min-width:0}
 
 /* ---- controls ---- */
 input,select,button{font:12px inherit;padding:5px 9px;border:1px solid var(--line);
@@ -294,7 +355,8 @@ color:var(--muted);margin:8px 0 3px;font-weight:700}
 # hub and the dictionary now sits one directory deep, so they all pass depth=1
 # and `nav()` prefixes `../`.
 NAV = [
-    ("hub", "Status", "index.html"),
+    ("today", "Today", "index.html"),
+    ("hub", "Status", "system.html"),
     ("explore", "Explore", "explore/latest.html"),
     ("bounce", "Bounce", "bounce/latest.html"),
     ("zones", "Zones", "zones/latest.html"),
@@ -447,6 +509,13 @@ def pillar_of(metric: str) -> str | None:
 def chip(text: str, value=None, cls: str = "") -> str:
     inner = f"{esc(text)} <b>{esc(value)}</b>" if value is not None else esc(text)
     return f'<span class="chip {cls}">{inner}</span>'
+
+
+def info(text: str) -> str:
+    """A small (i) that opens a short explanation: the declutter rule of 2026-11-08 -- notes
+    live behind this, not as paragraphs on the page. `text` is HTML the caller escaped."""
+    return ('<details class="info"><summary title="what is this?">i</summary>'
+            f'<div class="tip">{text}</div></details>')
 
 
 def card(title: str | None, body: str) -> str:
@@ -940,16 +1009,212 @@ def th(text: str, metric: str | None = None, cls: str = "") -> str:
     return f"<th{c}{a}>{text}</th>"
 
 
+# The menu, grouped (2026-11-08: 15 flat items took a third of a phone screen). "today" is
+# the top-level home link; every other NAV key sits in exactly one group (ui.selftest).
+NAV_GROUPS = [
+    ("Lists", [("shortlist", "the best-tested daily list"), ("watchlist", "saved lists, tracked nightly"),
+               ("candidates", "names at a level, with scores"), ("floor", "retests after a big run"),
+               ("bounce", "the original bounce screen"), ("zones", "every support zone near price")]),
+    ("Research", [("explore", "every stock, every score"), ("sectors", "sector and sub-industry readings"),
+                  ("insider", "directors' and officers' buying"), ("house", "House members' trades"),
+                  ("sentiment", "news tone"), ("fundamental", "business quality")]),
+    ("Stocks", [("profiles", "every stock page")]),
+    ("System", [("hub", "jobs, data and runs"), ("metrics", "what every number means")]),
+]
+
+NAV_JS = r"""<script>
+(function(){
+  if (window.__scrNav) return; window.__scrNav = 1;
+  window.scrFind = function(f, up){
+    var t = (f.t.value || '').trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, '');
+    if (t) location.href = up + 'stock/index.html?t=' + encodeURIComponent(t);
+    return false;
+  };
+  // Menus and (i) notes: one open at a time, closed by a click elsewhere or Escape.
+  var OPEN = '.nav details.dd[open], details.info[open]';
+  function closeAll(except){
+    document.querySelectorAll(OPEN).forEach(function(d){ if (d !== except) d.removeAttribute('open'); });
+  }
+  // An (i) near the right edge would push its note past the screen (measured: up to 65px
+  // at 375px wide) and the page would scroll sideways. Shift it back inside, 8px clear.
+  function fitTip(d){
+    var tip = d.querySelector('.tip'); if (!tip) return;
+    tip.style.left = '';
+    var r = tip.getBoundingClientRect(), vw = document.documentElement.clientWidth, pad = 8, shift = 0;
+    if (r.right > vw - pad) shift = (vw - pad) - r.right;
+    if (r.left + shift < pad) shift = pad - r.left;
+    if (shift) tip.style.left = ((parseFloat(getComputedStyle(tip).left) || 0) + shift) + 'px';
+  }
+  document.addEventListener('click', function(e){
+    document.querySelectorAll(OPEN).forEach(function(d){ if (!d.contains(e.target)) d.removeAttribute('open'); });
+  });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeAll(null); });
+  // Tables drawn by script link every row to stock/<T>.html, but only ~120 of ~3,500 names
+  // have a page. The local server builds a missing one on request; opened as a FILE the link
+  // is dead. So over file:// a stock link goes through the stock list, which opens the page
+  // when it exists and otherwise offers it to build. Rewritten at click time (left, middle,
+  // ctrl-click alike), so a page that exists costs one quick hop.
+  function viaList(e){
+    if (location.protocol !== 'file:' || !e.target || !e.target.closest) return;
+    var a = e.target.closest('a[href]'); if (!a) return;
+    var m = (a.getAttribute('href') || '').match(/^((?:\.\.\/)*)stock\/([A-Za-z0-9.\-]+)\.html$/);
+    if (m && m[2] !== 'index') a.setAttribute('href', m[1] + 'stock/index.html?t=' + encodeURIComponent(m[2]));
+  }
+  document.addEventListener('click', viaList, true);
+  document.addEventListener('auxclick', viaList, true);
+  document.addEventListener('toggle', function(e){
+    var d = e.target; if (!d.matches || !d.open) return;
+    if (d.matches('.nav details.dd') || d.matches('details.info')) closeAll(d);
+    if (d.matches('details.info')) fitTip(d);
+  }, true);
+})();
+</script>"""
+
+
 def nav(active: str = "", depth: int = 0, extra: str = "") -> str:
     """The header. `depth` is how many directories deep the page sits, so
-    `reports/stock/AAPL.html` passes depth=1 and gets `../index.html`."""
+    `reports/stock/AAPL.html` passes depth=1 and gets `../index.html`.
+    Today, four groups (native <details> dropdowns) and a ticker box."""
     up = "../" * depth
-    items = "".join(
-        f'<a class="{"on" if key == active else ""}" href="{up}{href}">{text}</a>'
-        for key, text, href in NAV)
-    tail = f'<span class="spacer"></span>{extra}' if extra else ""
-    return (f'<div class="nav"><div class="inner">'
-            f'<span class="brand">SCREENER</span>{items}{tail}</div></div>')
+    href = {k: h for k, _t, h in NAV}
+    text = {k: t for k, t, _h in NAV}
+    parts = [f'<a class="brand" href="{up}index.html">SCREENER</a>',
+             f'<a class="top{" on" if active == "today" else ""}" href="{up}index.html">Today</a>']
+    def find(cls: str) -> str:
+        return (f'<form class="{cls}" onsubmit="return scrFind(this,\'' + up + '\')">'
+                '<input name="t" placeholder="Ticker" aria-label="Open a stock page" '
+                'autocomplete="off" spellcheck="false"></form>')
+    for group, items in NAV_GROUPS:
+        on = any(k == active for k, _h in items)
+        links = "".join(f'<a class="{"on" if k == active else ""}" href="{up}{href[k]}">{text[k]}'
+                        f'<span class="hint">{esc(hint)}</span></a>' for k, hint in items)
+        # The Stocks menu carries the ticker box too: on a phone the inline box is hidden so
+        # the whole menu stays on one line (measured: it wrapped to 70px at 375px wide).
+        if group == "Stocks":
+            links = find("find in-menu") + links
+        parts.append(f'<details class="dd{" on" if on else ""}"><summary>{group}</summary>'
+                     f'<div class="menu">{links}</div></details>')
+    parts.append(find("find inline"))
+    tail = f'<span class="spacer"></span>{EXTRA_START}{extra}{EXTRA_END}' if extra else ""
+    return (f'{NAV_START}<div class="nav"><div class="inner">{"".join(parts)}{tail}</div></div>'
+            f'{NAV_JS}{NAV_END}')
+
+
+# ---------------------------------------------------------------- menus on pages already written
+# A page is a static file: a menu change reaches only the pages built after it. 412 pages were
+# on disk on 2026-11-08, most of them dated snapshots that are never rebuilt, and their
+# "Status" link pointed at index.html -- which became Today that day. `refresh_nav()` swaps in
+# the current menu (and its styles) on every page, keeping each page's own session picker and
+# highlighted entry. The markers make it exact; pages from before the markers are recognised by
+# the old menu's one fixed shape. Unchanged pages are not rewritten, so running it again is cheap.
+NAV_START, NAV_END = "<!--nav:start-->", "<!--nav:end-->"
+EXTRA_START, EXTRA_END = "<!--nav:extra-->", "<!--nav:/extra-->"
+_CSS_START, _CSS_END = "/* nav:start */", "/* nav:end */"
+_OLD_NAV = re.compile(r'<div class="nav"><div class="inner">(.*?)</div></div>', re.S)
+_ON = re.compile(r'<a class="(?:[^"]*\s)?on(?:\s[^"]*)?" href="([^"]*)"')
+# Links in page BODIES that meant the job table, the home page until 2026-11-08.
+_HUB_LINKS = (('href="../index.html">status hub</a>', 'href="../system.html">Status</a>'),
+              ('href="index.html">status hub</a>', 'href="system.html">Status</a>'))
+
+
+def built_profiles() -> set[str]:
+    """Tickers with a stock page on disk now. Read fresh: the profiles step adds pages mid-run."""
+    import config
+    d = config.REPORTS / "stock"
+    return {p.stem for p in d.glob("*.html") if p.stem != "index"} if d.exists() else set()
+
+
+def stock_href(ticker: str, depth: int = 0, built: set[str] | None = None) -> str:
+    """Where a ticker link should point: its page when one is built, else the stock list with the
+    ticker filled in (which opens the page if it appears later, and offers to build it). Only
+    ~120 of ~3,500 names have a page, and on 2026-11-08 336 links on the watchlist pages led
+    to files that did not exist."""
+    t = str(ticker)
+    built = built_profiles() if built is None else built
+    up = "../" * depth
+    return f"{up}stock/{esc(t)}.html" if t in built else f"{up}stock/index.html?t={esc(t)}"
+
+
+def _menu_of(html: str) -> tuple[int, int, str, str] | None:
+    """(start, end, highlighted href, session picker) of a page's menu; None if it has none."""
+    i = html.find(NAV_START)
+    if i >= 0:
+        j = html.find(NAV_END, i)
+        if j < 0:
+            return None
+        end = j + len(NAV_END)
+        block = html[i:end]
+        a, b = block.find(EXTRA_START), block.find(EXTRA_END)
+        extra = block[a + len(EXTRA_START):b] if 0 <= a < b else ""
+    else:
+        m = _OLD_NAV.search(html)
+        if not m or "<div" in m.group(1):          # not the old menu's shape: leave the page alone
+            return None
+        i, end, block = m.start(), m.end(), m.group(1)
+        k = block.find('<span class="spacer"></span>')
+        extra = block[k + len('<span class="spacer"></span>'):] if k >= 0 else ""
+    on = _ON.search(html, i, end)
+    return i, end, (on.group(1) if on else ""), extra
+
+
+def _active_key(href: str, depth: int) -> str:
+    up = "../" * depth
+    rel = href[len(up):] if up and href.startswith(up) else href
+    return next((k for k, _t, h in NAV if h == rel), "")
+
+
+def refresh_nav(root=None, verbose: bool = True) -> dict:
+    """Bring every page under `root` (default reports/) to the current menu. Returns counts."""
+    from pathlib import Path
+    if root is None:
+        import config
+        root = config.REPORTS
+    root = Path(root)
+    import os
+    out = {"pages": 0, "updated": 0, "no_menu": [], "busy": []}
+    for f in sorted(root.rglob("*.html")):
+        out["pages"] += 1
+        try:
+            seen = f.stat().st_mtime_ns
+            old = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            out["busy"].append(str(f.relative_to(root)))
+            continue
+        new = old
+        depth = len(f.relative_to(root).parts) - 1
+        got = _menu_of(new)
+        if got:
+            i, end, on, extra = got
+            new = new[:i] + nav(_active_key(on, depth), depth, extra) + new[end:]
+            a, b = new.find(_CSS_START), new.find(_CSS_END)
+            if 0 <= a < b:
+                new = new[:a] + NAV_CSS.rstrip("\n") + new[b + len(_CSS_END):]
+            elif "</head>" in new:
+                k = new.index("</head>")
+                new = new[:k] + f"<style>{NAV_CSS}</style>" + new[k:]
+        else:
+            out["no_menu"].append(str(f.relative_to(root)))
+        for a, b in _HUB_LINKS:
+            new = new.replace(a, b)
+        if new != old:
+            # Atomic, and only if nothing rewrote the page meanwhile: the local server builds
+            # stock pages on request, and a fresh page must never be overwritten by its old copy.
+            tmp = f.with_name(f".{f.name}.renav")
+            tmp.write_text(new, encoding="utf-8")
+            try:
+                if f.stat().st_mtime_ns != seen:
+                    out["busy"].append(str(f.relative_to(root)))
+                    continue
+                os.replace(tmp, f)
+                out["updated"] += 1
+            finally:
+                if tmp.exists():
+                    tmp.unlink()
+    if verbose:
+        print(f"  menus: {out['updated']} of {out['pages']} page(s) updated"
+              + (f"; no menu on {len(out['no_menu'])}: {', '.join(out['no_menu'][:5])}" if out["no_menu"] else "")
+              + (f"; skipped {len(out['busy'])} being rewritten" if out["busy"] else ""))
+    return out
 
 
 # Injected into every page. Gives each `.scroll.sticky-x` container a mirrored
@@ -1213,6 +1478,30 @@ def selftest(verbose: bool = True) -> None:
     assert "2026-08-04 &middot; live" in sp2 or "2026-08-04 · live" in sp2, sp2
     assert "file:" in sp2, "no file:// fallback in the picker"
 
+    # --- MENU REFRESH on pages already written ------------------------------
+    import tempfile
+    from pathlib import Path as _P
+    with tempfile.TemporaryDirectory() as td:
+        root = _P(td)
+        (root / "stock").mkdir()
+        picker = '<select id="sess"><option value="X.html">2026-11-06</option></select>'
+        old_nav = ('<div class="nav"><div class="inner"><span class="brand">SCREENER</span>'
+                   '<a class="" href="../index.html">Status</a><a class="on" href="../stock/index.html">'
+                   'Profiles</a><span class="spacer"></span>' + picker + '</div></div>')
+        (root / "stock" / "X.html").write_text(
+            '<html><head><style>.nav{}</style></head><body>' + old_nav + '<div class="wrap">'
+            '<a href="../index.html">status hub</a></div></body></html>', encoding="utf-8")
+        (root / "m.html").write_text(page("M", "<p>x</p>", active="metrics"), encoding="utf-8")
+        (root / "plain.html").write_text("<html><body>no menu</body></html>", encoding="utf-8")
+        r1 = refresh_nav(root, verbose=False)
+        x = (root / "stock" / "X.html").read_text(encoding="utf-8")
+        assert r1["updated"] == 1 and r1["no_menu"] == ["plain.html"], r1      # m.html already current
+        assert x.count(NAV_START) == 1 and x.count(_CSS_START) == 1 and "Profiles" in x, x[:300]
+        assert EXTRA_START + picker + EXTRA_END in x, "the session picker was lost"
+        assert 'class="dd on"><summary>Stocks' in x, "the highlighted entry was lost"
+        assert 'href="../system.html">Status</a>' in x and "status hub" not in x
+        assert refresh_nav(root, verbose=False)["updated"] == 0, "a second run rewrote pages"
+
     # --- CSS COLLISION GUARD ------------------------------------------------
     # `.bar` was defined here for percentile bars AND in explore.py for the
     # filter row. explore's rule set `display` but not `height`, so the shared
@@ -1220,7 +1509,7 @@ def selftest(verbose: bool = True) -> None:
     # Nothing errored; the controls simply vanished. Any generic class name
     # added to ui.CSS will do this again, so it is asserted rather than trusted.
     shared = _class_names(CSS)
-    for mod_name in ("explore", "dashboard", "stock_profile"):
+    for mod_name in ("explore", "dashboard", "stock_profile", "today_page"):
         try:
             mod = __import__(mod_name)
         except Exception:                                        # noqa: BLE001
@@ -1243,5 +1532,8 @@ def selftest(verbose: bool = True) -> None:
 
 
 if __name__ == "__main__":
-    selftest()
+    if "--renav" in sys.argv:          # bring every page in reports/ to the current menu
+        refresh_nav()
+    else:
+        selftest()
     sys.exit(0)

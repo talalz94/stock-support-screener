@@ -881,6 +881,15 @@ def _step_profiles(asof: str) -> tuple[int, str]:
     if not f.exists():
         return 0, "no flags file for this session"
     tk = list(dict.fromkeys(pd.read_parquet(f)["ticker"].astype(str)))
+    # ...plus the shortlist's names, which runs earlier for this reason (2026-11-09). Pages
+    # built only for the shortlist are dropped 20 sessions after the name leaves it -- see
+    # stock_profile.listed_pages -- BEFORE the on-disk scan below, so they are not rebuilt.
+    listed, removed, listed_err = [], [], ""
+    try:
+        listed, removed = stock_profile.listed_pages(asof, tk)
+        tk = list(dict.fromkeys(tk + listed))
+    except Exception as exc:                                     # noqa: BLE001
+        listed_err = f"; shortlist names unavailable ({type(exc).__name__})"
     # ...PLUS every page already on disk.
     #
     # Only today's flags were rebuilt, so a page written on a day its ticker
@@ -950,6 +959,11 @@ def _step_profiles(asof: str) -> tuple[int, str]:
     except Exception:                                        # noqa: BLE001
         pass
     detail = f"{ok} of {len(tk)} profile page(s)"
+    if listed:
+        detail += f", {len(listed)} for the shortlist"
+    if removed:
+        detail += f"; removed {len(removed)} off the shortlist 20+ sessions: {', '.join(removed[:6])}"
+    detail += listed_err
     if failed:
         detail += f"; FAILED: {', '.join(failed[:8])}"
         if len(failed) > 8:
@@ -1657,8 +1671,21 @@ def _step_dashboard(asof: str) -> tuple[int, str]:
     on the page it just built -- which is honest, not a bug.
     """
     import dashboard
+    import today_page
+    import ui
     p = dashboard.build(verbose=False)
-    return len(REGISTRY), f"{p.name} rebuilt"
+    t = today_page.build(verbose=False)
+    # Every page already written gets the current menu: most are dated snapshots no step
+    # rebuilds. Unchanged pages are not rewritten (measured: ~4s for 412 pages). A failure here
+    # is NAMED in the detail but does not fail the step: Today and Status are already written.
+    try:
+        r = ui.refresh_nav(verbose=False)
+        menus = f"menu refreshed on {r['updated']} of {r['pages']} page(s)"
+        if r["busy"]:
+            menus += f", {len(r['busy'])} skipped mid-rewrite"
+    except Exception as exc:                                     # noqa: BLE001
+        menus = f"MENU REFRESH FAILED: {exc!r}"[:160]
+    return len(REGISTRY), f"{p.name} and {t.name} rebuilt; {menus}"
 
 
 # --------------------------------------------------------------- the registry
@@ -1817,6 +1844,19 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("bars", "fundamental"), timeout=1800,
          desc="sector score (validated out of sample) + sub-industry and seasonal "
               "context, and the Sectors page"),
+    # Right after `sectors`, BEFORE explore and profiles (moved 2026-11-09): Explore's support,
+    # trade-plan and strength columns come from "the newest shortlist build on or before the
+    # session", so with the shortlist after explore every night's Explore showed the PREVIOUS
+    # session's buy limits, targets and stops as current. The narrative's checked view feeds
+    # the same columns.
+    Step("narrative", _step_narrative, config.CADENCE_DAILY,
+         depends_on=("sectors",), timeout=600,
+         desc="inputs per sector and sub-industry for the weekly AI narrative task, and the "
+              "check of its answers (no weight anywhere until judged forward)"),
+    Step("shortlist", _step_shortlist, config.CADENCE_DAILY,
+         depends_on=("zones", "fundamental", "combo", "sectors"), timeout=900,
+         desc="the daily shortlist: every ranking of the names at support, the trade plan, "
+              "and the forward ledger of how each ranking has done"),
     # SESSION-INDEXED, because it RENDERS A SESSION.
     #
     # It was date-indexed, and on 2026-08-14 that meant: the night run built
@@ -1858,20 +1898,12 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("bars",), timeout=600,
          desc="re-measure tracked watchlists from their entry date against the "
               "liquid market, and the Watchlists page"),
-    Step("narrative", _step_narrative, config.CADENCE_DAILY,
-         depends_on=("sectors",), timeout=600,
-         desc="inputs per sector and sub-industry for the weekly AI narrative task, and the "
-              "check of its answers (no weight anywhere until judged forward)"),
-    Step("shortlist", _step_shortlist, config.CADENCE_DAILY,
-         depends_on=("zones", "fundamental", "combo", "sectors"), timeout=900,
-         desc="the daily shortlist: every ranking of the names at support, the trade plan, "
-              "and the forward ledger of how each ranking has done"),
     Step("retention", _step_retention, config.CADENCE_DAILY, timeout=300,
          session_indexed=False, desc="age-based pruning of rejects, 1h, reports"),
     # Session-indexed too: it summarises the newest session, so a new session
     # must refresh it. It costs 0.5s, so there is no reason to be frugal here.
     Step("dashboard", _step_dashboard, config.CADENCE_DAILY, timeout=120,
-         desc="rebuild reports/index.html from the job table"),
+         desc="rebuild Today (reports/index.html) and Status (reports/system.html)"),
     Step("docs", _step_docs, config.CADENCE_DAILY, timeout=300,
          session_indexed=False,
          desc="regenerate measured cost/storage tables in the handover docs"),

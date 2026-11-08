@@ -336,6 +336,18 @@ background:var(--panel);z-index:1}
 .na{color:var(--muted)}
 .sorted{color:var(--accent)}
 .tv{font-size:11px;color:var(--muted);margin-left:5px}
+/* Phones (2026-11-09). Measured at 375px: the 190px rail beside the table left the TABLE 139px
+   wide, a filter rule (metric, test, value, remove) ran 369px and scrolled the page sideways, and
+   the sticky filter bar held 200px of an 812px screen. */
+@media (max-width:700px){
+  .layout{flex-direction:column;align-items:stretch}
+  .rail{width:auto;position:static;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .rail h3,.rail .note{grid-column:1/-1}
+  .rail button{margin-bottom:0}
+  .filters{position:static}
+  .filters .rule{flex-wrap:wrap;max-width:100%}
+  .filters .rule select{max-width:160px}
+}
 """
 
 

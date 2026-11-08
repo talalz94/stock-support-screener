@@ -100,10 +100,11 @@ def render_list(name: str, cfg: dict, S: dict) -> str:
               'the level, no low more than 10% under it yet; failed = a low more than 10% under '
               'the level since entry (final).</p>')
     rows = []
+    built = ui.built_profiles()
     for r in T.itertuples():
         st = str(r.status)
         rows.append(
-            f'<tr><td><a href="../stock/{ui.esc(r.ticker)}.html">{ui.esc(r.ticker)}</a></td>'
+            f'<tr><td><a href="{ui.stock_href(r.ticker, 1, built)}">{ui.esc(r.ticker)}</a></td>'
             f'<td>{ui.esc(getattr(r, "sector", "") if isinstance(getattr(r, "sector", ""), str) else "")}</td>'
             f'<td class="n">{_num(r.entry_close)}</td><td class="n">{_num(r.level)}</td>'
             f'<td class="n">{_num(r.latest_close)}</td><td class="n">{_pct(r.since_pct)}</td>'

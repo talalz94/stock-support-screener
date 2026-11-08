@@ -55,7 +55,8 @@ backtest just quietly improves.
 | `scores/hype.py` | attention + narrative premium (module 3) | via `orchestrator --step hype` |
 | **`factor_lab.py`** | **any metric → forward returns** | `--module M --leaderboard` |
 | **`orchestrator.py`** | **the one scheduled entry point** | `--status`, `--dry-run`, `--step N` |
-| **`dashboard.py`** | **master hub, `reports/index.html`** | `--open`, `--print` |
+| **`dashboard.py`** | **master hub, `reports/system.html`** (Status) | `--open`, `--print` |
+| **`today_page.py`** | **Today, `reports/index.html`** (the home page) | `--open` |
 | **`stock_profile.py`** | **per-stock sheet: radar + financials** | `AAPL PLTR --open`, `--flags` |
 | `settings.py` | what the profile view shows | `--show`, `--enable X`, `--order` |
 | `serve.py` | opt-in local server; makes hub buttons live | `--open`, `--port` |
@@ -119,7 +120,8 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 
 | file | written by | what it is |
 |---|---|---|
-| `reports/index.html` | **`dashboard.py`** | **the hub** — job status, stores, run history, links |
+| `reports/index.html` | **`today_page.py`** | **Today**, the home page — market, shortlist top 5, watchlists, this week |
+| `reports/system.html` | **`dashboard.py`** | **Status** — job status, stores, run history, links |
 | `reports/metrics.html` | `metrics_doc.py` | the metric dictionary |
 | `reports/explore/latest.html` | `explore.py` | every stock x every score |
 | `reports/bounce/latest.html` | `report.build()` | newest bounce report |
@@ -139,8 +141,10 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 Before this there were 74 files in one flat directory under four naming
 conventions — `explore_<date>` lowercase beside `Pattern_<date>`,
 `Sentiment_<date>` and `Fundamental_<date>` capitalised, plus three spellings of
-"latest". `index.html` is the hub because that is what a browser opens when
-pointed at `reports/`.
+"latest". `index.html` is the home page because that is what a browser opens when
+pointed at `reports/`: the hub until 2026-11-08, Today since (the hub is `system.html`).
+Every page carries the same menu; `python ui.py --renav` (also run nightly by `dashboard`)
+brings pages already written up to the current one.
 
 **Moving a page does not move its hrefs.** The reorganisation left 223 dead
 links in already-rendered HTML, and two of them lived where a `.py` grep could

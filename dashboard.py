@@ -1,5 +1,5 @@
 """
-The master status page: `reports/index.html`.
+The master status page: `reports/system.html` (the menu calls it Status).
 
     python dashboard.py            rebuild the hub
     python dashboard.py --open     rebuild and open it in a browser
@@ -7,7 +7,8 @@ The master status page: `reports/index.html`.
 
 What it is: one page that answers "did the job run, what did each step do, and
 what broke". It links the three analysis dashboards (bounce, sentiment,
-fundamental) and is what a browser lands on when pointed at `reports/`.
+fundamental). Until 2026-11-08 it was `reports/index.html`, the page a browser lands on;
+that is now Today (today_page.py), and this page is one click away under System.
 
 THREE CONSTRAINTS, each deliberate:
 
@@ -52,7 +53,7 @@ import orchestrator                                              # noqa: E402
 import ui                                                        # noqa: E402
 
 HISTORY_RUNS = 30          # most recent runs shown; keeps the page bounded
-HUB_FILE = config.REPORTS / "index.html"
+HUB_FILE = config.REPORTS / "system.html"
 
 # The three analysis dashboards this hub links. `label, file, what it is`.
 DASHBOARDS = [
@@ -280,8 +281,10 @@ button.run{font:11px/1 inherit;padding:4px 9px;margin-right:8px;
 border-color:var(--accent);background:var(--accent);color:#fff;font-weight:600}
 button.run:hover{opacity:.88;color:#fff}
 button.run:disabled{opacity:.55;cursor:default}
-details{margin-top:6px}
-summary{cursor:pointer;color:var(--neg);font-size:12px;font-weight:600}
+/* Scoped to the step table: bare `details`/`summary` rules also restyled the menu's
+   dropdowns (2026-11-09: the bar was 6px taller on this page than on every other). */
+td details{margin-top:6px}
+td summary{cursor:pointer;color:var(--neg);font-size:12px;font-weight:600}
 pre{background:var(--skipbg);border:1px solid var(--line);border-radius:6px;
 padding:10px;overflow-x:auto;font-size:11.5px;margin:8px 0 0;max-height:340px}
 """
