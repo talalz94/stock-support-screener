@@ -59,10 +59,14 @@ backtest just quietly improves.
 | **`stock_profile.py`** | **per-stock sheet: radar + financials** | `AAPL PLTR --open`, `--flags` |
 | `settings.py` | what the profile view shows | `--show`, `--enable X`, `--order` |
 | `serve.py` | opt-in local server; makes hub buttons live | `--open`, `--port` |
+| `shortlist.py` | the daily shortlist: every ranking of `shortlist_recipes.json`, the tested trade plan, the forward ledger, Explore's support / plan / strength columns (the `shortlist` step) | `--build [DATE]`, `--backtest` |
+| `narrative.py` | the weekly AI narrative's inputs and the strict check of its answers (the `narrative` step; the Claude-app task `narrative-weekly` writes the answers) | `--inputs`, `--ingest`, `--prompt`, `--selftest` |
+| `industry_map.py` | Finnhub industry labels laid over the SIC sector map on every read | `--fetch`, `--compare`, `--apply` |
+| `trade_rules_study.py` / `rs_study.py` / `metric_evidence.py` | the 2026-11-08 studies: 180 bounce-trade rules (daily + 30-minute), relative strength, every metric's evidence | see each docstring |
 
 ### orchestrator owns the schedule
 
-Thirty-three registry steps in fixed execution order (`python orchestrator.py
+Thirty-seven registry steps (2026-11-08) in fixed execution order (`python orchestrator.py
 --dry-run` prints it), replacing three independent schedules. Each writes a row to `data/_jobs.parquet`
 (`run_id | step | cadence | watermark | started | ended | duration_s | status |
 rows | detail | error | traceback`), which is the only thing the master
@@ -125,6 +129,12 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 | `reports/stock/<TICKER>.html` | `stock_profile.py` | per-stock sheet |
 | `reports/insider/latest.html` | `insider_page.py` | insider purchases, each filter's measured result beside it |
 | `reports/insider/house.html` | `insider_page.py` | House members' trades (local only: 5 U.S.C. 13107(c)) |
+| `reports/zones/latest.html` | `zones_page.py` | every support zone near price |
+| `reports/zones/candidates.html` | `candidates_page.py` | names at a level, with combo, warnings and earnings |
+| `reports/zones/floor.html` | `floor_page.py` | floor retests after a big run |
+| `reports/sectors/latest.html` | `sectors_page.py` | sector and sub-industry readings, the validated sector score |
+| `reports/watchlist/index.html` | `watchlist_page.py` | saved lists re-measured nightly |
+| `reports/shortlist/latest.html` | `shortlist.py` | the daily shortlist: every ranking, the trade plan, each ranking's forward record |
 
 Before this there were 74 files in one flat directory under four naming
 conventions — `explore_<date>` lowercase beside `Pattern_<date>`,
@@ -542,12 +552,42 @@ trades) and the "insider buying at support" badge on Candidates, Floor retest an
 level -- each part measured, the combination NOT). Numbers live in `NEXT_SESSION.md`
 and are rendered on the pages from the result files.
 
+## Module 8: shortlist, narrative and the sector map (added 2026-11-08)
+
+**The bounce trade, measured** (`trade_rules_study.py`). 180 rules on 175,937 at-support
+name-dates (217 dates, 2018-2026), chosen on 2018-21 and judged on 2022-26 with 0.10% costs:
+3 daily entries x 36 exits, plus 30-minute entries (the store's own bars, fetched for the
+entry and fill days). Buying at the next open earns ~0. A buy limit at the level + 0.5% for
+3 sessions, +3% / -8%, 10 sessions, holds even when fills must trade 0.2% through the limit:
++0.36% a trade on 2022-26 (t 2.42), positive in 8 of 9 years. Market-trend filters did not
+help; relative strength (`rs_study.py`) predicted nothing; only 3 of 114 stored metrics
+passed `metric_evidence.py`'s both-halves rule (about chance), none strongly.
+
+**The shortlist** (`shortlist.py`, step `shortlist`). Every ranking in `shortlist_recipes.json`
+(the user edits the default, n and filters) over the liquid names at support, with the trade
+plan; each ranking's daily top 50 goes into `data/shortlist/ledger.parquet` and is scored
+when its 13 sessions pass, so the rankings keep competing on unseen data. The default,
+fund_score, tested best (+0.22pp a trade over every at-support name, t 2.21).
+
+**The narrative** (`narrative.py`, step `narrative`, Claude-app task `narrative-weekly`). The
+step writes per-group inputs; the weekly task researches and writes a dated answer with the
+Write tool only; `ingest` rejects anything malformed. NO weight anywhere until judged forward
+against the sector score (an AI's view of the past knows the outcome).
+
+**The sector map** (`industry_map.py`). SIC ranges misplace whole industries (KLA in
+Healthcare, REITs in Financials, Lam in Industrials). Finnhub's industry label corrects 931
+names through `data/_sector_overrides.parquet`, laid over the SIC file by
+`macro.load_sector_map` and `sectors.groups` on every read -- a rebuild of the SIC file never
+undoes it. The sector score was re-checked on the corrected groups: its study's rule now
+picks breadth200 + fund (IC 0.082, t 2.51 out of sample), and `sector_score.COMPOSITE`
+follows the rule.
+
 ## Viewing and exploring
 
 | page | built by | what |
 |---|---|---|
-| `reports/explore.html` | `explore.py` | all tickers x all metrics, sortable + filterable |
-| `reports/stock/<T>.html` | `stock_profile.py` | radar, financials, ratio trends |
+| `reports/explore/latest.html` | `explore.py` | all tickers x all metrics, sortable + filterable; since 2026-11-08 also the support, trade-plan and relative-strength columns, each header ending with what `metric_evidence.py` measured |
+| `reports/stock/<T>.html` | `stock_profile.py` | radar, financials, ratio trends; since 2026-11-08 a `relative` block (the stock against SPY, its sector and its sub-industry, rebased a year ago) |
 
 `explore.py`: a missing metric **sorts last in both directions and is excluded by
 a numeric filter** — never treated as 0. Rows render on demand so sorting stays
