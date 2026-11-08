@@ -121,7 +121,13 @@ DIR = config.DATA / "shortlist"
 LEDGER = DIR / "ledger.parquet"
 OUTCOMES = DIR / "outcomes.parquet"
 PAGE = config.REPORTS / "shortlist"
-LIMIT_UP, LIMIT_DAYS, ATR_MULT, HOLD = 0.005, 3, 3.0, 10       # item 1's TRAIN-chosen rule
+LIMIT_UP, LIMIT_DAYS, HOLD = 0.005, 3, 10
+# Item 1's rule chosen on TRAIN dates once the 30-minute bars were in (2026-11-08): a buy limit at
+# the level + 0.5% for 3 sessions, target +3% and stop -8% from the fill, out after 10 sessions.
+# 2022-26 with fills that must trade 0.2% through the limit: +0.36% a trade (t 2.42), positive in
+# 8 of 9 years. +5% / -5% is the symmetric alternative (+0.38%, t 2.37).
+TGT, STP = 0.03, 0.08
+TGT_ALT, STP_ALT = 0.05, 0.05
 COST = 0.001
 
 
@@ -203,8 +209,10 @@ def candidates(asof: str) -> pd.DataFrame:
     D["atr_pct"] = (D.ticker.map(atr.atr.where(atr.n >= 15)) / D.price)
     D = D.join(_rs_for(C, V, asof, tk), on="ticker")
     D["limit"] = D.level * (1 + LIMIT_UP)
-    D["target"] = D.limit * (1 + ATR_MULT * D.atr_pct)
-    D["stop"] = D.limit * (1 - ATR_MULT * D.atr_pct)
+    D["target"] = D.limit * (1 + TGT)
+    D["stop"] = D.limit * (1 - STP)
+    D["target_alt"] = D.limit * (1 + TGT_ALT)
+    D["stop_alt"] = D.limit * (1 - STP_ALT)
     return D
 
 
@@ -273,11 +281,11 @@ def evaluate(verbose: bool = True) -> pd.DataFrame:
         a = u.atr_pct.to_numpy(dtype=float)
         out = {}
         e_px, e_row, start, gap_from, intra, ok0 = E["limit"]
-        tgt, stp = e_px * (1 + ATR_MULT * a), e_px * (1 - ATR_MULT * a)
-        ok = ok0 & np.isfinite(a) & (a > 0)
-        px, kk, hh = TR.simulate(P, start, gap_from, intra, e_row, tgt, stp, e_row + HOLD - 1, ok)
-        out["limit_ret"] = np.where(ok & np.isfinite(px), px / e_px - 1 - COST, np.nan)
-        out["limit_kind"] = np.where(ok, kk, 0)
+        for tag, tg, sp in (("limit", TGT, STP), ("limit55", TGT_ALT, STP_ALT)):
+            px, kk, hh = TR.simulate(P, start, gap_from, intra, e_row, e_px * (1 + tg), e_px * (1 - sp),
+                                     e_row + HOLD - 1, ok0)
+            out[f"{tag}_ret"] = np.where(ok0 & np.isfinite(px), px / e_px - 1 - COST, np.nan)
+            out[f"{tag}_kind"] = np.where(ok0, kk, 0)
         out["limit_filled"] = ok0
         e_px, e_row, start, gap_from, intra, ok0 = E["open"]
         px, kk, hh = TR.simulate(P, start, gap_from, intra, e_row, e_px * 1.05, e_px * 0.95, e_row + HOLD - 1, ok0)
@@ -297,8 +305,8 @@ def evaluate(verbose: bool = True) -> pd.DataFrame:
 COLS = [  # (key, header, kind) -- kind: t text, p price, pc percent (x100), n number, i int
     ("rank", "#", "i"), ("ticker", "Ticker", "t"), ("name", "Name", "t"), ("sector", "Sector", "t"),
     ("subind", "Sub-industry", "t"), ("price", "Price", "p"), ("level", "Level", "p"),
-    ("above_level_pct", "Above level %", "n"), ("limit", "Buy limit", "p"), ("target", "Target", "p"),
-    ("stop", "Stop", "p"), ("atr_pct", "ATR %", "pc"), ("fund", "Fund", "n"), ("combo_h60", "Combo 3m", "n"),
+    ("above_level_pct", "Above level %", "n"), ("limit", "Buy limit", "p"), ("target", "Target +3%", "p"),
+    ("stop", "Stop -8%", "p"), ("target_alt", "Alt target +5%", "p"), ("stop_alt", "Alt stop -5%", "p"), ("atr_pct", "ATR %", "pc"), ("fund", "Fund", "n"), ("combo_h60", "Combo 3m", "n"),
     ("combo_h20", "Combo 1m", "n"), ("gain_days", "Gainer days", "i"), ("rally_count", "Rallies", "i"),
     ("recovery_rate", "Dips won back", "pc"), ("rs_sec_63", "vs sector 3m", "pc"),
     ("rs_sub_63", "vs sub-ind 3m", "pc"), ("rs_mkt_63", "vs market 3m", "pc"), ("earn_sessions", "Earnings in (sessions)", "i"),
@@ -373,12 +381,15 @@ def _forward_table(cfg: dict) -> str:
                     f"<td class='n'>{x.limit_filled.mean() * 100:.0f}%</td>"
                     f"<td class='n'>{lim.mean() * 100:+.2f}%</td>"
                     f"<td class='n'>{(x.limit_kind == 1).sum() / max(len(lim), 1) * 100:.0f}% / {(x.limit_kind == -1).sum() / max(len(lim), 1) * 100:.0f}%</td>"
+                    f"<td class='n'>{x.limit55_ret.dropna().mean() * 100:+.2f}%</td>"
                     f"<td class='n'>{x.open_ret.dropna().mean() * 100:+.2f}%</td></tr>")
     return ("<table class='sl'><thead><tr><th>Ranking</th><th class='n'>Days</th><th class='n'>Entries</th>"
-            "<th class='n'>Limit filled</th><th class='n'>Limit rule, mean a trade</th><th class='n'>Target / stop hit</th>"
-            "<th class='n'>Open rule, mean a trade</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+            "<th class='n'>Limit filled</th><th class='n'>Limit +3/-8, mean a trade</th><th class='n'>Target / stop hit</th>"
+            "<th class='n'>Limit +5/-5</th><th class='n'>Open +5/-5</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
             "<p class='muted'>Net of 0.10% a round trip. Top "
-            f"{int(cfg['n'])} of each ranking per day; a day counts once its 13-session window has passed.</p>")
+            f"{int(cfg['n'])} of each ranking per day; a day counts once its 13-session window has passed. Scored on "
+            "daily bars (the fill day pessimistic: its stop counts, its target does not), so a little below the "
+            "30-minute backtest.</p>")
 
 
 def render(asof: str) -> Path:
@@ -422,10 +433,13 @@ def render(asof: str) -> Path:
                       f"<div class='scroll'><table class='sl'><thead><tr>{th}</tr></thead><tbody id='sl-body'></tbody></table></div>")
             + ui.card("How each ranking has done since tracking began", _forward_table(cfg))
             + ui.card("How to read this",
-                      "<p><b>Trade plan</b> (item 1's rule, chosen on 2018-21 dates): a buy limit at the level + 0.5%, live "
-                      "for 3 sessions; target and stop 3 x the 20-day ATR from the fill; out after 10 sessions. "
-                      "Measured on 2022-26: +0.44% a trade net of costs (t 1.37, not proven); with fills that must "
-                      "trade through the limit, about 0.13% less. Buying at the next open earned about nothing after costs.</p>"
+                      "<p><b>Trade plan</b> (item 1's rule, chosen on 2018-21 dates with 30-minute bars): a buy limit at "
+                      "the level + 0.5%, live for 3 sessions; target +3% and stop -8% from the fill; out after 10 "
+                      "sessions. Measured on 2022-26 with fills that must trade 0.2% through the limit and the fill day "
+                      "in 30-minute order: +0.36% a trade net of costs (t 2.42), positive in 8 of 9 years; about 54% of "
+                      "orders fill. The stop is wider than the target: it wins often and loses more when it loses. "
+                      "The alternative +5% / -5% did about the same (+0.38%, t 2.37). Buying at the next open earned "
+                      "about nothing after costs; buying an hour after the open made no difference.</p>"
                       "<p><b>Rankings</b>: the default is the one that tested best; every ranking is built and tracked "
                       "forward each night (data/shortlist/), so the others keep competing. Change the default, size and "
                       "filters in shortlist_recipes.json.</p>"

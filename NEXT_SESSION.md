@@ -197,7 +197,14 @@ chosen on early dates, tested on later ones, against the plain at-support rule.
 - **Q4, earnings inside the hold:** no difference on average (+0.10pp, t 0.81), but more stop-outs (40.6% vs 33.8%).
 - **Q5, dips won back among the hot:** nothing. **Q6, AT vs NEAR:** nothing.
 - **Hourly check:** 88 names, 4,201 days. An hour in, the price sat a median 1.6% from the open and was 0.5% lower on average.
-- **INTRADAY:** 30-minute bars are downloading (`--fetch-intraday`, 648 days, resumable); then `--build-intraday` and `--intraday`.
+- **INTRADAY (done 2026-11-08):**
+  - **Data:** 648 days of 30-minute regular-session bars. Highs and lows match the daily bars 100%; the 09:30 open matches within 0.2% on 96-100%.
+  - **Checks:** 400 random trades recomputed bar by bar: 400/400 identical for both entries.
+  - **I1, buying at 10:30 instead of the open:** no difference on the main exits (-0.03 / +0.10pp). The stop-under-the-level exit is worse at 10:30 (-0.21pp, t -3.1).
+  - **I2, the limit's fill day in 30-minute order:** +0.27 / +0.17pp a trade over the pessimistic daily rule, kept on 34 of 36 exits.
+  - **Best rule with intraday included (TRAIN pick):** limit +3% / -8%, 10 sessions. TEST +0.45% (t 3.06).
+  - **With fills that must trade 0.2% THROUGH the limit:** still KEPT. +3/-8: TRAIN +0.48% (halves +0.26 / +0.70), TEST +0.36% (t 2.42), positive in every year but 2018. +5/-5: TEST +0.38% (t 2.37).
+  - **The shortlist's trade plan is now limit +3/-8, with +5/-5 shown as the alternative.**
 
 **ITEM 2 -- `rs_study.py`: relative strength says NOTHING about the bounce.**
 - **Indexes:** leave-one-out equal-weight sector and sub-industry indexes (>= 8 other members) and SPY. A spot check of NVDA's rs_sec_63 against an independent recomputation matched to 5 decimals.
@@ -237,7 +244,7 @@ chosen on early dates, tested on later ones, against the plain at-support rule.
 1. `explore.py`: the new columns (level, buy limit, target, stop, ATR, gainer days, rallies, dips won back, RS vs sector / sub-industry / market, earnings, narrative), joined like `sector_score`, with each header's evidence from `_metric_evidence.json`.
 2. The vs-index / sector / sub-industry chart block on stock profiles (the user wants it for analysis).
 3. The sector map. When `industry_map.py --fetch` has finished (`data/_finnhub_industry.parquet`, resumable), write `--compare` / `--apply` (map finnhubIndustry to our sectors; review the disagreements), then re-check the sector score.
-4. Item 1 intraday. When `data/trade_rules_30m/` holds all 648 days (re-run `--fetch-intraday` to fill gaps), run `trade_rules_study.py --build-intraday` then `--intraday`.
+4. ~~Item 1 intraday~~ DONE 2026-11-08 (see ITEM 1 above).
 5. The user to set `narrative-weekly` to auto in the app.
 
 **FOUND, NOT FIXED (asked the user): the SIC sector map.**
