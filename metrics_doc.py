@@ -504,6 +504,16 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
                       "sector score."),
 }
 
+# The strategy columns Explore computes (strategies.py), named and explained from the strategy
+# itself so the two cannot drift. Their headers read "s growth" until 2026-11-09.
+try:
+    import strategies as _STRAT
+    STRATEGY_COLUMNS = {_st.column: "strategies.py via explore.build" for _st in _STRAT.STRATEGIES}
+    for _st in _STRAT.STRATEGIES:
+        EXTRA_LABELS.setdefault(_st.column, (f"{_st.title} strategy", f"{_st.doc} {_st.evidence}".strip()))
+except Exception:                                                # noqa: BLE001
+    STRATEGY_COLUMNS = {}
+
 # How the two comparison columns are computed. This is #14: they were unexplained
 # anywhere in the UI.
 COMPARISON_HELP = {
@@ -972,7 +982,8 @@ def selftest(verbose: bool = True) -> None:
               **{c: "shortlist.py via explore.collect" for c in (
                   "at_support", "above_level_pct", "buy_limit", "target", "stop", "atr_pct",
                   "gain_days", "loss_days", "rally_count", "recovery_rate", "rs_sec_63",
-                  "rs_sec_252", "rs_sub_63", "rs_mkt_63", "narrative_now")}}
+                  "rs_sec_252", "rs_sub_63", "rs_mkt_63", "narrative_now")},
+              **STRATEGY_COLUMNS}
     stale = sorted(k for k in EXTRA_LABELS if k not in live and k not in JOINED)
     assert not stale, (
         f"EXTRA_LABELS documents metric(s) no module emits: {stale}. "

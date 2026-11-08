@@ -176,6 +176,32 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-09 (evening) — EXPLORE GETS COLUMN VIEWS; ITS STRATEGY RAIL NEVER SORTED BY ITS STRATEGY
+
+**Asked:** "yes go ahead with the column presets for explore".
+
+**Views** (`explore.VIEWS`, a bar above the table; a dropdown on a phone):
+- Essentials (the default, 12 columns), Trade plan (12), Quality & value (14), Growth (10), Momentum (13), News & insiders (11), All (61), and Custom (the column chooser, now in the view bar).
+- **Only the drawn columns are rendered.** Essentials draws 1,680 cells for the first 120 rows against 7,560 for All. The old chooser restyled every cell of every drawn row after each draw.
+- **A column you sort or filter by is always shown**, underlined and counted ("13 of 61 columns (1 shown because sorted or filtered)").
+- **The choice lives in this browser** (`scr.prefs.explore`) and survives the nightly rebuild. The Settings page has a matching Explore card with the same setting.
+- **Carried over:** the old chooser's `explore.cols.v1` becomes Custom once, then the old key is removed.
+- **Plain labels:** the filter dropdown now uses the headers' labels instead of raw keys. The strategy columns read "Growth strategy" etc. (`metrics_doc` builds them from `strategies.py`; the drift guard lists them as joined columns).
+
+**BUG FIXED, present since the rail was built:**
+- **The cause:** each strategy button carried its column's index among the METRICS, but the sort reads ROW positions, and each row starts with 4 other fields.
+- **The effect:** "Growth" sorted the table by ticker, Z-A, and lit the Ticker header. Every strategy did the same.
+- **And:** the rail never recorded its sort, so a later search or filter dropped it.
+- **Now:** Growth ranks MU 97.9, BE 97.8, MGTX 97.3… strictly descending, and the order survives a search.
+- `explore.selftest` checks every built strategy button points at a metric column.
+
+**Checked in the browser (1280 and 375 px):**
+- Every view's cells line up with its headers. The chooser switches the view to Custom.
+- A filter on a hidden column shows that column, and every remaining row passes it.
+- A reload keeps the view and the filter, the Settings card drives Explore, and the old key carries over.
+- **Phone:** no sideways scroll; the column list opens within the screen. A long count text had pushed the page to 402 px; it now wraps.
+- **Site-wide:** the 5 dated snapshots were rebuilt too. The page audit is clean on 433 pages, the scripts compile, and the `ui`, `metrics_doc`, `settings_page` and `explore` self-tests pass.
+
 ## State at 2026-11-09 (later) — STOCK PAGES IN TABS, AND A SETTINGS PAGE
 
 **Asked:** "yes go ahead with the stock page tabs", then "also there is a config page that is professional that can be used to tweak settings/configs, please be neat and elegant and consistent and bug free".

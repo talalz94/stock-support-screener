@@ -61,7 +61,21 @@ def state() -> dict:
         "shortlist_meta": SL.ui_meta(),
         "today_cards": [{"key": k, "label": label, "hint": hint} for k, label, hint in TODAY_CARDS],
         "stock_pages": len(ui.built_profiles()),
+        "explore_views": _explore_views(),
     }
+
+
+def _explore_views() -> dict:
+    """Explore's column views (explore.VIEWS) for the Explore card; the page and this card
+    share one setting, `scr.prefs.explore.view`."""
+    try:
+        import explore
+        views = [{"key": k, "label": label, "hint": hint, "n": len(cols) if cols else None}
+                 for k, label, _s, hint, cols in explore.VIEWS]
+        return {"views": views + [{"key": "custom", "label": "Custom", "hint": "your own set of columns", "n": None}],
+                "default": explore.DEFAULT_VIEW}
+    except Exception:                                            # noqa: BLE001
+        return {"views": [], "default": ""}
 
 
 def _redraw_shortlist() -> str:
@@ -240,6 +254,19 @@ def body(st: dict) -> str:
         f'<ol class="set-list" id="todayList">{today_items}</ol>'
         + _foot("today", '<button type="button" id="todayReset">Restore defaults</button>') + '</section>')
 
+    ev = st["explore_views"]
+    ex_opts = "".join(f'<option value="{v["key"]}">{ui.esc(v["label"])}'
+                      f'{" (" + str(v["n"]) + " columns)" if v["n"] else ""}</option>' for v in ev["views"])
+    explore = (
+        '<section class="card set-sec" id="explore" aria-labelledby="h-explore">'
+        f'<div class="set-head"><h3 id="h-explore">Explore</h3>{_scope(False)}</div>'
+        '<p class="set-desc">Which columns the all-stocks table shows. Explore remembers the view you pick '
+        'there too: this is the same setting. A column you sort or filter by is always shown.</p>'
+        + _row("Columns shown", "Custom is the set you tick under Columns on Explore",
+               f'<select id="exView">{ex_opts}</select><p class="set-evidence" id="exHint"></p>')
+        + _foot("explore", '<button type="button" id="exForget">Forget my custom columns</button>')
+        + '</section>') if ev["views"] else ""
+
     stock = (
         '<section class="card set-sec" id="stock" aria-labelledby="h-stock">'
         f'<div class="set-head"><h3 id="h-stock">Stock pages</h3>{_scope(True)}</div>'
@@ -306,8 +333,9 @@ def body(st: dict) -> str:
         + '</section>')
 
     toc = ('<nav class="set-toc" aria-label="Settings sections">'
-           '<a href="#appearance">Appearance</a><a href="#today">Today page</a><a href="#stock">Stock pages</a>'
-           '<a href="#shortlist">Shortlist</a><a href="#backup">Backup</a></nav>')
+           '<a href="#appearance">Appearance</a><a href="#today">Today page</a>'
+           + ('<a href="#explore">Explore</a>' if explore else '') +
+           '<a href="#stock">Stock pages</a><a href="#shortlist">Shortlist</a><a href="#backup">Backup</a></nav>')
     file_note = ('<div class="banner warn" id="set-file"><b>Opened as a file, so the project settings are '
                  'read-only.</b> Appearance and Today work here. To change the stock pages and the shortlist, '
                  'start the local server and open Settings from there:'
@@ -316,7 +344,7 @@ def body(st: dict) -> str:
     data = json.dumps(st, separators=(",", ":")).replace("<", "\\u003c")
     return (f'<p class="set-intro">Choices for how the pages look and what they show. Each section says '
             f'where it is kept.</p>{file_note}'
-            f'<div class="set-layout">{toc}<div class="set-main">{appearance}{today}{stock}{shortlist}{backup}'
+            f'<div class="set-layout">{toc}<div class="set-main">{appearance}{today}{explore}{stock}{shortlist}{backup}'
             f'</div></div><script type="application/json" id="set-state">{data}</script>')
 
 
@@ -404,6 +432,32 @@ JS = r"""
   $('#todayReset').addEventListener('click', function(){
     var p = P.get(); delete p.today; P.set(p); paintToday(); status('today', 'Restored: every card, in the original order.', 'ok');
   });
+
+  // ---------------------------------------------------------------- Explore (this browser)
+  // The same setting Explore's own view bar writes: scr.prefs.explore = {view, custom}.
+  var EV = S.explore_views || {views: [], default: ''}, EXKEYS = EV.views.map(function(v){ return v.key; });
+  function exPrefs(){ var e = P.get().explore; return (e && typeof e === 'object' && !Array.isArray(e)) ? e : {}; }
+  function paintExplore(){
+    var sel = $('#exView'); if (!sel) return;
+    var e = exPrefs(), v = EXKEYS.indexOf(e.view) >= 0 ? e.view : EV.default;
+    sel.value = v;
+    var info = EV.views.filter(function(x){ return x.key === v; })[0];
+    var n = (v === 'custom' && Array.isArray(e.custom)) ? e.custom.length : (info && info.n);
+    $('#exHint').textContent = info ? info.hint.charAt(0).toUpperCase() + info.hint.slice(1) + (n ? ' (' + n + ' columns).' : '.') : '';
+    $('#exForget').disabled = !Array.isArray(e.custom);
+  }
+  if ($('#exView')) {
+    $('#exView').addEventListener('change', function(){
+      var p = P.get(), e = exPrefs(); e.view = this.value; p.explore = e;
+      var ok = P.set(p); paintExplore();
+      status('explore', ok ? 'Saved. Explore opens with these columns.' : 'This browser does not keep preferences.', ok ? 'ok' : 'err');
+    });
+    $('#exForget').addEventListener('click', function(){
+      var p = P.get(), e = exPrefs(); delete e.custom; if (e.view === 'custom') e.view = EV.default; p.explore = e;
+      P.set(p); paintExplore(); status('explore', 'Your custom columns are forgotten.', 'ok');
+    });
+  }
+  window.addEventListener('storage', function(ev){ if (ev.key === 'scr.prefs') { paintTheme(); paintToday(); paintExplore(); } });
 
   // ---------------------------------------------------------------- Stock pages (project file)
   var secList = $('#secList'), saved = {stock: S.stock, shortlist: S.shortlist};
@@ -550,6 +604,12 @@ JS = r"""
       if (t.hidden.length >= CARD_KEYS.length) t.hidden = [];
       out.today = t;
     }
+    if (p && p.explore && typeof p.explore === 'object') {
+      var x = {};
+      if (EXKEYS.indexOf(p.explore.view) >= 0) x.view = p.explore.view;
+      if (Array.isArray(p.explore.custom)) x.custom = p.explore.custom.filter(function(k){ return typeof k === 'string' && /^[a-z0-9_]{1,40}$/.test(k); });
+      out.explore = x;
+    }
     return out;
   }
   $('#bkExport').addEventListener('click', function(){
@@ -568,7 +628,7 @@ JS = r"""
       var doc; try { doc = JSON.parse(rd.result); } catch (e) { status('backup', 'Not a settings file: it is not valid JSON.', 'err'); return; }
       if (!doc || typeof doc !== 'object' || !('browser' in doc || 'stock' in doc || 'shortlist' in doc)) { status('backup', 'Not a settings file from this page.', 'err'); return; }
       var done = [];
-      if (doc.browser) { P.set(sanitizePrefs(doc.browser)); P.applyTheme(P.get().theme); paintTheme(); paintToday(); done.push('this browser’s choices applied'); }
+      if (doc.browser) { P.set(sanitizePrefs(doc.browser)); P.applyTheme(P.get().theme); paintTheme(); paintToday(); paintExplore(); done.push('this browser’s choices applied'); }
       if (LIVE && doc.stock && typeof doc.stock === 'object') { paintStock(Object.assign({}, saved.stock, doc.stock)); refresh('stock'); done.push('stock pages loaded: review and Save'); }
       if (LIVE && doc.shortlist && typeof doc.shortlist === 'object') { paintShortlist(Object.assign({}, saved.shortlist, doc.shortlist)); refresh('shortlist'); done.push('shortlist loaded: review and Save'); }
       if (!LIVE && (doc.stock || doc.shortlist)) done.push('project settings need the local server');
@@ -578,8 +638,8 @@ JS = r"""
     rd.readAsText(f);
   });
   $('#bkReset').addEventListener('click', function(){
-    P.set({}); P.applyTheme(null); paintTheme(); paintToday();
-    status('backup', 'This browser is back to the defaults: Auto theme, every Today card.', 'ok');
+    P.set({}); P.applyTheme(null); paintTheme(); paintToday(); paintExplore();
+    status('backup', 'This browser is back to the defaults: Auto theme, every Today card, Explore on Essentials.', 'ok');
   });
   $$('button.copy[data-c]').forEach(function(b){ b.addEventListener('click', function(){
     var t = b.getAttribute('data-c'), done = function(){ b.textContent = 'copied'; setTimeout(function(){ b.textContent = 'copy'; }, 1400); };
@@ -609,7 +669,7 @@ JS = r"""
     $('#set-file').classList.toggle('on', !on && !quiet);
     syncTabControls(); refresh('stock'); refresh('shortlist');
   }
-  paintTheme(); paintToday(); paintStock(saved.stock); paintShortlist(saved.shortlist); setLive(false, true);
+  paintTheme(); paintToday(); paintExplore(); paintStock(saved.stock); paintShortlist(saved.shortlist); setLive(false, true);
   // Opened as a file there is no server to ask, and asking would only log an error.
   if (location.protocol === 'file:') { setLive(false); return; }
   fetch('/api/settings', {cache: 'no-store'}).then(function(r){ if (!r.ok) throw new Error(r.status); return r.json(); })
@@ -665,7 +725,8 @@ def selftest() -> int:
     assert json.loads(blob)["stock"] == st["stock"], "the page's embedded state does not parse back"
     for el in ("themeToggle", "todayList", "secList", "tabsOn", "defaultTab", "chartWin", "relWin", "finFreq",
                "growthRows", "eventsLimit", "slDefault", "slN", "slWarn", "slAbove", "stockSave", "slSave",
-               "stockRebuild", "slRebuild", "bkExport", "bkImport", "bkFile", "bkReset", "set-file"):
+               "stockRebuild", "slRebuild", "bkExport", "bkImport", "bkFile", "bkReset", "set-file",
+               "exView", "exHint", "exForget"):
         assert f'id="{el}"' in html, f"the page lost #{el}, which its script needs"
     print(f"  [settings_page] {len(st['sections'])} sections, {len(st['tabs'])} tabs, "
           f"{len(st['shortlist_meta']['recipes'])} rankings; 9 malformed saves refused, nothing written")

@@ -90,11 +90,47 @@ DEFAULT_METRICS = [
     "house_big_buy_60d",
 ]
 
+# COLUMN VIEWS (2026-11-09: 61 columns at once was "too cluttered"). Each view names its columns
+# by key, shown in the table's own order; a key this build does not have is skipped. "Custom" is
+# the reader's own set from the column chooser. (key, label, short label for a phone, what it is,
+# columns -- None = every column.)
+VIEWS = (
+    ("essentials", "Essentials", "Essentials",
+     "the measured scores, the plan at support, quality, strength, news and size",
+     ["combo_h20", "combo_h60", "sector_score", "at_support", "above_level_pct", "buy_limit",
+      "fund_score", "pe", "rs_sec_63", "sent_mean_30d", "insider_score", "mktcap"]),
+    ("plan", "Trade plan", "Plan",
+     "where the support level is, the measured bounce trade, and how often the name runs",
+     ["at_support", "above_level_pct", "buy_limit", "target", "stop", "atr_pct", "gain_days",
+      "loss_days", "rally_count", "recovery_rate", "sector_score", "fund_score"]),
+    ("quality", "Quality & value", "Quality",
+     "the fundamental pillars, valuation and returns on capital",
+     ["fund_score", "quality_score", "value_score", "safety_score", "pe", "pb", "ev_ebitda",
+      "fcf_yield", "roe", "roic", "f_score", "z_score", "net_issuance", "mktcap"]),
+    ("growth", "Growth", "Growth",
+     "revenue and earnings growth, and whether margins are widening",
+     ["growth_score", "rev_growth", "rev_growth_q", "eps_growth", "eps_growth_q", "gross_margin_chg",
+      "op_margin_chg", "fund_score", "ps_ratio", "mktcap"]),
+    ("momentum", "Momentum", "Momentum",
+     "strength against the market and sector, rallies, dips and hype",
+     ["rs_mkt_63", "rs_sec_63", "rs_sec_252", "rs_sub_63", "gain_days", "rally_count",
+      "recovery_rate", "drawdown", "dip_score", "dip_gate", "hype_score", "attention_score",
+      "premium_score"]),
+    ("news", "News & insiders", "News",
+     "news tone and its age, the sector narrative, insider and House buying",
+     ["sent_mean_30d", "sent_decay_30d", "sent_age", "news_count_30d", "narrative_now",
+      "insider_score", "small_buy_30d", "rare_buy_30d", "buyers_30d", "value_30d",
+      "house_big_buy_60d"]),
+    ("all", "All columns", "All", "every column", None),
+)
+DEFAULT_VIEW = "essentials"
+
 # Metrics where LOW is conventionally better -- used only to colour the cell,
 # never to reorder anything. Sorting is always literal.
 LOWER_BETTER = {"pe", "pb", "ev_ebitda", "ps_ratio", "net_issuance",
                 "m_score", "days_since_filing"}
 INTEGERISH = {"news_count_30d", "f_score", "bars_used", "sent_age"}
+NCOL = 4            # each row: ticker, name, sector, exchange, then the metrics (see _payload)
 
 
 def static_sessions() -> set[str]:
@@ -336,6 +372,19 @@ background:var(--panel);z-index:1}
 .na{color:var(--muted)}
 .sorted{color:var(--accent)}
 .tv{font-size:11px;color:var(--muted);margin-left:5px}
+/* Column views (2026-11-09): tab-like, the same look as a stock page's tabs. */
+.viewbar{display:flex;align-items:center;gap:2px;margin:0 0 10px;border-bottom:1px solid var(--line)}
+.viewbar .vb{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;min-width:0}
+.viewbar .vb::-webkit-scrollbar{display:none}
+.viewbar button[data-view]{border:0;border-radius:0;background:none;padding:9px 13px;font-size:13px;
+font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.viewbar button[data-view]:hover{color:var(--ink);border-bottom-color:transparent}
+.viewbar button[data-view].on{color:var(--accent);border-bottom-color:var(--accent)}
+.viewbar .vtools{margin-left:auto;display:flex;align-items:center;gap:10px;padding:4px 0 4px 12px;flex:none}
+#colN{color:var(--muted);font-size:12px;white-space:nowrap}
+#viewSel{display:none;font-size:13px;padding:6px 9px;margin:4px 0}
+th.off{display:none}
+th.pinned{box-shadow:inset 0 -2px 0 var(--warn)}
 /* Phones (2026-11-09). Measured at 375px: the 190px rail beside the table left the TABLE 139px
    wide, a filter rule (metric, test, value, remove) ran 369px and scrolled the page sideways, and
    the sticky filter bar held 200px of an 812px screen. */
@@ -347,7 +396,117 @@ background:var(--panel);z-index:1}
   .filters{position:static}
   .filters .rule{flex-wrap:wrap;max-width:100%}
   .filters .rule select{max-width:160px}
+  .viewbar{border-bottom:0;flex-wrap:wrap;position:relative}
+  .viewbar .vb{display:none}
+  #viewSel{display:inline-block}
+  /* the count can carry "(1 shown because sorted or filtered)": it wraps rather than
+     pushing the page sideways (measured 402px at 375 before) */
+  .viewbar .vtools{padding-left:4px;flex:1 1 auto;min-width:0;flex-wrap:wrap;justify-content:space-between}
+  #colN{white-space:normal}
+  /* the column list opens the full width of the bar, never past the screen's edge */
+  .viewbar .chooser{position:static}
+  .viewbar .chooser .pop{left:0;right:0;top:100%;width:auto}
 }
+"""
+
+
+# The views and the column chooser (2026-11-09), a plain string spliced into render()'s script
+# after the sort and filter code it reads. It replaces a hide/show that walked every cell of every
+# drawn row after each draw: only the visible columns are drawn now.
+VIEWS_JS = r"""
+// ---- column views -------------------------------------------------------
+// A view is a named set of columns; "Custom" is the reader's own, ticked in the column
+// chooser. The choice lives in this browser (scr.prefs.explore, shared with the Settings page)
+// and survives the nightly rebuild. A column you SORT or FILTER by is always shown, marked as
+// such: a ranking by a value you cannot see is no use.
+const VIEWS = __VIEWS__, VIEWKEYS = VIEWS.map(function(v){ return v.key; }).concat(['custom']);
+const PREFS = window.scrPrefs || {get: function(){ return {}; }, set: function(){ return false; }};
+const TH = Array.prototype.slice.call(document.querySelectorAll('#head th[data-m]'));
+function exPrefs(){
+  const e = PREFS.get().explore;
+  return (e && typeof e === 'object' && !Array.isArray(e)) ? e : {};
+}
+function saveEx(e){ const p = PREFS.get(); p.explore = e; PREFS.set(p); }
+// The chooser before views kept its hidden columns under its own key: carried over once, as Custom.
+(function(){
+  let old = null;
+  try { old = JSON.parse(localStorage.getItem('explore.cols.v1') || 'null'); } catch (e) {}
+  if (old && typeof old === 'object' && !PREFS.get().explore
+      && Object.keys(old).some(function(k){ return old[k] === true; })) {
+    saveEx({view: 'custom', custom: COLS.filter(function(c){ return !old[c]; })});
+  }
+  try { localStorage.removeItem('explore.cols.v1'); } catch (e) {}
+})();
+function base(){
+  const e = exPrefs(), v = VIEWKEYS.indexOf(e.view) >= 0 ? e.view : '__DEFAULT__';
+  if (v === 'custom') {
+    const c = Array.isArray(e.custom) ? e.custom : COLS;
+    return {view: v, set: new Set(c.filter(function(k){ return COLS.indexOf(k) >= 0; }))};
+  }
+  const d = VIEWS.filter(function(x){ return x.key === v; })[0];
+  return {view: v, set: new Set(d.cols.map(function(i){ return COLS[i]; }))};
+}
+function computeVis(){
+  const b = base(), extra = new Set();
+  if (sortI !== null && sortI >= NCOL) extra.add(COLS[sortI - NCOL]);
+  readRules().forEach(function(r){
+    if ((!isNaN(r.lo) || !isNaN(r.hi)) && r.ci >= NCOL) extra.add(COLS[r.ci - NCOL]);
+  });
+  VIS = [];
+  COLS.forEach(function(c, i){ if (b.set.has(c) || extra.has(c)) VIS.push(i); });
+  let pinned = 0;
+  TH.forEach(function(th){
+    const c = COLS[+th.getAttribute('data-i') - NCOL], own = b.set.has(c), shown = own || extra.has(c);
+    th.classList.toggle('off', !shown); th.classList.toggle('pinned', shown && !own);
+    if (shown && !own) pinned++;
+  });
+  document.querySelectorAll('#viewbar button[data-view]').forEach(function(x){
+    const on = x.getAttribute('data-view') === b.view;
+    x.classList.toggle('on', on); x.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+  document.getElementById('viewSel').value = b.view;
+  document.querySelectorAll('#colList input[data-c]').forEach(function(x){ x.checked = b.set.has(x.getAttribute('data-c')); });
+  document.getElementById('colN').textContent = VIS.length + ' of ' + COLS.length + ' columns'
+    + (pinned ? ' (' + pinned + ' shown because sorted or filtered)' : '');
+}
+function setView(v){ const e = exPrefs(); e.view = v; saveEx(e); computeVis(); paint(true); }
+document.getElementById('viewbar').addEventListener('click', function(ev){
+  const x = ev.target.closest('button[data-view]'); if (x) setView(x.getAttribute('data-view'));
+});
+document.getElementById('viewSel').addEventListener('change', function(){ setView(this.value); });
+
+// The column chooser: a tick or untick makes the view Custom, starting from what was shown.
+const colList = document.getElementById('colList');
+colList.innerHTML = TH.map(function(th){
+  const m = th.getAttribute('data-m');
+  return '<label><input type="checkbox" data-c="' + m + '"> ' + th.textContent
+    + (th.getAttribute('data-v') === '1' ? ' <span class="pill ok" style="font-size:9px">validated</span>' : '')
+    + '</label>';
+}).join('');
+function setCustom(set){
+  saveEx({view: 'custom', custom: COLS.filter(function(k){ return set.has(k); })});
+  computeVis(); paint(true);
+}
+colList.addEventListener('change', function(ev){
+  const c = ev.target.getAttribute('data-c'); if (!c) return;
+  const s = new Set(base().set);
+  if (ev.target.checked) s.add(c); else s.delete(c);
+  setCustom(s);
+});
+document.querySelector('#chooser .acts').addEventListener('click', function(ev){
+  const act = ev.target.getAttribute('data-act'); if (!act) return;
+  if (act === 'all') { setView('all'); return; }
+  setCustom(new Set(act === 'none' ? [] : TH.filter(function(th){ return th.getAttribute('data-v') === '1'; })
+                                           .map(function(th){ return th.getAttribute('data-m'); })));
+});
+document.getElementById('colsBtn').addEventListener('click', function(ev){
+  ev.stopPropagation(); document.getElementById('chooser').classList.toggle('open');
+});
+document.addEventListener('click', function(ev){
+  if (!ev.target.closest('#chooser')) document.getElementById('chooser').classList.remove('open');
+});
+// The Settings page (or another tab) changed the view: follow it.
+window.addEventListener('storage', function(ev){ if (ev.key === 'scr.prefs') { computeVis(); paint(true); } });
 """
 
 
@@ -384,8 +543,12 @@ def _rail_html(cols: list[str], strat_cov: dict | None) -> str:
         mark = ("&#9888; unmeasured" if ev.startswith("UNMEASURED")
                 else "&#9888; no edge measured" if ev.startswith("NO EDGE")
                 else "")
+        # data-si is the ROW index the sort reads: 4 leading fields (ticker, name, sector,
+        # exchange) come before the metrics. It was the metric's own index until 2026-11-09, so
+        # every strategy sorted by those leading fields -- "Growth" put the table in Z-A ticker
+        # order -- and the Ticker header lit up as the sorted column.
         out.append(
-            f'<button data-si="{cols.index(cov["column"])}" '
+            f'<button data-si="{NCOL + cols.index(cov["column"])}" '
             f'title="{ui.esc(cov["doc"])}{chr(10)}{chr(10)}{ui.esc(ev)}">'
             f'<b>{ui.esc(cov["title"])}</b>'
             f'<span>{cov["ranked"]:,} of {cov["universe"]:,} ranked</span>'
@@ -433,6 +596,19 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
     except Exception:                                            # noqa: BLE001
         badge_help = ""
     src = " &middot; ".join(f"{k} @ {v}" for k, v in prov.items() if v) or "none"
+    # The views, as column INDEXES into `cols`; a view's key this build lacks is skipped.
+    views = [{"key": k, "label": label, "short": short, "hint": hint,
+              "cols": [i for i, c in enumerate(cols) if want is None or c in want]}
+             for k, label, short, hint, want in VIEWS]
+    views_js = (VIEWS_JS.replace("__VIEWS__", json.dumps(views, separators=(",", ":")))
+                .replace("__DEFAULT__", DEFAULT_VIEW))
+    view_btns = "".join(
+        f'<button type="button" data-view="{v["key"]}" aria-pressed="false" '
+        f'title="{ui.esc(v["hint"])} ({len(v["cols"])} columns)">{ui.esc(v["label"])}</button>'
+        for v in views) + ('<button type="button" data-view="custom" aria-pressed="false" '
+                           'title="your own set: tick columns under Columns">Custom</button>')
+    view_opts = "".join(f'<option value="{v["key"]}">{ui.esc(v["label"])}</option>' for v in views) \
+        + '<option value="custom">Custom</option>'
     sectors = sorted({s for s in (_s(r[2]) for r in rows) if s})
     sec_opts = "".join(f'<option value="{s}">{s}</option>' for s in sectors)
 
@@ -449,13 +625,30 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
                 f'{ui.esc(ui.label(c))}</th>'
                 for i, c in enumerate(cols)))
 
-    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">{ui.EARLY_JS}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Explore &middot; all stocks</title><style>{ui.CSS}{CSS}</style></head>
 <body>{navbar}<div class="wrap">
 <h1>Explore</h1>
 <div class="sub">{len(rows):,} tickers &middot; session <b>{asof}</b> &middot;
 scores from {src} </div>
+
+<div class="viewbar" id="viewbar">
+  <div class="vb" role="group" aria-label="Columns shown">{view_btns}</div>
+  <select id="viewSel" aria-label="Columns shown">{view_opts}</select>
+  <div class="vtools"><span id="colN"></span>
+  <span class="chooser" id="chooser">
+    <button type="button" id="colsBtn" aria-label="Choose columns">Columns &#9662;</button>
+    <div class="pop">
+      <div class="acts">
+        <button type="button" data-act="all">all</button>
+        <button type="button" data-act="valid" title="only metrics the study found significant at some horizon">validated</button>
+        <button type="button" data-act="none">none</button>
+      </div>
+      <div id="colList"></div>
+    </div>
+  </span></div>
+</div>
 
 <div class="filters">
   <input id="q" placeholder="ticker or name..." autocomplete="off">
@@ -466,17 +659,6 @@ scores from {src} </div>
     <input type="checkbox" id="watchOnly"> &#9733; only
     <span id="watchN" class="watchn"></span></label>
   <button id="reset">reset</button>
-  <span class="chooser" id="chooser">
-    <button id="colsBtn">columns &#9662;</button>
-    <div class="pop">
-      <div class="acts">
-        <button data-act="all">all</button>
-        <button data-act="valid" title="only metrics the study found significant at some horizon">validated</button>
-        <button data-act="none">none</button>
-      </div>
-      <div id="colList"></div>
-    </div>
-  </span>
   <span class="count" id="count"></span>
 </div>
 
@@ -524,6 +706,12 @@ function evtags(tk){{
 const COLS = DATA.cols, ROWS = DATA.rows;
 const NCOL = 4;                      // ticker, name, sector, exchange
 let view = ROWS.slice(), sortI = null, sortAsc = false, painted = 0;
+let VIS = COLS.map(function(_, i){{ return i; }});    // the columns drawn: see computeVis
+// Plain labels, the headers' own words, for the filter menu (it showed raw keys before).
+const LABEL = {{}};
+document.querySelectorAll('#head th[data-m]').forEach(function(th){{
+  LABEL[th.getAttribute('data-m')] = th.textContent;
+}});
 const PAGE = 120;
 
 const body = document.getElementById('body');
@@ -593,7 +781,7 @@ function metricSelect(sel){{
   const s = document.createElement('select');
   COLS.forEach(function(c, i){{
     const o = document.createElement('option');
-    o.value = i + NCOL; o.textContent = c;
+    o.value = i + NCOL; o.textContent = LABEL[c] || c;
     if ((i + NCOL) === sel) o.selected = true;
     s.appendChild(o);
   }});
@@ -694,7 +882,8 @@ function rowHTML(r){{
         + '<a class="tv" href="' + tvLink(tk, r[3]) + '" target="_blank"'
         + ' rel="noopener" title="TradingView">&#9741;</a></td>'
         + '<td class="sec">' + (r[2] || '') + '</td>';
-  for (let i = 0; i < COLS.length; i++){{
+  for (let k = 0; k < VIS.length; k++){{
+    const i = VIS[k];
     h += '<td>' + fmt(r[i + NCOL], COLS[i]) + '</td>';
   }}
   return h + '</tr>';
@@ -714,6 +903,7 @@ scroller.addEventListener('scroll', function(){{
 }});
 
 function apply(){{
+  computeVis();                      // a filter can bring its column into view
   const q = document.getElementById('q').value.trim().toUpperCase();
   const sec = document.getElementById('sector').value;
   const rules = readRules();
@@ -765,10 +955,21 @@ document.getElementById('head').addEventListener('click', function(e){{
   const i = parseInt(th.getAttribute('data-i'), 10);
   sortAsc = (sortI === i) ? !sortAsc : false;
   sortI = i;
-  document.querySelectorAll('th').forEach(function(x){{ x.classList.remove('sorted'); }});
-  th.classList.add('sorted');
+  markSort();
+  computeVis();
   doSort(i, sortAsc, true);
 }});
+
+// The sorted header, and the strategy button that matches it (or None).
+function markSort(){{
+  document.querySelectorAll('#head th').forEach(function(x){{
+    x.classList.toggle('sorted', sortI !== null && parseInt(x.getAttribute('data-i'), 10) === sortI);
+  }});
+  document.querySelectorAll('.rail button').forEach(function(b){{
+    const si = parseInt(b.getAttribute('data-si'), 10);
+    b.classList.toggle('on', sortI === null ? si < 0 : si === sortI);
+  }});
+}}
 
 document.getElementById('watchOnly').addEventListener('change', apply);
 ['q','sector'].forEach(function(id){{
@@ -779,95 +980,31 @@ document.getElementById('reset').addEventListener('click', function(){{
   document.getElementById('q').value = '';
   document.getElementById('sector').value = '';
   rulesBox.innerHTML = ''; addRule(); saveRules();
-  sortI = null; apply();
+  sortI = null; markSort(); apply();
 }});
 
 
-// ---- column chooser -------------------------------------------------------
-// Choice persists in localStorage, so a nightly rebuild does not silently undo
-// what you picked. "validated" uses the study, not a hand-kept list.
-var TH = [].slice.call(document.querySelectorAll('th[data-m]'));
-var KEY = 'explore.cols.v1';
-var hidden = {{}};
-try {{ hidden = JSON.parse(localStorage.getItem(KEY) || '{{}}'); }} catch(e){{}}
-
-function applyCols(){{
-  TH.forEach(function(th){{
-    var m = th.getAttribute('data-m');
-    var off = !!hidden[m];
-    var i = [].indexOf.call(th.parentNode.children, th);
-    th.style.display = off ? 'none' : '';
-    [].forEach.call(document.querySelectorAll('#body tr'), function(r){{
-      if (r.cells[i]) r.cells[i].style.display = off ? 'none' : '';
-    }});
-  }});
-  try {{ localStorage.setItem(KEY, JSON.stringify(hidden)); }} catch(e){{}}
-}}
-
-var list = document.getElementById('colList');
-list.innerHTML = TH.map(function(th){{
-  var m = th.getAttribute('data-m');
-  return '<label><input type="checkbox" data-c="' + m + '"'
-    + (hidden[m] ? '' : ' checked') + '> ' + th.textContent
-    + (th.getAttribute('data-v') === '1'
-        ? ' <span class="pill ok" style="font-size:9px">validated</span>' : '')
-    + '</label>';
-}}).join('');
-
-document.getElementById('colsBtn').addEventListener('click', function(e){{
-  e.stopPropagation();
-  document.getElementById('chooser').classList.toggle('open');
-}});
-document.addEventListener('click', function(e){{
-  if (!e.target.closest('#chooser'))
-    document.getElementById('chooser').classList.remove('open');
-}});
-list.addEventListener('change', function(e){{
-  var c = e.target.getAttribute('data-c'); if (!c) return;
-  hidden[c] = !e.target.checked; applyCols();
-}});
-document.querySelector('#chooser .acts').addEventListener('click', function(e){{
-  var act = e.target.getAttribute('data-act'); if (!act) return;
-  TH.forEach(function(th){{
-    var m = th.getAttribute('data-m');
-    hidden[m] = (act === 'none') ? true
-              : (act === 'valid') ? (th.getAttribute('data-v') !== '1')
-              : false;
-  }});
-  [].forEach.call(list.querySelectorAll('input'), function(i){{
-    i.checked = !hidden[i.getAttribute('data-c')];
-  }});
-  applyCols();
-}});
-
-// Re-apply after every repaint, since rows render on demand.
-var _paint = paint;
-paint = function(reset){{ _paint(reset); applyCols(); }};
+{views_js}
 
 // ---- strategy rail ------------------------------------------------------
 // A strategy is just a column, so "select a strategy" is "sort by that
-// column, best first". No separate view, no second code path.
+// column, best first". No separate view, no second code path. data-si is the
+// row index the sort reads; sortI is SET, so a later search or filter keeps
+// the strategy's order (it reverted to unsorted before 2026-11-09).
 Array.prototype.forEach.call(document.querySelectorAll('.rail button'),
   function(b){{
     b.addEventListener('click', function(){{
-      Array.prototype.forEach.call(document.querySelectorAll('.rail button'),
-        function(o){{ o.classList.remove('on'); }});
-      b.classList.add('on');
       const si = parseInt(b.getAttribute('data-si'), 10);
-      if (si < 0){{ sortI = null; apply(); return; }}
-      Array.prototype.forEach.call(document.querySelectorAll('#head th'),
-        function(th){{ th.classList.remove('sorted'); }});
-      const th = document.querySelectorAll('#head th')[si];
-      if (th) th.classList.add('sorted');
+      sortI = si < 0 ? null : si;
       sortAsc = false;               // a strategy score is best-first
-      doSort(si, false, false);
-      paint(true);
+      markSort();
+      apply();                       // applies the sort and shows its column
     }});
   }});
 
 loadRules();
+markSort();
 apply();
-applyCols();
 </script>
 </body></html>"""
 
@@ -944,7 +1081,35 @@ def build(metrics: list[str] | None = None, verbose: bool = True,
     return out
 
 
+def selftest() -> int:
+    """The views' definitions, and the built page's view bar and strategy rail."""
+    import re
+    keys = [k for k, *_r in VIEWS]
+    assert len(set(keys)) == len(keys) and "custom" not in keys and DEFAULT_VIEW in keys, keys
+    try:
+        import strategies as STRAT
+        known = set(DEFAULT_METRICS) | {s.column for s in STRAT.STRATEGIES}
+    except Exception:                                            # noqa: BLE001
+        known = set(DEFAULT_METRICS)
+    for k, _label, _short, _hint, cols in VIEWS:
+        # a typo here would make a column silently absent from its view
+        unknown = sorted(set(cols or []) - known)
+        assert not unknown, f"view {k!r} names column(s) the table never has: {unknown}"
+        assert cols is None or len(cols) == len(set(cols)), f"view {k!r} repeats a column"
+    if OUT.exists():
+        html = OUT.read_text(encoding="utf-8")
+        assert html.count('data-view="') == len(VIEWS) + 1, "the view bar lost a button"
+        si = [int(x) for x in re.findall(r'<button data-si="(-?\d+)"', html)]
+        assert si and all(x == -1 or x >= NCOL for x in si), \
+            f"a strategy button points below the metric columns: {si}"
+    print(f"  [explore] {len(VIEWS)} views + Custom, every column real; "
+          f"strategy buttons sort by their own columns")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
     ap = argparse.ArgumentParser(description="Sortable/filterable stock table.")
     ap.add_argument("--metrics", help="comma-separated metric list")
     ap.add_argument("--open", action="store_true")

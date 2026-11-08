@@ -125,7 +125,7 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 | `reports/settings.html` | **`settings_page.py`** | **Settings** — appearance, Today's cards, stock-page sections and tabs, the shortlist |
 | `reports/system.html` | **`dashboard.py`** | **Status** — job status, stores, run history, links |
 | `reports/metrics.html` | `metrics_doc.py` | the metric dictionary |
-| `reports/explore/latest.html` | `explore.py` | every stock x every score |
+| `reports/explore/latest.html` | `explore.py` | every stock x every score, in column views (`explore.VIEWS`; `--selftest`) |
 | `reports/bounce/latest.html` | `report.build()` | newest bounce report |
 | `reports/bounce/index.html` | `report.write_index()` | bounce sessions, newest first |
 | `reports/sentiment/latest.html` | `senti_screen` | sentiment dashboard |

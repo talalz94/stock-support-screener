@@ -110,7 +110,9 @@ type has a folder with `latest.html` in it (dated copies beside it).
 - **`reports\system.html`** — Status: job steps, stores, run history (`dashboard.py`). It
   reads the job table and file sizes only, so opening it never costs anything and never
   triggers work. Until 2026-11-08 this was `index.html`.
-- `reports\explore\latest.html` — every stock x every metric, sortable and filterable
+- `reports\explore\latest.html` — every stock x every metric, sortable and filterable, in
+  column views (Essentials, Trade plan, Quality & value, Growth, Momentum, News & insiders,
+  All, or your own Custom set)
 - `reports\bounce\latest.html` — the support-bounce screen and every stock it analysed
 - `reports\zones\latest.html` — **Zones**: every support level below every stock, with a
   sector dropdown, band chips and touch / rally / drawdown filters
