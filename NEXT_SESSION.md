@@ -240,14 +240,24 @@ chosen on early dates, tested on later ones, against the plain at-support rule.
 - **Ranking backtest** (`--backtest`, top 20 per date): **fund_score is best**. Picked on TRAIN under the limit rule; KEPT under the open rule (+0.22pp a trade vs every at-support name, t 2.21). The other rankings are listed with their evidence; gain_days has no edge.
 - **Forward test:** every ranking's daily top 50 goes into `data/shortlist/ledger.parquet` and is scored when its 13 sessions pass.
 
-**LEFT for the next session:**
-1. `explore.py`: the new columns (level, buy limit, target, stop, ATR, gainer days, rallies, dips won back, RS vs sector / sub-industry / market, earnings, narrative), joined like `sector_score`, with each header's evidence from `_metric_evidence.json`.
-2. The vs-index / sector / sub-industry chart block on stock profiles (the user wants it for analysis).
-3. The sector map. When `industry_map.py --fetch` has finished (`data/_finnhub_industry.parquet`, resumable), write `--compare` / `--apply` (map finnhubIndustry to our sectors; review the disagreements), then re-check the sector score.
-4. ~~Item 1 intraday~~ DONE 2026-11-08 (see ITEM 1 above).
-5. The user to set `narrative-weekly` to auto in the app.
+**DONE later on 2026-11-08 (the rest of items 1-3):**
+1. **Explore:** 15 new columns (at support, above level %, buy limit, target, stop, ATR %, gainer and loser days, rallies, dips won back, vs sector 3m / 12m, vs sub-industry, vs market, narrative). They are joined from `shortlist.explore_columns`, and the relative strength covers every liquid name.
+   - Every header tooltip ends with the catalogue's MEASURED line (`explore.evidence_note`).
+   - Checked in the browser: 3,474 rows; 1,379 at support, 590 other liquid names.
+2. **Stock profiles:** a new `relative` block after the price chart. It shows the stock, SPY, its sector and its sub-industry rebased a year ago (leave-one-out, as Explore), plus the 1m / 3m / 6m / 1y table. Checked on KLAC; the profile self-test passes.
+3. **The sector map (the user approved the Finnhub fix):**
+   - `industry_map.py --fetch` gave 3,451 of 3,472 tradeable names a label. `--apply` writes 931 overrides to `data/_sector_overrides.parquet`.
+   - `macro.load_sector_map` and `sectors.groups` lay them over the SIC file on every read, so the weekly SIC rebuild never undoes them (`raw=True` gives the file as built).
+   - The mixed labels are handled by rule: "Electrical Equipment" overrides only misfits; "Communications" -> Technology; food distributors and grocers -> Staples.
+   - **If `data/` is lost:** re-run `--fetch` (about 1 h) and then `--apply`.
+4. **The sector score, re-checked** (the 10-20 study kept as `data/_sector_study_summary_sic_20261020.json`):
+   - On the corrected groups the old rs21 + breadth200 still holds out of sample (IC 0.088, t 2.31).
+   - sector_study's own rule now picks **breadth200 + fund** (IC 0.082, t 2.51; rs21 fell to t 1.82 on the first half). `sector_score.COMPOSITE` follows the rule.
+   - Items 1 and 2 re-run on the corrected groups: the same conclusions (copies `_trade_rules_study_sic_20261108.json`, `_rs_study_sic_20261108.json`).
 
-**FOUND, NOT FIXED (asked the user): the SIC sector map.**
+**STILL OPEN:** the user to set `narrative-weekly` to auto in the app (its first run is 2026-11-14), then judge its first answer file and measure its cost before any per-stock narrative.
+
+**FIXED 2026-11-08 (see above): the SIC sector map.**
 - `macro.py` maps 3827-3851 to Healthcare, so 3827 optical instruments (KLAC, NVMI, CAMT, COHR) and 3829 measuring devices (ONTO, MIR, GEOS) sit in Healthcare: 20 names.
 - 3559 "special machinery" puts AMAT and LRCX in Industrials.
 - 3826 lab instruments (A, BIO, AVTR) and DHR sit in Technology.

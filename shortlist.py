@@ -233,6 +233,14 @@ def build(asof: str, verbose: bool = True) -> dict:
     out = DIR / asof
     out.mkdir(parents=True, exist_ok=True)
     D.to_parquet(out / "candidates.parquet", index=False)
+    # relative strength for EVERY liquid name, not only those at support: the Explore page's
+    # vs-sector / vs-market columns and filters read it (explore_columns)
+    import sectors
+    C, V = sectors.load_wide()
+    C, V = C.loc[:asof], V.loc[:asof]
+    dv20 = (C * V).rolling(20, min_periods=15).mean()
+    liq = [t for t in C.columns if C.at[asof, t] >= 5 and dv20.at[asof, t] >= 20e6]
+    _rs_for(C, V, asof, liq).rename_axis("ticker").reset_index().to_parquet(out / "rs_all.parquet", index=False)
     for name, x in lists.items():
         x.to_csv(out / f"{name}.csv", index=False)
     led = pd.concat([x.assign(date=asof, recipe=name)[["date", "recipe", "rank", "ticker", "price", "level",
@@ -299,6 +307,48 @@ def evaluate(verbose: bool = True) -> pd.DataFrame:
     if verbose:
         print(f"shortlist outcomes: {len(done):,} scored entries", flush=True)
     return done
+
+
+# ------------------------------------------------------------------------- Explore's columns
+EXPLORE_COLS = ["at_support", "above_level_pct", "buy_limit", "target", "stop", "atr_pct",
+                "gain_days", "loss_days", "rally_count", "recovery_rate",
+                "rs_sec_63", "rs_sec_252", "rs_sub_63", "rs_mkt_63", "narrative_now"]
+
+
+def explore_columns(asof: str) -> pd.DataFrame:
+    """Ticker-indexed numeric columns for explore.collect, from the newest shortlist build on or
+    before `asof`: the support and trade-plan columns for names at support (blank elsewhere),
+    relative strength for every liquid name, at_support 1/0 for every liquid name, and the
+    group's weekly AI narrative ('now', -2..+2) once a checked snapshot exists."""
+    import sectors
+    days = sorted(p.name for p in DIR.glob("????-??-??") if p.name <= asof and (p / "candidates.parquet").exists())
+    if not days:
+        return pd.DataFrame(columns=EXPLORE_COLS)
+    d = DIR / days[-1]
+    D = pd.read_parquet(d / "candidates.parquet").drop_duplicates("ticker").set_index("ticker")
+    out = pd.DataFrame(index=D.index)
+    out["above_level_pct"] = D.above_level_pct
+    out["buy_limit"], out["target"], out["stop"] = D.limit, D.target, D.stop
+    for c in ("atr_pct", "gain_days", "loss_days", "rally_count", "recovery_rate"):
+        out[c] = D[c]
+    rs_file = d / "rs_all.parquet"
+    if rs_file.exists():
+        rs = pd.read_parquet(rs_file).drop_duplicates("ticker").set_index("ticker")
+        out = out.join(rs, how="outer")
+    out["at_support"] = np.where(out.index.isin(D.index), 1.0, 0.0)
+    try:
+        import narrative
+        nl = narrative.latest(asof)
+        if len(nl):
+            by = {(r.level, r.group): float(r.now) for r in nl.itertuples()}
+            g = sectors.groups().drop_duplicates("ticker").set_index("ticker")
+            gg = g.reindex(out.index)
+            out["narrative_now"] = [by.get(("subind", s), by.get(("sector", c)))
+                                    for s, c in zip(gg.subind, gg.sector)]
+    except Exception:                                            # noqa: BLE001
+        pass
+    out.attrs["asof"] = days[-1]
+    return out.reindex(columns=EXPLORE_COLS)
 
 
 # ------------------------------------------------------------------------- the page

@@ -61,6 +61,13 @@ DEFAULT_METRICS = [
     # The stock's SECTOR score (sector_score.py) -- measured out of sample; joined
     # in `collect` because it lives outside the score store.
     "sector_score",
+    # The bounce trade at support and the plan items of 2026-11-08 (shortlist.py via
+    # explore_columns): where the level is, the measured trade plan, how often the name runs,
+    # and how it is doing against its sector and the market. Each tooltip carries what was
+    # measured -- most of them nothing.
+    "at_support", "above_level_pct", "buy_limit", "target", "stop", "atr_pct",
+    "gain_days", "loss_days", "rally_count", "recovery_rate",
+    "rs_sec_63", "rs_sec_252", "rs_sub_63", "rs_mkt_63", "narrative_now",
     "fund_score", "quality_score", "value_score", "growth_score", "safety_score",
     "pe", "pb", "ev_ebitda", "fcf_yield", "roe", "roic", "f_score", "z_score",
     # The growth pillar went from 5 metrics to 11 on 2026-08-23. The sequential
@@ -187,7 +194,48 @@ def collect(metrics: list[str], asof: str) -> tuple[pd.DataFrame, dict]:
         except Exception:                                        # noqa: BLE001
             pass
 
+    # THE SHORTLIST / STUDY COLUMNS (2026-11-08) live outside the score store too: joined
+    # from the newest shortlist build on or before asof. Missing -> blank, never zero.
+    try:
+        import shortlist as SL
+        want = [m for m in metrics if m in SL.EXPLORE_COLS]
+        if want:
+            j = SL.explore_columns(asof)
+            if len(j):
+                wide = wide.join(j[want], how="left")
+                prov["shortlist"] = j.attrs.get("asof")
+    except Exception:                                            # noqa: BLE001
+        pass
+
     return wide.sort_index(), prov
+
+
+_EVIDENCE: dict | None = None
+
+
+def evidence_note(metric: str) -> str:
+    """What metric_evidence.py measured for this column: the bounce trade at support (top third
+    minus bottom third, 2022-26, after choosing nothing) and the 20-day IC over every liquid
+    name. Empty when the metric was not in the catalogue."""
+    global _EVIDENCE
+    if _EVIDENCE is None:
+        try:
+            _EVIDENCE = json.loads((config.DATA / "_metric_evidence.json").read_text(encoding="utf-8"))["results"]
+        except Exception:                                        # noqa: BLE001
+            _EVIDENCE = {}
+    r = _EVIDENCE.get(metric)
+    if not r:
+        return ""
+    bits = []
+    for k, lab in (("t1_default", "at support, bought at the open"), ("t2_q1_rule", "at support, limit order"),
+                   ("t3_ic", "all liquid names, 20-day IC")):
+        x = r.get(k) or {}
+        if x.get("test_t") is None:
+            continue
+        unit = "" if k == "t3_ic" else "pp a trade, top third minus bottom"
+        verdict = "STRONG" if x.get("strong") else ("held in every period" if x.get("kept") else "not proven")
+        bits.append(f"{lab}: {x['test']:+.3f}{unit and ' ' + unit} on 2022-26 (t {x['test_t']:+.2f}) -- {verdict}")
+    return ("MEASURED (metric_evidence.py): " + "; ".join(bits)) if bits else ""
 
 
 def _s(v) -> str:
@@ -385,7 +433,7 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
             + "".join(
                 f'<th data-i="{i + 4}" data-m="{ui.esc(c)}" '
                 f'data-v="{1 if c in valid else 0}" '
-                f'title="{ui.esc(metrics_doc.tooltip(c))}">'
+                f'title="{ui.esc(metrics_doc.tooltip(c))}{chr(10) + chr(10) + ui.esc(evidence_note(c)) if evidence_note(c) else ""}">'
                 f'{ui.esc(ui.label(c))}</th>'
                 for i, c in enumerate(cols)))
 

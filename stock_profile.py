@@ -896,6 +896,133 @@ def _link(url: str | None, text: str) -> str:
     return (f'<a href="{ui.esc(url)}" target="_blank" rel="noopener">{text}</a>' if url else "&ndash;")
 
 
+# ------------------------------------------------------------- against the market and sector
+_REL: dict = {}
+REL_WINDOWS = ((21, "1m"), (63, "3m"), (126, "6m"), (252, "1y"))
+REL_COLORS = {"stock": "currentColor", "SPY": "#8a94a6", "sector": "#2f7fd8", "sub-industry": "#d9822b"}
+
+
+def _rel_context(asof: str) -> dict | None:
+    """Once per process and session: daily returns, prior-day eligibility, and each sector's and
+    sub-industry's sum and count of eligible members' returns (so one stock can be left out of
+    its own group cheaply), plus SPY. The same construction as rs_study.py / shortlist._rs_for."""
+    if asof in _REL:
+        return _REL[asof]
+    try:
+        import glob
+        import sectors
+        C, V = sectors.load_wide()
+        C, V = C.loc[:asof].iloc[-300:], V.loc[:asof].iloc[-300:]
+        E = sectors.eligible(C, V)
+        R = sectors.daily_returns(C)
+        elig = E.shift(1).fillna(False).astype(bool)
+        Rm = R.where(elig)
+        g = sectors.groups().drop_duplicates("ticker").set_index("ticker")
+        sums, cnts = {}, {}
+        for level in ("sector", "subind"):
+            lab = g[level].reindex(C.columns)
+            for name in lab.dropna().unique():
+                cols = lab.index[lab == name]
+                x = Rm[cols]
+                sums[(level, name)] = x.sum(axis=1, min_count=1)
+                cnts[(level, name)] = x.notna().sum(axis=1)
+        e = pd.concat(pd.read_parquet(p, columns=["ticker", "date", "close"])
+                      for p in sorted(glob.glob(str(config.BARS_ETF / "*.parquet"))))
+        e["date"] = e.date.astype(str).str[:10]
+        spy = e[e.ticker == "SPY"].drop_duplicates("date").set_index("date").close.sort_index()
+        _REL[asof] = {"R": R, "Rm": Rm, "groups": g, "sums": sums, "cnts": cnts,
+                      "spy": spy.pct_change(fill_method=None).reindex(C.index), "min": sectors.MIN_MEMBERS}
+    except Exception:                                            # noqa: BLE001
+        _REL[asof] = None
+    return _REL[asof]
+
+
+def _rel_svg(dates: list[str], lines: list[tuple[str, np.ndarray]], w: int = 980, h: int = 230) -> str:
+    """Rebased lines (100 = the first day), hand-built SVG as ui.price_chart (pages open offline)."""
+    vals = np.concatenate([v[np.isfinite(v)] for _, v in lines if np.isfinite(v).any()])
+    if not len(vals):
+        return ""
+    lo, hi = float(min(vals.min(), 100)), float(max(vals.max(), 100))
+    pad = (hi - lo) * 0.06 or 1.0
+    lo, hi = lo - pad, hi + pad
+    n = len(dates)
+    X = lambda i: 40 + (w - 120) * i / max(n - 1, 1)
+    Y = lambda v: 10 + (h - 30) * (hi - v) / (hi - lo)
+    out = [f'<svg viewBox="0 0 {w} {h}" class="pchart" role="img" aria-label="stock against market, sector and sub-industry">',
+           f'<line x1="40" x2="{w - 80}" y1="{Y(100):.1f}" y2="{Y(100):.1f}" stroke="#8a94a6" stroke-dasharray="4 4" stroke-width="1"/>',
+           f'<text x="4" y="{Y(100) + 4:.1f}" font-size="11" fill="#8a94a6">100</text>',
+           f'<text x="4" y="{Y(hi - pad) + 4:.1f}" font-size="11" fill="#8a94a6">{hi - pad:.0f}</text>',
+           f'<text x="4" y="{Y(lo + pad) + 4:.1f}" font-size="11" fill="#8a94a6">{lo + pad:.0f}</text>',
+           f'<text x="40" y="{h - 4}" font-size="11" fill="#8a94a6">{ui.esc(dates[0])}</text>',
+           f'<text x="{w - 80}" y="{h - 4}" font-size="11" fill="#8a94a6" text-anchor="end">{ui.esc(dates[-1])}</text>']
+    for name, v in lines:
+        pts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in enumerate(v) if np.isfinite(x))
+        if not pts:
+            continue
+        sw = 2.4 if name == "stock" else 1.6
+        out.append(f'<polyline points="{pts}" fill="none" stroke="{REL_COLORS[name]}" stroke-width="{sw}"/>')
+        last = v[np.isfinite(v)][-1]
+        out.append(f'<text x="{w - 76}" y="{Y(last) + 4:.1f}" font-size="11" fill="{REL_COLORS[name]}">'
+                   f'{ui.esc(name)} {last - 100:+.0f}%</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+def _block_relative(ticker: str, asof: str, opt: dict) -> str:
+    """The stock against SPY, its sector and its sub-industry over the last year, rebased to 100,
+    with the 1m / 3m / 6m / 1y figures. Sector and sub-industry are equal-weight averages of their
+    OTHER eligible members (the stock left out), as the vs-sector columns on Explore."""
+    ctx = _rel_context(asof)
+    if ctx is None or ticker not in ctx["R"].columns:
+        return '<div class="note">no relative-strength data for this name</div>'
+    R, Rm, g = ctx["R"], ctx["Rm"], ctx["groups"]
+    own = R[ticker]
+    own_e = Rm[ticker].notna()
+    series = {"stock": own, "SPY": ctx["spy"]}
+    names = {}
+    for level, label in (("sector", "sector"), ("subind", "sub-industry")):
+        grp = g[level].get(ticker) if ticker in g.index else None
+        if grp is None or (level, grp) not in ctx["sums"]:
+            continue
+        s, c = ctx["sums"][(level, grp)], ctx["cnts"][(level, grp)]
+        n = c - own_e.astype(int)
+        loo = (s - Rm[ticker].fillna(0.0)) / n.where(n > 0)
+        series[label] = loo.where(n >= ctx["min"])
+        names[label] = grp
+    win = int(opt.get("window") or 252)
+    idx = R.index[-win:]
+    lines = []
+    for name, r in series.items():
+        x = np.log1p(r.reindex(idx).fillna(0.0).to_numpy(dtype=float))
+        v = 100 * np.exp(np.cumsum(x))
+        if r.reindex(idx).notna().mean() < 0.8:
+            v[:] = np.nan
+        lines.append((name, v))
+    svg = _rel_svg([str(d) for d in idx], lines)
+    rows = []
+    for k, lab in REL_WINDOWS:
+        sl = R.index[-k:]
+        ret = {name: float(np.expm1(np.log1p(r.reindex(sl).fillna(0.0)).sum())) if r.reindex(sl).notna().mean() >= 0.8
+               else np.nan for name, r in series.items()}
+        cell = lambda v: "&mdash;" if not np.isfinite(v) else f"{v * 100:+.1f}%"
+        gap = lambda a, b: "&mdash;" if not (np.isfinite(a) and np.isfinite(b)) else f"{(a - b) * 100:+.1f}pp"
+        rows.append(f"<tr><td>{lab}</td><td class='n'>{cell(ret.get('stock', np.nan))}</td>"
+                    f"<td class='n'>{cell(ret.get('sector', np.nan))}</td><td class='n'>{cell(ret.get('sub-industry', np.nan))}</td>"
+                    f"<td class='n'>{cell(ret.get('SPY', np.nan))}</td>"
+                    f"<td class='n'>{gap(ret.get('stock', np.nan), ret.get('sector', np.nan))}</td>"
+                    f"<td class='n'>{gap(ret.get('stock', np.nan), ret.get('SPY', np.nan))}</td></tr>")
+    sec_l = ui.esc(names.get("sector", "sector"))
+    sub_l = ui.esc(names.get("sub-industry", "sub-industry"))
+    table = ("<table class='rel'><thead><tr><th>Window</th><th class='n'>Stock</th>"
+             f"<th class='n'>Sector ({sec_l})</th><th class='n'>Sub-industry ({sub_l})</th><th class='n'>S&amp;P 500</th>"
+             "<th class='n'>vs sector</th><th class='n'>vs market</th></tr></thead><tbody>"
+             + "".join(rows) + "</tbody></table>")
+    note = ("<p class='note'>Sector and sub-industry: equal-weight averages of their other liquid members, "
+            "the stock left out. Measured 2018-2026 (rs_study.py): running above the sector did NOT predict "
+            "a better bounce or better returns, so this is for reading the stock, not for ranking it.</p>")
+    return svg + table + note
+
+
 def _block_events(ticker: str, asof: str, limit: int = 10) -> str:
     """Next earnings date, recent SEC filings by type, and any filing the news-event
     study measured as a warning -- point in time, quoted from its result file."""
@@ -1357,6 +1484,9 @@ def build(ticker: str, verbose: bool = True,
                          'quarterly only &mdash; the fact store is quarterly, '
                          'anything finer would be interpolation</span></div>'
                          + panes)
+        elif key == "relative":
+            parts.append("<h2>Against the market, sector and sub-industry</h2>"
+                         + _block_relative(ticker, asof, opt))
         elif key == "insider":
             parts.append("<h2>Insider and House trades</h2>" + _block_insider(ticker, asof))
         elif key == "events":

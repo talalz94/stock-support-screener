@@ -453,11 +453,55 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
     # sector_score.py -- not a score module; joined onto rows by explore.collect.
     "sector_score": ("Sector score",
                      "0-100, the stock's SECTOR, not the stock: average rank of the "
-                     "sector's 1-month return vs the market and its share of stocks "
-                     "above their 200-day average. Chosen on 2017-2022 and tested on "
-                     "2022-2026, which it had never seen: IC +0.141, t +4.10 over 55 "
-                     "months (sector_study.py, 2026-10-14). Tilts the odds for a month; "
-                     "it does not pick stocks. Details on the Sectors page."),
+                     "sector's share of stocks above their 200-day average and its "
+                     "members' median fundamental score. Chosen on 2017-2022 and tested on "
+                     "2022-2026, which it had never seen: IC +0.082, t +2.51 over 55 months "
+                     "(sector_study.py, re-run 2026-11-08 after the sector map was corrected "
+                     "with Finnhub's industry labels; before that, on the SIC map, 1-month "
+                     "return + breadth). Tilts the odds for a month; it does not pick "
+                     "stocks. Details on the Sectors page."),
+    # shortlist.py via explore.collect (2026-11-08): the bounce trade at support and plan
+    # items 1-4. Not score modules; joined from the newest shortlist build.
+    "at_support": ("At support", "1 when the nearest support zone is 0-6% under the close (the "
+                   "Zones page's AT / NEAR), 0 for every other liquid name. The population the "
+                   "bounce trade and the shortlist use."),
+    "above_level_pct": ("Above level %", "how far the close sits above that support level, in %. "
+                        "With the limit order, the furthest third did better (+0.35pp a trade on "
+                        "2022-26, t 2.39, in every period): a name 2.5-6% up fills only on a real "
+                        "pullback to its level. The one at-support measure that held."),
+    "buy_limit": ("Buy limit", "the support level + 0.5%: the limit order of the tested trade, live for "
+                  "3 sessions. About 54% of such orders filled (2018-2026)."),
+    "target": ("Target", "+3% from the limit fill: the tested trade's target (out after 10 sessions "
+               "if neither side is hit). Measured on 2022-26 with fills that must trade through "
+               "the limit: +0.36% a trade net of costs, t 2.42. Research, not advice."),
+    "stop": ("Stop", "-8% from the limit fill: the tested trade's stop. Wider than the target, so "
+             "the trade wins often and loses more when it loses; +5% / -5% did about the same."),
+    "atr_pct": ("ATR %", "20-day average true range as % of the close: how far the stock usually "
+                "moves in a day. Context; the fixed +3% / -8% beat ATR-scaled brackets once 30-minute "
+                "bars were in."),
+    "gain_days": ("Gainer days", "sessions in the last year the stock was among the market's top-20 "
+                  "daily % gainers (names liquid the day before). The 10-23 list's ranking. "
+                  "Measured: no edge for the bounce trade; mostly a volatility count."),
+    "loss_days": ("Loser days", "the same for the top-20 daily LOSERS. Across all liquid names a "
+                  "NEGATIVE predictor of the next 20 days (IC -0.032, t -2.16, held in every "
+                  "period): lottery-stock behaviour."),
+    "rally_count": ("Rallies (1y)", "separate climbs of 20%+ in the last year, each ended by a 10% "
+                    "pullback -- frequency, not size. Measured: no edge for the bounce trade."),
+    "recovery_rate": ("Dips won back", "share of the last year's 15%+ dips that got back to the "
+                      "prior high within 63 sessions (>= 2 dips). A lead at 60 sessions on 52 "
+                      "dates, no edge for the 10-session bounce trade."),
+    "rs_sec_63": ("vs sector 3m", "the stock's 3-month return minus its sector's (equal-weight, the "
+                  "stock left out). Measured (rs_study.py): no edge at support or across all "
+                  "names. For reading one stock, not for ranking."),
+    "rs_sec_252": ("vs sector 12m", "the same over 12 months. Measured: no edge."),
+    "rs_sub_63": ("vs sub-industry 3m", "the 3-month return minus its sub-industry's. Measured: no "
+                  "edge."),
+    "rs_mkt_63": ("vs market 3m", "the 3-month return minus SPY's. Measured: no edge."),
+    "narrative_now": ("Narrative (group)", "the weekly AI view of the stock's sub-industry (else its "
+                      "sector) right now, -2 strong headwind .. +2 strong tailwind, from the checked "
+                      "`narrative-weekly` answers. NO weight anywhere: it can only be judged on later "
+                      "prices, so it is shown, not trusted, until months of snapshots beat the "
+                      "sector score."),
 }
 
 # How the two comparison columns are computed. This is #14: they were unexplained
@@ -924,7 +968,11 @@ def selftest(verbose: bool = True) -> None:
 
     # Fields that are not score-module metrics but ARE real columns, joined onto
     # rows from their own file. Named with their source so this is not a loophole.
-    JOINED = {"sector_score": "sector_score.py via explore.collect"}
+    JOINED = {"sector_score": "sector_score.py via explore.collect",
+              **{c: "shortlist.py via explore.collect" for c in (
+                  "at_support", "above_level_pct", "buy_limit", "target", "stop", "atr_pct",
+                  "gain_days", "loss_days", "rally_count", "recovery_rate", "rs_sec_63",
+                  "rs_sec_252", "rs_sub_63", "rs_mkt_63", "narrative_now")}}
     stale = sorted(k for k in EXTRA_LABELS if k not in live and k not in JOINED)
     assert not stale, (
         f"EXTRA_LABELS documents metric(s) no module emits: {stale}. "

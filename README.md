@@ -242,11 +242,13 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **35 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
+- **37 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
   shortvol, hype, provider, sec_facts, sec_gap, sec_edgar, insider, congress,
   fundamental, events, leaderboard, dip, insider_score, combo, candidates, floor,
   insider_pages, sectors, validate, explore, snapshots, profiles, watchlists,
-  retention, dashboard, docs`. `news_events` (SEC filings by type, press-release and FDA feeds, earnings
+  narrative, shortlist, retention, dashboard, docs`. `narrative` writes the weekly AI narrative task's
+  inputs and checks its answers; `shortlist` builds every ranking's list of names at support with the
+  tested trade plan and scores the forward ledger. `news_events` (SEC filings by type, press-release and FDA feeds, earnings
   calendar) runs before `bounce` so every page shows that night's warning filings and
   earnings dates; `watchlists` re-measures saved lists. `insider` and
   `congress` (insider and House trades) are independent: nothing depends on them, so a failure
@@ -465,11 +467,17 @@ as bankruptcy text and asserts no metric moves.
 | `watchlist_track.py` | tracks a saved watchlist from its entry date (the "Gainers at support" list), statuses fixed in the module, per-session history; `--refresh` / `--mark-uploaded` for the claude.ai copy |
 | `gainers_at_support.py` | the "Gainers at support" list for a session: liquid names at/near support, ranked within sector by past-year top-20 gainer days, with sector/fund/combo, warning filings and next earnings; writes `data/watchlists/gainers_at_support_<date>/`; add a `track.json` to track it nightly |
 | `big_movers_study.py` | do stocks that keep running bounce better at support? Top-20 / liquidity-fifth gainer and loser days, tilt, `rally_count` (separate 20%+ rallies), `recovery_rate` (15% dips won back within 63 sessions), burst months, sub-industry peers; plain and volatility-neutral, split halves, walk-forward vs gain_days and the plain rule; `data/_big_movers_study.json`. Frequent movers move more BOTH ways; only recovery_rate leans up (60 sessions: a lead, not a rule). `--trades`: the quick bounce trade (next open, +/-X% bracket, `data/_big_movers_trades.json`): the level helps HOT stocks (+0.4pp a trade vs hot stocks elsewhere, which lose) but hot does not beat calm at the level |
+| `trade_rules_study.py` | which bounce-trade rule works (plan item 1): 108 rules (open / limit at the level +0.5% / next close x fixed, ATR and level-stop brackets) on 175,937 at-support name-dates, chosen on 2018-21 and judged on 2022-26 with 0.10% costs; segments, 11 market filters, earnings, AT/NEAR. `--fetch-intraday` / `--build-intraday` / `--intraday`: 30-minute bars for the entry and fill days. Result: the open earns ~0; a limit at the level +0.5%, +3% / -8% (or +5/-5), 10 sessions, holds even with trade-through fills (+0.36% a trade, t 2.42) |
+| `rs_study.py` | does running above the sector / market predict the bounce? Leave-one-out sector and sub-industry indexes, 10 measures: none kept (plan item 2) |
+| `metric_evidence.py` | the evidence catalogue: every stored metric with history tested at support (two trades) and as a 20-day IC; KEPT / STRONG labels feed Explore's tooltips and the shortlist (plan item 3) |
+| `shortlist.py` | the daily shortlist (plan item 3): every ranking in `shortlist_recipes.json` (default fund_score, n 20, max 50) of the names at support with the tested trade plan, the forward ledger (`data/shortlist/`), `reports/shortlist/latest.html`, and Explore's support / plan / relative-strength columns; `--backtest` ranks the rankings |
+| `narrative.py` | the AI narrative (plan item 4): nightly inputs per sector and sub-industry for the weekly Claude-app task `narrative-weekly`, and the strict check of its answers (`data/narrative/`); no ranking weight until judged forward |
+| `industry_map.py` | corrects the SIC sector map with Finnhub's free industry labels (`--fetch` ~1 h, `--compare`, `--apply` -> `data/_sector_overrides.parquet`, laid over the SIC map on every read by `macro.load_sector_map` and `sectors.groups`) |
 | `watchlist_page.py` | the `watchlists` step: re-measures every `data/watchlists/*/track.json` list nightly and draws `reports/watchlist/` |
 | `news_events.py` | stock news EVENTS in `data/news_events/`: every SEC filing by type since 2016 (8-K items, deal and activist forms, acceptance to the second), PR Newswire M&A / FDA-approval and FDA press feeds, a daily Finnhub earnings-calendar snapshot (point in time); `page_flags(asof)` feeds the warning and earnings tags. The `news_events` step. `--backfill`, `--update`, `--stats`, `--selftest`. NOT `events.py` (severity calibration) |
 | `news_events_study.py` | what each event type predicts, vs the liquidity fifth AND the same stock's own non-event days, split halves; `data/_news_events_study_summary.json`. Nothing qualified as a buy signal; 3.02 / 4.02 / 1.02 are warnings |
 | `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
-| **`orchestrator.py`** | **THE scheduled entry point** — 35-step registry, watermark catch-up, `data/_jobs.parquet` |
+| **`orchestrator.py`** | **THE scheduled entry point** — 37-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/index.html` — read-only, never triggers work |
 
 ---

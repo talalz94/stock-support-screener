@@ -45,7 +45,7 @@ PROFILE_FILE = config.DATA / "_profile.json"
 DEFAULT_PROFILE: dict[str, Any] = {
     "schema": SCHEMA_VERSION,
     "name": "default",
-    "order": ["header", "chart", "radar", "scores", "insider", "events", "financials", "growth",
+    "order": ["header", "chart", "relative", "radar", "scores", "insider", "events", "financials", "growth",
               "fundamentals", "sentiment", "hype", "levels"],
     "blocks": {
         "header": {"enabled": True,
@@ -54,6 +54,9 @@ DEFAULT_PROFILE: dict[str, Any] = {
         # Price sits directly under the header: it is the first thing anyone
         # checks, and the support level is what the whole screener is about.
         "chart": {"enabled": True, "window": "1y"},
+        # The stock against SPY, its sector and its sub-industry, rebased a year ago (asked
+        # 2026-11-08: "helpful in analysis for a particular stock"). Measured no ranking edge.
+        "relative": {"enabled": True, "window": 252},
         "radar": {"enabled": True,
                   "axes": ["fundamentals", "sentiment", "hype", "technicals"]},
         # combo_* first: they are the only scores whose weights were measured
