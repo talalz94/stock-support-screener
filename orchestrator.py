@@ -1610,7 +1610,11 @@ def _step_docs(asof: str) -> tuple[int, str]:
     """
     import docs
     n = docs.apply(verbose=False)
-    return n, f"{len(docs.BLOCKS)} generated block(s) in {n} file(s)"
+    # The Metrics page (reports/metrics.html) too: it was built only by hand and sat at
+    # 2026-10-14 while columns and their measured evidence were added (found 2026-11-08).
+    import metrics_doc
+    metrics_doc.build(verbose=False)
+    return n, f"{len(docs.BLOCKS)} generated block(s) in {n} file(s); metrics.html rebuilt"
 
 
 def _step_watchlists(asof: str) -> tuple[int, str]:

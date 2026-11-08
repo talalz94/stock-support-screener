@@ -1020,7 +1020,7 @@ def _block_relative(ticker: str, asof: str, opt: dict) -> str:
     note = ("<p class='note'>Sector and sub-industry: equal-weight averages of their other liquid members, "
             "the stock left out. Measured 2018-2026 (rs_study.py): running above the sector did NOT predict "
             "a better bounce or better returns, so this is for reading the stock, not for ranking it.</p>")
-    return svg + table + note
+    return svg + f"<div class='scroll'>{table}</div>" + note      # a narrow screen scrolls the table, not the page
 
 
 def _block_events(ticker: str, asof: str, limit: int = 10) -> str:
@@ -1541,6 +1541,9 @@ def build(ticker: str, verbose: bool = True,
         ".grid2{display:grid;grid-template-columns:minmax(300px,380px) 1fr;"
         "gap:18px;align-items:start}"
         "@media(max-width:900px){.grid2{grid-template-columns:1fr}}"
+        # grid items keep their content width unless allowed to shrink: on a phone the radar
+        # card pushed the page 28px sideways (found 2026-11-08)
+        ".grid2>*{min-width:0}.grid2 svg{max-width:100%;height:auto}"
         ".finbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;"
         "margin-bottom:9px}"
         "td.spark{padding:2px 6px;width:86px}"

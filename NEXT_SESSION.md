@@ -176,6 +176,36 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-08 (evening) — UI/UX AUDIT: MEASURED, PLAN PROPOSED, AWAITING THE USER
+
+**Asked:** "its too cluttered with so much info, I want it better organized in a professional way with room to customize ... snappy, ui/ux should be friendly and bug free" -- analysis first.
+
+**Measured** (local server, 16 pages):
+- **Speed:** every page loads in 0.1-0.6 s; Explore is the slowest (0.64 s, 1.7 MB, 11,374 DOM nodes).
+- **Heavy files for few rows:** Insider 743 KB, House 956 KB, Zones 896 KB, Bounce 602 KB. Stock pages are ~270 KB each.
+- **Long pages at 1280 px:** Bounce 12,300 px, metrics 10,600, fundamental 7,500, a stock page 7,000, hub 6,100.
+- **Long pages at phone width:** Bounce 21 screens, a stock page 17, the hub 11.
+- **The menu:** 15 flat items, 180-260 px tall on a phone (a quarter to a third of the screen).
+- **Density:** Explore shows 61 columns by default, the Shortlist 28; a stock page has 12 sections.
+- **Overlap:** six pages are variants of "stocks near support" -- Bounce, Zones, Candidates, Floor retest, Shortlist, Watchlists.
+- **Customising:** only through the CLI (`settings.py` for profile blocks), a JSON file (`shortlist_recipes.json`), or Explore's per-visit column chooser.
+
+**Bugs found:**
+- `status.py --pages`: 330+ dead links. Every Shortlist and Watchlist stock link points at a profile page that was never built (0 of the Shortlist's top 50 have one), because `profiles` builds that day's bounce flags plus pages already on disk.
+- At phone width, stock pages scrolled sideways. The new `relative` table: fixed (scroll wrapper). The radar grid (`.grid2` items kept their content width): fixed (`min-width:0`). 637 -> 371 px on AAPL. STILL OPEN: the metric cards' fixed 74 px percentile bars leave about 13 px of overflow on a 375 px phone -- part of the stock-page redesign.
+- At phone width, Explore's filter bar overflows: open.
+- `reports/metrics.html` was built only by hand, stale since 10-14. Fixed: the `docs` step now rebuilds it nightly.
+
+**Proposed** (the user to choose; nothing built):
+1. Bugs: profile pages for every name the lists link to (nightly for the Shortlist's default top N and the watchlists, or built on demand through `serve.py`); links fall back cleanly; a nightly UI check (dead links, phone-width overflow, console errors) in `validate`.
+2. Structure: 5 menu groups (Today, Lists, Research, Stock search, System).
+   - A "Today" home: market regime, the Shortlist's top names with plans, watchlist moves, this week's warnings and earnings, one data-freshness badge.
+   - Jobs, stores and runs move to "System".
+   - The overlapping list pages merge into Lists as views.
+3. Declutter: tabs on the stock page (Overview / Chart & levels / Fundamentals / Insiders & filings / News); column presets per table (Essentials / Trade plan / Quality / Momentum / All); collapsible sections that remember their state; one (i) per section instead of paragraphs; plain labels for the jargon.
+4. Customising: a gear panel on every page -- sections and order, column presets and density, the default ranking and size, hidden menu items, theme, saved filters. Kept in the browser (instant, offline) with export / import; optionally saved through `serve.py` so the nightly pages follow it too.
+5. Polish: one design system in `ui.py` (page header with purpose and data-as-of, cards, a single table component); a dark-mode toggle (prefers-color-scheme already works); shared JSON data files and lazy sections for the heavy pages.
+
 ## State at 2026-11-08 (later) — PLAN ITEMS 1-4 STARTED: THE TRADE RULES, RELATIVE STRENGTH, THE EVIDENCE CATALOGUE, THE NARRATIVE TASK
 
 **Base:** `big_movers_study.py --step 10`: 294,161 liquid name-dates on 217 dates (2018-01-02 .. 2026-08-07), 175,937 at support. TRAIN 101 dates (before 2022), TEST 116.
