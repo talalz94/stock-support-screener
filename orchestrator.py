@@ -278,9 +278,13 @@ def _step_bars(asof: str) -> tuple[int, str]:
     res = bars.update(window=5)
     if not res.get("ok") and not res.get("skipped"):
         raise RuntimeError(f"bars.update reported not-ok: {res}")
-    return int(res.get("bars", 0)), (f"{res.get('bars', 0):,} bars, "
-                                     f"{res.get('tickers', 0)} tickers, "
-                                     f"{res.get('sessions', 0)} new session(s)")
+    # `bars.update` counts what it wrote as "rows" (the new sessions plus the
+    # re-fetched trailing window). Reading "bars" logged "0 bars" every night
+    # while the store filled normally (seen 2026-11-03..06).
+    n = int(res.get("rows", 0))
+    return n, (f"{n:,} bars, "
+               f"{res.get('tickers', 0)} tickers, "
+               f"{res.get('sessions', 0)} new session(s)")
 
 
 def _step_macro(asof: str) -> tuple[int, str]:

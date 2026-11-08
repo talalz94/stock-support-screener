@@ -148,6 +148,45 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-08 — A WEEK UNATTENDED: EVERY SESSION IN, TWO RUNS SLEPT THROUGH, THE LISTS MET A PULLBACK
+
+**Runs (all automatic, 0 failed):**
+- 11-05 05:00: took 11-04.
+- 11-06 05:00: took 11-05, finishing 16:40. The keep-awake log shows the process FROZEN twice, 566 min in total: the PC slept mid-run.
+- 11-07 00:06: the weekly steps. Frozen 524 min overnight. On waking, a PR Newswire SSL error cost that run the FDA-approval wire.
+- 11-07 17:55: took Fri 11-06. The PC slept through the morning starts and StartWhenAvailable caught up.
+
+Prices, scores and zones are in through 11-06. The 128 thin names missing a 11-03 bar were filled by the next run's 5-session re-fetch. Nothing needs changing: resilience in code, as the power-settings rule says.
+
+**Fixed:** the bars step logged "0 bars" every night, because it read `res["bars"]` while
+`bars.update` returns `rows`. It now logs the rows written.
+
+**Validate:** CLEAN on 11-05 and 11-07; 9 TTM-window problems on 11-06's rotating sample.
+
+Full check of all 3,472 tradeable names on 11-08 (`ttm_invariants.check`, asof 11-06): 23,027 of 23,099 windows ok. The 72 bad windows sit in 12 companies:
+- **8 known** 52/53-week or 16-week-quarter calendars: PEP, DPZ, COST, ACI, AZO, KR, JACK, RRGB. `no_gap` fails at a 120-123-day quarter.
+- **4 not explained yet:**
+  - AEHR: 13 windows spanning 301 days.
+  - AIV: a stray 2026-01-31 period end after 2025-12-31.
+  - LCLN and PS: 183-day spans.
+
+**OPEN:** look at those 4.
+
+**The lists after the Wed-Fri pullback, vs every liquid name on the same dates.** "Failed" means a low under 90% of the level since entry.
+- 10-23, after 10 sessions:
+  - list -0.42% (median -0.96%, 47% up) vs -0.64% (median +0.29%, 52% up);
+  - 77 per plan, 11 held, 14 below support, **78 failed** (25 on 11-03).
+- 10-30, after 5 sessions:
+  - list -3.98% (median -2.67%, 40% up) vs -1.50% (median -0.15%, 48% up);
+  - 70 / 13 / 28 / **83 failed**.
+
+As the study measured, hot names at support break their levels far more often: about 43% of each list within 5-10 sessions. This is a live case for the planned market-uptrend test.
+
+**The claude.ai dashboard copy is stale at 10-30.**
+- The app task's runs at 11-04 21:21Z and 11-05 14:45Z both report "succeeded", but `last_uploaded.txt` still says 10-30.
+- The 11-04 run sat at its first command with no process running: an approval prompt nobody answered.
+- It needs the user present, or an allow rule for its exact commands.
+
 ## State at 2026-11-02 (late morning) — DEBT FALLBACK TAGS: 244 NAMES GAIN A DEBT FIGURE, AND NO NAME THAT HAD ONE IS MOVED BY IT
 
 Why: on 10-30, 989 of 3,312 universe names had NO debt figure, so every debt input
@@ -4852,72 +4891,72 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-04 08:35 — do not edit by hand._
+_Generated 2026-11-08 00:48 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 6s | 8s | 2.6 min ⚠ | 2.0 min | 64 |
-| `bars` | daily | 58s | 53s | 37.0 min ⚠ | 10.0 min | 64 |
-| `macro` | daily | 46s | 1.6 min | 8.3 min | 15.0 min | 64 |
-| `news` | daily | 20s | 5s | 31s | 10.0 min | 64 |
-| `news_events` | daily | 3.2 min | 3.6 min | 6.7 min | 30.0 min | 4 |
-| `senti_cache` | daily | 1s | 3s | 50s | 10.0 min | 64 |
-| `sentiment` | daily | 7s | 16s | 3.2 min | 15.0 min | 65 |
-| `bounce` | daily | 28s | 40s | 1.6 min | 15.0 min | 65 |
-| `zones` | daily | 50s | 1.6 min | 3.1 min | 30.0 min | 48 |
-| `shortvol` | daily | 4s | 4s | 10s | 10.0 min | 62 |
-| `hype` | daily | 58s | 2.1 min | 4.6 min | 120.0 min | 65 |
-| `provider` | daily | 63.2 min | 65.0 min | 71.0 min | 120.0 min | 57 |
-| `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 15 |
-| `sec_gap` | weekly | 6.4 min | 5.4 min | 12.1 min | 20.0 min | 14 |
-| `sec_edgar` | daily | 3.7 min | 34s | 4.3 min | 30.0 min | 24 |
-| `insider` | daily | 4.6 min | 1.7 min | 4.6 min | 30.0 min | 9 |
-| `congress` | daily | 4s | 11s | 16s | 30.0 min | 9 |
-| `fundamental` | daily | 1.9 min | 3.6 min | 60.7 min | 180.0 min | 73 |
-| `events` | weekly | 37.7 min | 10.7 min | 590.9 min ⚠ | 30.0 min | 15 |
-| `leaderboard` | weekly | 91.0 min | 40.7 min | 91.0 min ⚠ | 90.0 min | 16 |
-| `dip` | daily | 3s | 18s | 70s | 15.0 min | 73 |
-| `insider_score` | daily | 2.4 min | 7.0 min | 7.9 min | 30.0 min | 7 |
-| `combo` | daily | 3s | 19s | 60s | 15.0 min | 72 |
-| `candidates` | daily | 1s | 6s | 3.8 min | 5.0 min | 30 |
-| `floor` | daily | 27s | 55s | 3.0 min | 15.0 min | 24 |
-| `insider_pages` | daily | 2s | 8s | 12s | 15.0 min | 7 |
-| `sectors` | daily | 37s | 3.2 min | 5.8 min | 30.0 min | 23 |
-| `validate` | daily | 6.8 min | 7.1 min | 23.8 min | 60.0 min | 59 |
-| `explore` | daily | 3s | 9s | 24s | 5.0 min | 81 |
-| `snapshots` | daily | 3s | 4s | 36s | 5.0 min | 93 |
-| `profiles` | daily | 3.5 min | 21.4 min | 58.5 min ⚠ | 15.0 min | 76 |
-| `watchlists` | daily | 2s | 5s | 6s | 10.0 min | 3 |
-| `retention` | daily | 0s | 0s | 2s | 5.0 min | 83 |
-| `dashboard` | daily | 0s | 0s | 9s | 2.0 min | 88 |
-| `docs` | daily | 1s | 0s | 6s | 5.0 min | 104 |
+| `universe` | daily | 1.9 min | 8s | 1.9 min | 2.0 min | 67 |
+| `bars` | daily | 80s | 54s | 5.2 min | 10.0 min | 67 |
+| `macro` | daily | 2.0 min | 1.6 min | 3.8 min | 15.0 min | 67 |
+| `news` | daily | 18s | 5s | 31s | 10.0 min | 67 |
+| `news_events` | daily | 3.2 min | 4.4 min | 531.0 min ⚠ | 30.0 min | 8 |
+| `senti_cache` | daily | 9s | 3s | 12s | 10.0 min | 67 |
+| `sentiment` | daily | 40s | 18s | 40s | 15.0 min | 68 |
+| `bounce` | daily | 1.9 min | 41s | 1.9 min | 15.0 min | 68 |
+| `zones` | daily | 2.5 min | 1.6 min | 3.1 min | 30.0 min | 51 |
+| `shortvol` | daily | 11s | 4s | 11s | 10.0 min | 65 |
+| `hype` | daily | 2.7 min | 2.1 min | 3.5 min | 120.0 min | 68 |
+| `provider` | daily | 64.5 min | 65.0 min | 64.5 min | 120.0 min | 60 |
+| `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 16 |
+| `sec_gap` | weekly | 2.9 min | 5.2 min | 12.1 min | 20.0 min | 15 |
+| `sec_edgar` | daily | 7s | 43s | 581.1 min ⚠ | 30.0 min | 28 |
+| `insider` | daily | 31s | 2.0 min | 4.6 min | 30.0 min | 13 |
+| `congress` | daily | 3s | 9s | 11s | 30.0 min | 13 |
+| `fundamental` | daily | 3.8 min | 3.7 min | 7.3 min | 180.0 min | 76 |
+| `events` | weekly | 8.0 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 16 |
+| `leaderboard` | weekly | 36.6 min | 40.0 min | 91.0 min ⚠ | 90.0 min | 17 |
+| `dip` | daily | 10s | 17s | 10s | 15.0 min | 76 |
+| `insider_score` | daily | 3.9 min | 5.3 min | 7.0 min | 30.0 min | 10 |
+| `combo` | daily | 11s | 18s | 11s | 15.0 min | 75 |
+| `candidates` | daily | 2s | 5s | 3s | 5.0 min | 33 |
+| `floor` | daily | 42s | 53s | 3.0 min | 15.0 min | 27 |
+| `insider_pages` | daily | 5s | 7s | 8s | 15.0 min | 10 |
+| `sectors` | daily | 70s | 2.6 min | 5.8 min | 30.0 min | 26 |
+| `validate` | daily | 9.7 min | 7.1 min | 23.8 min | 60.0 min | 62 |
+| `explore` | daily | 7s | 9s | 9s | 5.0 min | 84 |
+| `snapshots` | daily | 16s | 4s | 16s | 5.0 min | 97 |
+| `profiles` | daily | 5.9 min | 21.3 min | 58.5 min ⚠ | 15.0 min | 79 |
+| `watchlists` | daily | 3s | 3s | 5s | 10.0 min | 6 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 87 |
+| `dashboard` | daily | 1s | 0s | 9s | 2.0 min | 91 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 108 |
 
-**Daily total ≈ 122.9 min.** Weekly adds 56.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 121.6 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-04 08:35 — do not edit by hand._
+_Generated 2026-11-08 00:48 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 123 | 250.8 | 2016-09 → 2026-11 |
+| bars 1d | 123 | 251.2 | 2016-09 → 2026-11 |
 | bars 1h | 5 | 0.8 | 2026-07 → 2026-11 |
 | bars ETF | 125 | 2.9 | 2016-07 → 2026-11 |
-| news | 124 | 175.4 | 2016-08 → 2026-11 |
-| sentiment cache | 124 | 12.1 | 2016-08 → 2026-11 |
-| scores | 123 | 334.8 | 2016-09 → 2026-11 |
+| news | 124 | 176.8 | 2016-08 → 2026-11 |
+| sentiment cache | 124 | 12.2 | 2016-08 → 2026-11 |
+| scores | 123 | 339.0 | 2016-09 → 2026-11 |
 | fundamentals | 70 | 345.4 | 2009q2 → 2026q3 |
-| short volume | 76 | 57.1 | 2020-08 → 2026-11 |
-| flags | 67 | 5.7 | 2026-07-31 → 2026-11-03 |
-| rejects | 22 | 8.3 | 2026-10-05 → 2026-11-03 |
-| zones | 48 | 27.0 | 2026-08-27 → 2026-11-03 |
-| fundamentals (companyfacts) | 131 | 74.9 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 23 | 1.0 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 43 | 217.2 | — |
+| short volume | 76 | 57.3 | 2020-08 → 2026-11 |
+| flags | 70 | 5.9 | 2026-07-31 → 2026-11-06 |
+| rejects | 21 | 7.9 | 2026-10-09 → 2026-11-06 |
+| zones | 51 | 28.7 | 2026-08-27 → 2026-11-06 |
+| fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
+| fundamentals (EDGAR filings) | 23 | 1.9 | 2009q4 → 2026q3 |
+| loose (macro, universe, jobs, study) | 43 | 217.3 | — |
 
-**`data/` total ≈ 1,514 MB.** `reports/` is a further 129 MB across 396 pages.
+**`data/` total ≈ 1,522 MB.** `reports/` is a further 135 MB across 410 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -4925,22 +4964,22 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-04 08:35 — do not edit by hand._
+_Generated 2026-11-08 00:48 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 393 | 2016-09-27 → 2026-11-03 |
-| `fundamental` | 61 | 250 | 2016-09-26 → 2026-11-03 |
-| `hype` | 20 | 368 | 2016-10-25 → 2026-11-03 |
-| `dip` | 10 | 295 | 2016-09-27 → 2026-11-03 |
-| `insider` | 8 | 212 | 2016-09-06 → 2026-11-03 |
-| `combo` | 16 | 250 | 2016-11-04 → 2026-11-03 |
+| `sentiment` | 26 | 396 | 2016-09-27 → 2026-11-06 |
+| `fundamental` | 61 | 253 | 2016-09-26 → 2026-11-06 |
+| `hype` | 20 | 371 | 2016-10-25 → 2026-11-06 |
+| `dip` | 10 | 298 | 2016-09-27 → 2026-11-06 |
+| `insider` | 8 | 215 | 2016-09-06 → 2026-11-06 |
+| `combo` | 16 | 253 | 2016-11-04 → 2026-11-06 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-04 08:35 — do not edit by hand._
+_Generated 2026-11-08 00:48 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
