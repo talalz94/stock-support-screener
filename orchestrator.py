@@ -1621,6 +1621,19 @@ def _step_watchlists(asof: str) -> tuple[int, str]:
     return n, f"{n} watchlist(s) re-measured, drawn on watchlist/{p.name}"
 
 
+def _step_narrative(asof: str) -> tuple[int, str]:
+    """The weekly AI narrative's inputs (data/narrative/inputs_latest.json, read by the
+    Claude-app task `narrative-weekly`) and the check of any new answer file. Nightly, because
+    the task fires only while the app is open and must find fresh inputs whenever it does.
+    Nothing it writes carries a ranking weight until it is judged forward."""
+    import narrative
+    doc = narrative.inputs(asof, verbose=False)
+    r = narrative.ingest(verbose=False)
+    rej = f"; REJECTED {sorted(r['rejected'])}" if r["rejected"] else ""
+    return len(doc["groups"]), (f"inputs for {len(doc['groups'])} groups as of {doc['asof']}; "
+                                f"{len(r['added'])} new answer file(s) ingested{rej}")
+
+
 def _step_dashboard(asof: str) -> tuple[int, str]:
     """Last step by design: it renders the job table, so it must run after every
     other step has written its row. Its own row therefore always reads `running`
@@ -1828,6 +1841,10 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("bars",), timeout=600,
          desc="re-measure tracked watchlists from their entry date against the "
               "liquid market, and the Watchlists page"),
+    Step("narrative", _step_narrative, config.CADENCE_DAILY,
+         depends_on=("sectors",), timeout=600,
+         desc="inputs per sector and sub-industry for the weekly AI narrative task, and the "
+              "check of its answers (no weight anywhere until judged forward)"),
     Step("retention", _step_retention, config.CADENCE_DAILY, timeout=300,
          session_indexed=False, desc="age-based pruning of rejects, 1h, reports"),
     # Session-indexed too: it summarises the newest session, so a new session

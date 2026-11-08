@@ -108,6 +108,34 @@ Filters are combined only after each passes alone, and a combination is chosen o
 pre-2022 dates and judged after 2022 (walk-forward). Code: a `--refine` mode in
 `big_movers_study.py` reading the trades file (about 1 min after step 0).
 
+**STARTED 2026-11-08, scope widened by the user's answers:**
+- "try out different levels, by market cap and other stuff, may be different levels work for different stocks";
+- entry "usually next morning open like after an hour", or later in the day "in case the price is edging closer";
+- market filter: "research and try the best ones".
+
+The design is `trade_rules_study.py`'s docstring, fixed before any result:
+- **Rules:** 108 = 3 entries (open; a limit at the level + 0.5% for 3 sessions; next close) x 36 exits:
+  - fixed % brackets;
+  - 20-day-ATR brackets;
+  - a stop 3% under the level.
+- **Costs:** 0.10% a round trip.
+- **Segments:** market cap (< $2B / $2-10B / $10-200B / > $200B, the scores store's `mktcap` as of each date), volatility third, hotness, sector, AT/NEAR.
+- **Filters:** 11, from research.
+  - Connors & Alvarez: pullbacks only above the 200-day.
+  - Nagel 2012 (RFS): reversal returns rise WITH the VIX, so "calm only" may be backwards. Tested both ways.
+  - The list: SPY / QQQ over the 50- and 200-day, breadth > 50%, VIX >= 20, VIX falling, high-yield spread falling, SPY > 200-day AND VIX >= 20, the sector ETF, the stock's own 200-day.
+- **Selection:** everything is chosen on 2018-2021 and judged on 2022-2026 against the plain +5/-5 rule. Kept only if it holds in both 2018-19 and 2020-21 and on TEST.
+- **Base:** `big_movers_study.py --step 10` (about 220 dates, `_big_movers_events_s10.parquet`).
+- **Engine:** the self-test passes 17 hand-worked cases (daily and 30-minute).
+- **Hourly check:** the store's hourly bars (88 names, 4 months, 4,201 name-days) put the price about an hour in a median 1.6% from the open, more than 2% away on 41% of days, and 0.5% lower on average.
+- **INTRADAY, approved by the user ("if its free"):**
+  - Alpaca's free tier serves SIP history but pages intraday bars at 248 a request even across symbols (measured).
+  - So only 30-minute REGULAR-session bars are fetched (13 a day: 09:30 = the official open, 10:30 = "an hour after"), for the ENTRY DAY of every at-support case and the limit's fill day when it filled on day 2 or 3.
+  - About 14k requests, about 1.5 h, into `data/trade_rules_30m/` (the study's own; nightly retention prunes the 1h store).
+  - New entries: open+1h (buy at 10:30), and the limit in 30-minute order (only the fill's own bar stays pessimistic). Every exit, so 72 more rules.
+  - I1: open+1h minus open. I2: limit in 30-minute order minus the pessimistic limit. Does the best rule change?
+  - Fixed before any bar was downloaded (`trade_rules_study.py`, intraday block).
+
 ### RELATIVE STRENGTH VS THE MARKET AND THE SECTOR (planned 2026-11-02; NOT BUILT)
 **The idea, in the user's words:** a stock's line should roughly follow its index and its
 sector; one that has been ABOVE its sector is a healthy sign. Nothing like it exists yet
@@ -147,6 +175,63 @@ walk-forward -- most of it already sits in the studies' JSON files); `combo` (on
 measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
+
+## State at 2026-11-08 (later) — PLAN ITEMS 1-4 STARTED: THE TRADE RULES, RELATIVE STRENGTH, THE EVIDENCE CATALOGUE, THE NARRATIVE TASK
+
+**Base:** `big_movers_study.py --step 10`: 294,161 liquid name-dates on 217 dates (2018-01-02 .. 2026-08-07), 175,937 at support. TRAIN 101 dates (before 2022), TEST 116.
+- `--step` writes `_s10` files and never touches the 42-step study.
+- Rows are built one frame per date, to fit 4x the dates.
+
+**ITEM 1 -- `trade_rules_study.py` (108 rules = 3 entries x 36 exits, 0.10% costs).**
+- **Checks:** the engine self-test passes 17 cases. `--check` recomputed 20 random trades x 5 rules bar by bar from raw store bars: 100/100 identical.
+- **The default (open, +/-5%, 10 sessions) is about zero after costs:** +0.03% a trade on TRAIN, +0.05% on TEST.
+- **The LIMIT entry (level + 0.5%, 3 sessions) beats the open on every exit.** The 36 limit rules average +0.24 / +0.27% vs the open's -0.05 / +0.03%. It is better in 7 of 9 years, about equal in 2018, and slightly worse only in 2022 with the 3-ATR rule.
+- **Kept with touch fills** (both halves agree and TEST t >= 2): limit +5/-5 (TEST +0.33%, t 2.00), limit +5/-8 (+0.40, 2.04), limit +3/-8 (+0.31, 2.07).
+- **BUT with a fill that must trade 0.2% THROUGH the limit,** the fill rate goes 56.7% -> 53.9% and every limit rule loses 0.12-0.14%. TEST is then +0.20 to +0.33%, t 1.0-1.5: NOT kept. The lost fills were the touch-and-go "perfect bounces", which real limit orders often miss.
+- **Q1 (chosen on TRAIN):** limit + 3 x ATR / - 3 x ATR, 10 sessions. TRAIN +0.70% (t 2.05), TEST +0.44% (t 1.37): not kept.
+- **Q2, per-segment rules** (cap, volatility, hotness, sector, AT/NEAR): none beats the single Q1 rule on TEST (-0.09 .. -0.01pp). The ATR brackets already scale to each stock.
+- **Q3, filters:**
+  - SPY / QQQ trend filters point the WRONG way: the trades did better below the averages. Not significant.
+  - VIX >= 20 is the TRAIN pick: on +0.56% vs off -0.30% (t 2.10). TEST is the same direction (+0.20 vs -0.04, t 0.59), as Nagel 2012 predicts; not kept.
+  - The high-yield spread filter is untestable: FRED keeps only about 3 years of the ICE series (29% of dates).
+- **Q4, earnings inside the hold:** no difference on average (+0.10pp, t 0.81), but more stop-outs (40.6% vs 33.8%).
+- **Q5, dips won back among the hot:** nothing. **Q6, AT vs NEAR:** nothing.
+- **Hourly check:** 88 names, 4,201 days. An hour in, the price sat a median 1.6% from the open and was 0.5% lower on average.
+- **INTRADAY:** 30-minute bars are downloading (`--fetch-intraday`, 648 days, resumable); then `--build-intraday` and `--intraday`.
+
+**ITEM 2 -- `rs_study.py`: relative strength says NOTHING about the bounce.**
+- **Indexes:** leave-one-out equal-weight sector and sub-industry indexes (>= 8 other members) and SPY. A spot check of NVDA's rs_sec_63 against an independent recomputation matched to 5 decimals.
+- **Tested:** 10 metrics (vs sector over 1-12 months, vs sub-industry, vs market, line above its 50-day, share of time above, RS-line high, beta-adjusted residual), plus momentum as the baseline.
+- **R1 at support:** none kept (best TEST |t| 1.29).
+- **R2 hot third:** -0.05pp, t -0.35.
+- **R3 factor IC:** none kept (best resid_252 TEST t 1.85, NW).
+- 35 comparisons, about 1.8 expected by chance; none reached |t| 2.
+
+**ITEM 3 -- `metric_evidence.py`, the evidence catalogue:** every stored metric with history (103) plus the studies' own. It tests at support with the default and the Q1 trade, and the 20-day IC across all liquid names. KEPT / STRONG (TEST |t| >= 3) labels feed the filter page and the shortlist.
+- **Result:** 114 metrics, 321 tests (about 16 pass |t| >= 2 and about 0.9 pass |t| >= 3 by chance). Only 3 are KEPT, about the chance level under the both-halves rule. None is STRONG.
+  - **At support:** only `dist` with the Q1 limit rule. The furthest third above the level minus the nearest: TEST +0.35pp (t 2.39), halves +0.35 / +0.53. It is the limit mechanism: a name 2.5-6% above its level fills only on a real pullback.
+  - **Across all liquid names:** `loss_days` (IC -0.032, t -2.16) and `vol_surge` (-0.013, t -2.02), both NEGATIVE (lottery-stock behaviour).
+- **Promising on TEST, but failed 2018-19:**
+  - fund_score IC +0.027 (t 3.19);
+  - combo_h60 +0.04 (t 2.86);
+  - combo_h20 +0.034 (t 2.55);
+  - growth_score at support +0.14pp (t 2.38);
+  - dip_gate at support (t 2.98).
+- **No edge for the bounce trade:** gain_days, rally_count, recovery_rate, insider_score, sentiment, hype, rs_sec_63, mom_12_1, stretch / extension.
+
+**ITEM 4 -- `narrative.py` + the Claude-app task `narrative-weekly` (Saturdays about 10:43; first run 2026-11-14):**
+- **Inputs:** the new nightly step `narrative` (33rd of 36, after `watchlists`) writes `data/narrative/inputs_latest.json`. Per group (20 sectors, 44 sub-industries) it carries the score and rank (sectors only), RS, breadth, seasonality (context only), news counts and sentiment, the week's strongest-toned headlines and filing events. Then it ingests any new answer.
+- **The task:** reads that file, researches the web (about 40 searches), and writes `data/narrative/<date>.json` with the Write tool. NO shell commands. The prompt lives in `narrative.TASK_PROMPT`.
+- **Checking:** `check_answer` rejects anything malformed: scores outside -2..2, a source dated after the answer, a missing group, untagged themes (self-test 6/6).
+- **No weight** until months of snapshots beat the sector score forward.
+- **The task was saved WITHOUT auto mode:** the user should set it or "Run now" once to approve its tools.
+
+**FOUND, NOT FIXED (asked the user): the SIC sector map.**
+- `macro.py` maps 3827-3851 to Healthcare, so 3827 optical instruments (KLAC, NVMI, CAMT, COHR) and 3829 measuring devices (ONTO, MIR, GEOS) sit in Healthcare: 20 names.
+- 3559 "special machinery" puts AMAT and LRCX in Industrials.
+- 3826 lab instruments (A, BIO, AVTR) and DHR sit in Technology.
+- This matters most for item 4, where stocks inherit their group's narrative.
+- The proposed fix: Finnhub's free profile `finnhubIndustry` for every name (about 1 h at 60/min) to correct the map, then re-check the sector score.
 
 ## State at 2026-11-08 — A WEEK UNATTENDED: EVERY SESSION IN, TWO RUNS SLEPT THROUGH, THE LISTS MET A PULLBACK
 

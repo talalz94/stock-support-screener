@@ -149,6 +149,20 @@ TRADES_OUT = config.DATA / "_big_movers_trades.json"
 TRADES_EVENTS = config.DATA / "_big_movers_trades.parquet"
 
 
+def use_step(n: int) -> None:
+    """Space the dates `n` sessions apart instead of 42, into files of their own (the
+    42-step study's files are never overwritten). At n < 40 the 40-session level
+    windows and the 20/60-session returns overlap, so only trades no longer than n
+    sessions keep independent dates."""
+    global STEP, OUT, OUT_EVENTS, TRADES_OUT, TRADES_EVENTS
+    STEP = n
+    if n != 42:
+        OUT = config.DATA / f"_big_movers_study_s{n}.json"
+        OUT_EVENTS = config.DATA / f"_big_movers_events_s{n}.parquet"
+        TRADES_OUT = config.DATA / f"_big_movers_trades_s{n}.json"
+        TRADES_EVENTS = config.DATA / f"_big_movers_trades_s{n}.parquet"
+
+
 def earnings_rows(dates: np.ndarray, ticks: np.ndarray) -> set[tuple[int, int]]:
     """(row, ticker index) pairs that are an earnings day: an 8-K Item 2.02 public that
     session or the one before (public_session is the first close after acceptance)."""
@@ -328,7 +342,7 @@ def run(verbose=True, smoke=False) -> pd.DataFrame:
     CY = cycle_panel(W, rows_d, verbose)
     rng = np.random.default_rng(20261102)
     C = W["close"]
-    recs = []
+    parts = []                                       # one frame per date: 220 dates of dicts would not fit
     for n_i, i in enumerate(rows_d):
         D = str(dates[i])
         six = str((pd.Timestamp(D) - pd.DateOffset(years=6)).date())
@@ -342,7 +356,7 @@ def run(verbose=True, smoke=False) -> pd.DataFrame:
         names = np.flatnonzero(ok)
         if smoke and len(names) > SMOKE_NAMES:
             names = np.sort(rng.choice(names, SMOKE_NAMES, replace=False))
-        n_at = 0
+        n_at, day = 0, []
         for j in names:
             st = ZL.listing_start(valid[:, j], i)
             rows = np.flatnonzero(valid[max(st, lo6):i + 1, j]) + max(st, lo6)
@@ -376,11 +390,13 @@ def run(verbose=True, smoke=False) -> pd.DataFrame:
             if np.isfinite(lvl) and len(c) >= HOLD * 0.9:
                 row["fail"] = bool(c.min() <= lvl * 0.90)
                 row["hit"] = bool(c.max() >= lvl * 1.15)
-            recs.append(row)
+            day.append(row)
+        parts.append(pd.DataFrame(day))
         if verbose:
             print(f"  {D}: {len(names):,} liquid, {n_at:,} at support; {time.time() - t0:.0f}s", flush=True)
     del W, B, CY, valid, dv, C                       # the panel below loads its own prices
-    ev = pd.DataFrame(recs)
+    ev = pd.concat(parts, ignore_index=True)
+    del parts
     ev["recovery_rate"] = np.where(ev.dips >= 1, ev.recovered / ev.dips.where(ev.dips >= 1), np.nan)
     import sectors
     sub = sectors.groups().drop_duplicates("ticker").set_index("ticker")["subind"]
@@ -728,7 +744,8 @@ def summarise_trades(tv: pd.DataFrame) -> dict:
     col = {"gain_days": "gain_days", "rally_count": "rally_count", "recovery_rate": "recovery_rate",
            "tilt fifth e63": "T_fifth_e63", "burst_months top20": "top20_up_months"}
     tests = {}
-    for k in BRACKETS:
+    # a trade longer than the date spacing overlaps the next date's: no independent t
+    for k in [k for k, b in BRACKETS.items() if b[2] <= STEP]:
         for nm, (gate,) in scores.items():
             for o in ("ret", "win") if k == PRIMARY else ("ret",):
                 tests[f"{k} {o}: AT hot minus cold, {nm}"] = spread(at, col[nm], f"{k}_{o}", gate)
@@ -786,8 +803,13 @@ def _trade_buckets(df, score, edges, labels, gate):
 
 
 def main() -> int:
+    if "--step" in sys.argv:
+        use_step(int(sys.argv[sys.argv.index("--step") + 1]))
     if "--trades" in sys.argv:
         tv = pd.read_parquet(TRADES_EVENTS) if "--summarise" in sys.argv and TRADES_EVENTS.exists() else trades()
+        if "--build-only" in sys.argv:            # results stay unseen until a test's rules are fixed
+            print(f"built {TRADES_EVENTS.name}: {len(tv):,} name-dates over {tv.date.nunique()} dates")
+            return 0
         s = summarise_trades(tv)
         TRADES_OUT.write_text(json.dumps(s, indent=1, default=str), encoding="utf-8")
         print(json.dumps({k: s[k] for k in ("dates", "trades_at_support", "tests_with_t",
@@ -798,6 +820,10 @@ def main() -> int:
         ev = pd.read_parquet(OUT_EVENTS)
     else:
         ev = run(smoke=smoke)
+    if STEP < HOLD:
+        print(f"step {STEP}: events only ({OUT_EVENTS.name}); the 20/60-session and 40-session-level "
+              f"summary needs dates at least {HOLD} sessions apart, so it is not drawn here")
+        return 0
     s = summarise(ev)
     if not smoke:
         OUT.write_text(json.dumps(s, indent=1, default=str), encoding="utf-8")
