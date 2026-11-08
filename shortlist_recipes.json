@@ -1,0 +1,31 @@
+{
+ "_note": "The daily shortlist's rankings. Edit freely: `default` picks the one shown first, `n` how many rows (the page lets you change it up to `max_n`). Every recipe is built and forward-tracked each night, so the alternatives keep competing. Evidence: data/_shortlist_backtest.json (2026-11-08). Research screens, not investment advice.",
+ "default": "fund_score",
+ "n": 20,
+ "max_n": 50,
+ "filters": {"exclude_warnings": true, "max_above_level_pct": 6.0},
+ "recipes": [
+  {"name": "fund_score", "label": "Fundamental score", "rank_by": "fund", "ascending": false,
+   "evidence": "Best tested: top 20 at support beat every at-support name by +0.22% a trade on 2022-26 at the open (t 2.21) and held in 2018-19 and 2020-21; with the limit rule +0.24% (not significant)."},
+  {"name": "combo_h60", "label": "Combo score (3 months)", "rank_by": "combo_h60", "ascending": false,
+   "evidence": "+0.20% a trade on 2022-26 at the open (t 1.56); mixed in 2018-21. Promising, not proven."},
+  {"name": "combo_h20", "label": "Combo score (1 month)", "rank_by": "combo_h20", "ascending": false,
+   "evidence": "+0.17% a trade on 2022-26 at the open (t 1.47); mixed in 2018-21. Promising, not proven."},
+  {"name": "limit_ready", "label": "Furthest above the level (limit-ready)", "rank_by": "above_level_pct", "ascending": false,
+   "evidence": "With the limit order: +1.20% a trade on 2022-26 (t 1.87) but only 17% of orders filled, and -1.8% in 2018-19. Unstable."},
+  {"name": "gain_days", "label": "Hottest (top-20 gainer days)", "rank_by": "gain_days", "ascending": false,
+   "evidence": "The 10-23 list's rule: no measured edge (-0.09% at the open, +0.43% with the limit, both not significant); more stop-outs."},
+  {"name": "insider_score", "label": "Insider buying", "rank_by": "insider_score", "ascending": false,
+   "evidence": "No measured edge at support (-0.07% at the open, +0.25% with the limit)."},
+  {"name": "sentiment", "label": "News sentiment (30 days)", "rank_by": "sent_mean_30d", "ascending": false,
+   "evidence": "No measured edge at support (+0.11% at the open, +0.14% with the limit)."},
+  {"name": "low_vol", "label": "Calmest first", "rank_by": "vol63", "ascending": true,
+   "evidence": "No edge: -0.11% at the open, -0.34% with the limit."},
+  {"name": "rally_count", "label": "Most separate rallies", "rank_by": "rally_count", "ascending": false,
+   "evidence": "No edge: -0.25% at the open, +0.17% with the limit."},
+  {"name": "recovery_rate", "label": "Dips won back", "rank_by": "recovery_rate", "ascending": false,
+   "evidence": "No edge: +0.13% at the open, +0.08% with the limit."},
+  {"name": "growth_score", "label": "Growth score", "rank_by": "growth_score", "ascending": false,
+   "evidence": "No edge: +0.07% at the open, -0.30% with the limit (and -0.65% on 2018-21)."}
+ ]
+}

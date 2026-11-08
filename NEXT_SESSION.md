@@ -226,6 +226,20 @@ chosen on early dates, tested on later ones, against the plain at-support rule.
 - **No weight** until months of snapshots beat the sector score forward.
 - **The task was saved WITHOUT auto mode:** the user should set it or "Run now" once to approve its tools.
 
+**SHORTLIST BUILT (item 3, part 1).**
+- **Files:** `shortlist.py` and `shortlist_recipes.json` (editable: default ranking, n = 20, max_n = 50, filters).
+- **Nightly step:** `shortlist` (37 steps now).
+- **Page:** `reports/shortlist/latest.html` (nav "Shortlist"). Checked in the browser: no console errors; ranking switch, size and hide-earnings all work.
+- **Ranking backtest** (`--backtest`, top 20 per date): **fund_score is best**. Picked on TRAIN under the limit rule; KEPT under the open rule (+0.22pp a trade vs every at-support name, t 2.21). The other rankings are listed with their evidence; gain_days has no edge.
+- **Forward test:** every ranking's daily top 50 goes into `data/shortlist/ledger.parquet` and is scored when its 13 sessions pass.
+
+**LEFT for the next session:**
+1. `explore.py`: the new columns (level, buy limit, target, stop, ATR, gainer days, rallies, dips won back, RS vs sector / sub-industry / market, earnings, narrative), joined like `sector_score`, with each header's evidence from `_metric_evidence.json`.
+2. The vs-index / sector / sub-industry chart block on stock profiles (the user wants it for analysis).
+3. The sector map. When `industry_map.py --fetch` has finished (`data/_finnhub_industry.parquet`, resumable), write `--compare` / `--apply` (map finnhubIndustry to our sectors; review the disagreements), then re-check the sector score.
+4. Item 1 intraday. When `data/trade_rules_30m/` holds all 648 days (re-run `--fetch-intraday` to fill gaps), run `trade_rules_study.py --build-intraday` then `--intraday`.
+5. The user to set `narrative-weekly` to auto in the app.
+
 **FOUND, NOT FIXED (asked the user): the SIC sector map.**
 - `macro.py` maps 3827-3851 to Healthcare, so 3827 optical instruments (KLAC, NVMI, CAMT, COHR) and 3829 measuring devices (ONTO, MIR, GEOS) sit in Healthcare: 20 names.
 - 3559 "special machinery" puts AMAT and LRCX in Industrials.

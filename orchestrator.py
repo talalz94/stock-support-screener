@@ -1634,6 +1634,18 @@ def _step_narrative(asof: str) -> tuple[int, str]:
                                 f"{len(r['added'])} new answer file(s) ingested{rej}")
 
 
+def _step_shortlist(asof: str) -> tuple[int, str]:
+    """The daily shortlist (shortlist_recipes.json): every ranking's list of liquid names at
+    support with item 1's trade plan, the forward ledger scored as windows complete, and
+    reports/shortlist/latest.html. Research screens, not advice."""
+    import shortlist
+    r = shortlist.build(asof, verbose=False)
+    o = shortlist.evaluate(verbose=False)
+    shortlist.render(asof)
+    return r["pool"], (f"{r['pool']:,} names at support after filters, {len(r['lists'])} rankings; "
+                       f"{len(o):,} ledger entries scored")
+
+
 def _step_dashboard(asof: str) -> tuple[int, str]:
     """Last step by design: it renders the job table, so it must run after every
     other step has written its row. Its own row therefore always reads `running`
@@ -1845,6 +1857,10 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("sectors",), timeout=600,
          desc="inputs per sector and sub-industry for the weekly AI narrative task, and the "
               "check of its answers (no weight anywhere until judged forward)"),
+    Step("shortlist", _step_shortlist, config.CADENCE_DAILY,
+         depends_on=("zones", "fundamental", "combo", "sectors"), timeout=900,
+         desc="the daily shortlist: every ranking of the names at support, the trade plan, "
+              "and the forward ledger of how each ranking has done"),
     Step("retention", _step_retention, config.CADENCE_DAILY, timeout=300,
          session_indexed=False, desc="age-based pruning of rejects, 1h, reports"),
     # Session-indexed too: it summarises the newest session, so a new session
