@@ -255,7 +255,7 @@ chosen on early dates, tested on later ones, against the plain at-support rule.
    - sector_study's own rule now picks **breadth200 + fund** (IC 0.082, t 2.51; rs21 fell to t 1.82 on the first half). `sector_score.COMPOSITE` follows the rule.
    - Items 1 and 2 re-run on the corrected groups: the same conclusions (copies `_trade_rules_study_sic_20261108.json`, `_rs_study_sic_20261108.json`).
 
-**STILL OPEN:** the user to set `narrative-weekly` to auto in the app (its first run is 2026-11-14), then judge its first answer file and measure its cost before any per-stock narrative.
+**STILL OPEN:** `narrative-weekly` is set to auto by the user (2026-11-08); its first run is 2026-11-14. Then judge its first answer file and measure its cost before any per-stock narrative.
 
 **FIXED 2026-11-08 (see above): the SIC sector map.**
 - `macro.py` maps 3827-3851 to Healthcare, so 3827 optical instruments (KLAC, NVMI, CAMT, COHR) and 3829 measuring devices (ONTO, MIR, GEOS) sit in Healthcare: 20 names.
