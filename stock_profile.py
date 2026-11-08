@@ -1442,8 +1442,9 @@ def build(ticker: str, verbose: bool = True,
             if freq == fin_opt.get("freq", "A"):
                 hist = h
 
-    parts = []
+    parts, part_keys = [], []
     for key, opt in blocks:
+        n0 = len(parts)
         if key == "header":
             parts.append(_block_header(ticker, m, sc, px, opt))
         elif key == "chart":
@@ -1509,18 +1510,25 @@ def build(ticker: str, verbose: bool = True,
         # `scores` renders inside the radar block; `levels` and `growth` are
         # handled by their hosts. Unknown blocks are skipped without error so a
         # profile saved by a future version still renders.
+        part_keys += [key] * (len(parts) - n0)
 
+    # THE HEADER ABOVE, THE REST IN TABS (2026-11-09). The page was 7,000 px at a desktop width
+    # and 14,000 on a phone; the tabs and what is in each are settings (settings.TABS, edited on
+    # the Settings page). Tabs switched off give the one long page as before.
     src = ", ".join(f"{k} @ {v.get('_session')}" for k, v in sc.items()) or "none"
-    body = "".join(parts) + (
-        '<div class="note"><b>The financial history above is not '
-        'point-in-time.</b> It lets the latest restatement win, which is '
-        'correct for reading and wrong for backtesting &mdash; nothing on this '
-        'page may feed factor_lab. <code>facts_asof</code> is the '
-        'point-in-time door.<br><b>Vs industry</b> is the percentile among '
-        'peers in the same sector for this session; <b>vs history</b> is where '
-        "today sits inside this company's own stored history. A hatched bar "
-        'means no data, which is not the same as ranking last.<br>Built '
-        f'{datetime.now():%Y-%m-%d %H:%M:%S}.</div>')
+    top = "".join(h for k, h in zip(part_keys, parts) if k == "header")
+    html_of: dict[str, str] = {}
+    for k, h in zip(part_keys, parts):
+        if k != "header":
+            html_of[k] = html_of.get(k, "") + h          # a block may render in more than one piece
+    groups = SETTINGS.tab_groups(prof, list(html_of))
+    if len(groups) > 1:
+        sections = ui.tabs("stocktabs", [(t, label, short, "".join(html_of[k] for k in ks))
+                                         for t, label, short, ks in groups],
+                           default=(prof.get("tabs") or {}).get("default"))
+    else:
+        sections = "".join(html_of.values())
+    body = top + sections
 
     # BUILD TIME IS PART OF THE HEADER, not a footnote.
     #
@@ -1531,10 +1539,18 @@ def build(ticker: str, verbose: bool = True,
     # world like a bug that had never been fixed. Nothing on the page said
     # when it had been rendered, so there was no way to tell.
     _built = datetime.now()
-    sub = (f'session <b>{ui.esc(asof)}</b> &middot; profile '
-           f'&ldquo;{ui.esc(prof.get("name"))}&rdquo; &middot; '
-           f'scores from {ui.esc(src)} &middot; '
-           f'page built <b>{_built:%Y-%m-%d %H:%M}</b>')
+    # What used to be a footnote paragraph and half of this line sits behind the (i) (the
+    # declutter rule of 2026-11-08). The session and the build time stay in sight: a stale page
+    # is otherwise indistinguishable from a current one.
+    about = ui.info(
+        f'Scores from {ui.esc(src)}. Layout &ldquo;{ui.esc(prof.get("name"))}&rdquo;, changed on the '
+        '<a href="../settings.html#stock">Settings</a> page.<br><b>Vs industry</b> is the percentile '
+        'among peers in the same sector for this session; <b>vs history</b> is where today sits '
+        "inside this company's own stored history. A hatched bar means no data, which is not the "
+        'same as ranking last.<br><b>The financial history is not point-in-time:</b> the latest '
+        'restatement wins, which is right for reading and wrong for backtesting.')
+    sub = (f'session <b>{ui.esc(asof)}</b> &middot; page built <b>{_built:%Y-%m-%d %H:%M}</b>'
+           f'{about}')
 
     extra_css = (
         "<style>"
@@ -1998,6 +2014,22 @@ def selftest(verbose: bool = True) -> None:
             "the chart window handler is NOT in the rendered <script>; the "
             "buttons will render and do nothing")
         assert 'data-win="MAX"' in _html, "chart windows missing from the page"
+        # THE TABS (2026-11-09): with tabs on, every section heading sits inside a panel and
+        # there is one panel per tab -- a section outside every panel would show on all tabs.
+        if (SETTINGS.load().get("tabs") or {}).get("enabled", True) and 'role="tablist"' in _html:
+            bar = _html.index('role="tablist"')
+            n_tabs = len(re.findall(r'role="tab" ', _html))
+            n_panels = len(re.findall(r'<section class="tabpanel', _html))
+            assert n_tabs == n_panels > 1, (n_tabs, n_panels)
+            assert all(m.start() > bar for m in re.finditer(r"<h2>", _html)), \
+                "a section heading sits above the tabs"
+            assert len(re.findall(r'<section class="tabpanel on"', _html)) == 1, "not exactly one open tab"
+
+    # The Settings page offers exactly the windows this file draws.
+    assert tuple(n for n, _d, _h in CHART_WINDOWS) == SETTINGS.CHART_WINDOW_CHOICES, \
+        "settings.CHART_WINDOW_CHOICES drifted from CHART_WINDOWS"
+    assert tuple(d for d, _l in REL_WINDOWS) == SETTINGS.RELATIVE_WINDOW_CHOICES, \
+        "settings.RELATIVE_WINDOW_CHOICES drifted from REL_WINDOWS"
 
     # <thead> is what `.scroll.sticky-x thead th` pins. Without the wrapper the
     # selector matched nothing and the header scrolled away -- which looked

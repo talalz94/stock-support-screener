@@ -471,6 +471,15 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:                             # noqa: BLE001
                 return self._json(500, {"error": repr(exc)[:200]})
 
+        # The Settings page's current values (settings_page.state). Read is open, like
+        # /api/watchlist; a save goes through do_POST and its header guard.
+        if path == "/api/settings":
+            try:
+                import settings_page
+                return self._json(200, settings_page.state())
+            except Exception as exc:                             # noqa: BLE001
+                return self._json(500, {"error": repr(exc)[:200]})
+
         if path == "/api/steps":
             return self._json(200, {"steps": [
                 {"name": s.name, "cadence": s.cadence, "desc": s.desc}
@@ -581,6 +590,26 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:                             # noqa: BLE001
                 return self._json(400, {"error": repr(exc)[:200]})
 
+        # A save from the Settings page. Only two fixed files can change, each through the
+        # module that owns it, which checks every value and saves nothing when one is wrong.
+        if path == "/api/settings":
+            try:
+                n = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                n = -1
+            if not 0 < n <= 65536:
+                return self._json(413 if n > 65536 else 400, {"ok": False, "errors": ["a body of 1 to 65,536 bytes is required"]})
+            try:
+                body = json.loads(self.rfile.read(n).decode("utf-8"))
+            except (UnicodeDecodeError, ValueError) as exc:
+                return self._json(400, {"ok": False, "errors": [f"not valid JSON: {exc}"[:200]]})
+            try:
+                import settings_page
+                code, payload = settings_page.save(body)
+                return self._json(code, payload)
+            except Exception as exc:                             # noqa: BLE001
+                return self._json(500, {"ok": False, "errors": [repr(exc)[:200]]})
+
         if not path.startswith("/api/run/"):
             return self._json(404, {"error": "not found"})
 
@@ -659,10 +688,12 @@ def main() -> int:
     except Exception as exc:                                     # noqa: BLE001
         _log(f"could not rebuild the hub ({exc!r}); serving whatever exists")
     try:
+        import settings_page
         import today_page
         today_page.build(verbose=False)     # the landing page, so it is never older than the hub
+        settings_page.build(verbose=False)
     except Exception as exc:                                     # noqa: BLE001
-        _log(f"could not rebuild Today ({exc!r}); serving whatever exists")
+        _log(f"could not rebuild Today or Settings ({exc!r}); serving whatever exists")
 
     url = f"http://{HOST}:{a.port}/index.html"
     srv = ThreadingHTTPServer((HOST, a.port), Handler)

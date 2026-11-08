@@ -139,6 +139,84 @@ def recipes() -> dict:
     return cfg
 
 
+# ------------------------------------------------------------- what the Settings page edits
+# The four choices a reader makes; the rankings themselves stay in the file. The candidates end
+# 6% above their level (gainers_at_support keeps zones 0-6% below the close), so a cap above 6
+# would filter nothing.
+SETTINGS_DEFAULTS = {"default": "fund_score", "n": 20, "exclude_warnings": True, "max_above_level_pct": 6.0}
+ABOVE_LEVEL_RANGE = (0.5, 6.0)
+
+
+def ui_state() -> dict:
+    cfg = recipes()
+    f = cfg.get("filters") or {}
+    return {"default": cfg["default"], "n": int(cfg["n"]),
+            "exclude_warnings": bool(f.get("exclude_warnings", False)),
+            "max_above_level_pct": float(f.get("max_above_level_pct", ABOVE_LEVEL_RANGE[1]))}
+
+
+def ui_meta() -> dict:
+    """What the Settings page needs to draw the choices: every ranking with its evidence."""
+    cfg = recipes()
+    return {"max_n": int(cfg["max_n"]), "above_range": list(ABOVE_LEVEL_RANGE),
+            "recipes": [{"name": r["name"], "label": r["label"], "evidence": r.get("evidence", "")}
+                        for r in cfg["recipes"]]}
+
+
+def apply_ui(values) -> tuple[dict, list[str]]:
+    """Check what the Settings page sent and save it to shortlist_recipes.json. Returns (the
+    page's new state, problems); nothing is saved when there is any problem.
+
+    The file is written by hand too ("Edit freely"), so only the three edited values are
+    replaced in place: a save shows in git as exactly the lines that changed. The result is
+    parsed back and must equal the intended settings; if the file's layout ever defeats the
+    in-place edit, it is rewritten whole rather than saved wrong."""
+    import math
+    import os
+    import re
+    if not isinstance(values, dict):
+        return ui_state(), ["expected an object of settings"]
+    want = set(SETTINGS_DEFAULTS)
+    missing, extra = sorted(want - set(values)), sorted(set(values) - want)
+    if missing or extra:
+        return ui_state(), ([f"missing: {', '.join(missing)}"] if missing else []) + \
+                           ([f"unknown: {', '.join(extra)}"] if extra else [])
+    cfg = recipes()
+    names = [r["name"] for r in cfg["recipes"]]
+    errs = []
+    if values["default"] not in names:
+        errs.append(f"default must be one of: {', '.join(names)}")
+    n = values["n"]
+    if not (isinstance(n, int) and not isinstance(n, bool) and 1 <= n <= int(cfg["max_n"])):
+        errs.append(f"n must be a whole number from 1 to {cfg['max_n']}")
+    if not isinstance(values["exclude_warnings"], bool):
+        errs.append("exclude_warnings must be true or false")
+    x = values["max_above_level_pct"]
+    lo, hi = ABOVE_LEVEL_RANGE
+    if not (isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and lo <= x <= hi):
+        errs.append(f"max_above_level_pct must be a number from {lo} to {hi}")
+    if errs:
+        return ui_state(), errs
+
+    filters = {**(cfg.get("filters") or {}), "exclude_warnings": values["exclude_warnings"],
+               "max_above_level_pct": round(float(x), 2)}
+    expect = {**cfg, "default": values["default"], "n": n, "filters": filters}
+    raw = RECIPES_FILE.read_text(encoding="utf-8")
+    text = re.sub(r'(?m)^(\s*"default"\s*:\s*)"[^"\n]*"', lambda m: m.group(1) + json.dumps(values["default"]), raw, count=1)
+    text = re.sub(r'(?m)^(\s*"n"\s*:\s*)\d+', lambda m: m.group(1) + str(n), text, count=1)
+    text = re.sub(r'(?m)^(\s*"filters"\s*:\s*)\{[^{}]*\}', lambda m: m.group(1) + json.dumps(filters), text, count=1)
+    try:
+        ok = json.loads(text) == expect
+    except ValueError:
+        ok = False
+    if not ok:
+        text = json.dumps(expect, indent=1, ensure_ascii=False) + "\n"
+    tmp = RECIPES_FILE.with_suffix(".json.tmp")
+    tmp.write_bytes(text.encode("utf-8"))            # bytes: the file's own line endings, untranslated
+    os.replace(tmp, RECIPES_FILE)
+    return ui_state(), []
+
+
 def _rs_for(C: pd.DataFrame, V: pd.DataFrame, asof: str, tickers: list[str]) -> pd.DataFrame:
     """rs_sec_63 / rs_sec_252 / rs_mkt_63 / rs_sub_63 on `asof`, as rs_study.py (the stock left
     out of its own group), from the last 300 sessions only."""
@@ -505,7 +583,54 @@ def render(asof: str) -> Path:
     return p
 
 
+def selftest() -> int:
+    """The Settings page's save, on a scratch copy of the recipes file (the real one is untouched):
+    a save of unchanged values leaves the file byte for byte; a change touches only its own lines;
+    bad input saves nothing; a layout the in-place edit cannot handle is rewritten, never saved wrong."""
+    global RECIPES_FILE
+    import shutil
+    import tempfile
+    real = RECIPES_FILE
+    with tempfile.TemporaryDirectory() as td:
+        RECIPES_FILE = Path(td) / "shortlist_recipes.json"
+        shutil.copyfile(real, RECIPES_FILE)
+        try:
+            orig = RECIPES_FILE.read_bytes()
+            st, errs = apply_ui(ui_state())
+            assert not errs and RECIPES_FILE.read_bytes() == orig, ("a no-change save altered the file", errs)
+            names = [r["name"] for r in recipes()["recipes"]]
+            v = {"default": names[-1], "n": 7, "exclude_warnings": not st["exclude_warnings"], "max_above_level_pct": 4.5}
+            st2, errs = apply_ui(v)
+            assert not errs and st2 == v, (errs, st2)
+            a, b = orig.decode().splitlines(), RECIPES_FILE.read_text(encoding="utf-8").splitlines()
+            changed = [i for i, (x, y) in enumerate(zip(a, b)) if x != y]
+            assert len(a) == len(b) and len(changed) == 3, f"changed lines {changed}"
+            assert recipes()["recipes"] == json.loads(orig)["recipes"], "the rankings themselves changed"
+            before = RECIPES_FILE.read_bytes()
+            for bad in ({**v, "default": "nope"}, {**v, "n": 0}, {**v, "n": True}, {**v, "n": 3.0},
+                        {**v, "n": recipes()["max_n"] + 1}, {**v, "max_above_level_pct": 7},
+                        {**v, "max_above_level_pct": float("nan")}, {**v, "exclude_warnings": 1},
+                        {**v, "extra": 1}, {k: x for k, x in v.items() if k != "n"}, [], None):
+                _s, e = apply_ui(bad)
+                assert e, f"accepted {bad!r:.100}"
+                assert RECIPES_FILE.read_bytes() == before, "a refused change was saved"
+            # a hand-made layout the in-place edit cannot follow: rewritten whole, still correct
+            cfg = json.loads(before)
+            cfg["filters"] = {"exclude_warnings": True, "nested": {"x": 1}, "max_above_level_pct": 6.0}
+            RECIPES_FILE.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
+            st3, errs = apply_ui({**v, "n": 9})
+            got = recipes()
+            assert not errs and got["n"] == 9 and got["filters"]["nested"] == {"x": 1}, (errs, got.get("filters"))
+        finally:
+            RECIPES_FILE = real
+    print("  [shortlist] the Settings page's save: no-change save byte-identical, a change touches 3 "
+          "lines, 12 kinds of bad input refused, an unfamiliar layout rewritten correctly")
+    return 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return selftest()
     if "--build" in sys.argv:
         i = sys.argv.index("--build")
         asof = sys.argv[i + 1] if len(sys.argv) > i + 1 and not sys.argv[i + 1].startswith("-") else None

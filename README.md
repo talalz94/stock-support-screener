@@ -104,6 +104,9 @@ same menu (Today, then Lists / Research / Stocks / System, and a ticker box); ea
 type has a folder with `latest.html` in it (dated copies beside it).
 
 - **`reports\index.html`** — Today (`today_page.py`), the home page since 2026-11-08
+- **`reports\settings.html`** — Settings: the theme and Today's cards are kept in the browser;
+  the stock page's sections and tabs and the shortlist's ranking, size and filters are saved to
+  the project's files, which needs the local server (`python serve.py --open`)
 - **`reports\system.html`** — Status: job steps, stores, run history (`dashboard.py`). It
   reads the job table and file sizes only, so opening it never costs anything and never
   triggers work. Until 2026-11-08 this was `index.html`.
@@ -486,6 +489,7 @@ as bankruptcy text and asserts no metric moves.
 | **`orchestrator.py`** | **THE scheduled entry point** — 37-step registry, watermark catch-up, `data/_jobs.parquet` |
 | **`dashboard.py`** | **the status hub**, `reports/system.html` — read-only, never triggers work |
 | **`today_page.py`** | **Today**, `reports/index.html` (the home page) — market, shortlist top 5, watchlists, this week, narrative |
+| **`settings_page.py`** | **Settings**, `reports/settings.html` — theme and Today's cards (this browser); stock-page sections and tabs, shortlist ranking, size and filters (project files, saved through `serve.py`) |
 
 ---
 

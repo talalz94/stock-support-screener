@@ -10,6 +10,10 @@ What the per-stock profile view shows, and in what order.
 Stored as `data/_profile.json`. One file, one profile -- named profiles can come
 later, and the schema is versioned so adding one does not invalidate this.
 
+Since 2026-11-09 the stock page groups its sections into TABS (`TABS`, `tab_groups`), and the
+Settings page (`settings_page.py`) edits the layout through `ui_state` / `apply_ui`: every value
+checked, nothing saved when one is wrong, and fields the page does not show left as they are.
+
 WHY A REGISTRY OF BLOCKS RATHER THAN A LIST OF METRICS
 --------------------------------------------------------
 The ask was "I want to see only some fundamentals, 2 plots, 2 sentiment
@@ -117,7 +121,44 @@ DEFAULT_PROFILE: dict[str, Any] = {
         # news-event study measured as warnings (news_events, 2026-11-01).
         "events": {"enabled": True, "limit": 10},
     },
+    # Sections grouped into tabs (2026-11-09: a stock page was 7,000 px at a desktop width and
+    # 14,000 on a phone). The header stays above the tabs. A section no tab names lands in a
+    # "More" tab rather than vanishing; `enabled: False` gives one long page as before.
+    "tabs": {"enabled": True, "default": "overview",
+             "assign": {"chart": "overview", "relative": "overview", "radar": "overview",
+                        "insider": "insiders", "events": "insiders",
+                        "financials": "fundamentals", "fundamentals": "fundamentals",
+                        "sentiment": "news", "hype": "news"}},
 }
+
+# The tabs: a fixed set, so a layout can never name a tab that does not exist.
+# (key, label, short label for a phone)
+TABS = (("overview", "Overview", "Overview"),
+        ("fundamentals", "Fundamentals", "Fundamentals"),
+        ("insiders", "Insiders & filings", "Insiders"),
+        ("news", "News & sentiment", "News"))
+TAB_KEYS = tuple(k for k, _l, _s in TABS)
+
+# The sections a reader sees, in the Settings page's words. Three blocks render inside a host
+# and follow its tab: `scores` is the composite card beside the radar, `growth` the growth rows
+# under the financials (its switch is a Financials option), and `levels` has no effect of its
+# own -- the chart always draws the support level.
+SECTIONS = {
+    "chart": ("Price chart", "price, volume and the support level"),
+    "relative": ("Against the market and sector", "the stock vs SPY, its sector and sub-industry"),
+    "radar": ("Score radar", "the four pillars and the composite scores"),
+    "insider": ("Insider and House trades", "purchases, sales and each buyer's record"),
+    "events": ("Filings and earnings", "the next earnings date and recent SEC filings"),
+    "financials": ("Financials", "annual and quarterly statements, with growth rows"),
+    "fundamentals": ("Fundamental metrics", "valuation, quality and balance-sheet metrics"),
+    "sentiment": ("Sentiment", "news tone and the age of the newest article"),
+    "hype": ("Hype", "attention, premium and stretch"),
+}
+HOSTED = {"scores": "radar", "growth": "financials", "levels": "chart"}
+# Must match stock_profile.CHART_WINDOWS and REL_WINDOWS (stock_profile.selftest checks).
+CHART_WINDOW_CHOICES = ("1M", "3M", "6M", "1Y", "5Y", "MAX")
+RELATIVE_WINDOW_CHOICES = (21, 63, 126, 252)
+EVENTS_LIMIT_RANGE = (1, 50)
 
 
 def load() -> dict:
@@ -150,6 +191,15 @@ def load() -> dict:
         # Unknown blocks are KEPT -- see the module docstring.
         prof["blocks"].setdefault(key, {})
         prof["blocks"][key].update(block)
+    # Tabs: the saved choices over the defaults, so a section added later still gets a tab.
+    t = saved.get("tabs")
+    if isinstance(t, dict):
+        if isinstance(t.get("enabled"), bool):
+            prof["tabs"]["enabled"] = t["enabled"]
+        if t.get("default") in TAB_KEYS:
+            prof["tabs"]["default"] = t["default"]
+        if isinstance(t.get("assign"), dict):
+            prof["tabs"]["assign"].update({str(k): str(v) for k, v in t["assign"].items()})
 
     return _reconcile(prof)
 
@@ -181,6 +231,119 @@ def blocks_in_order(prof: dict | None = None) -> list[tuple[str, dict]]:
         if isinstance(block, dict) and block.get("enabled", True):
             out.append((key, block))
     return out
+
+
+def tab_groups(prof: dict, keys: list[str]) -> list[tuple[str, str, str, list[str]]]:
+    """The rendered blocks `keys` (header excluded, in the profile's order) grouped into tabs:
+    [(tab key, label, short label, [block keys])], tabs in TABS order and empty ones left out.
+    [] when tabs are switched off. A block no tab names goes to a "More" tab at the end."""
+    t = prof.get("tabs") or {}
+    if not t.get("enabled", True):
+        return []
+    assign = t.get("assign") or {}
+    groups: dict[str, list[str]] = {k: [] for k in TAB_KEYS}
+    more = []
+    for key in keys:
+        tab = assign.get(HOSTED.get(key, key))
+        (groups[tab] if tab in groups else more).append(key)
+    out = [(k, label, short, groups[k]) for k, label, short in TABS if groups[k]]
+    if more:
+        out.append(("more", "More", "More", more))
+    return out
+
+
+# ------------------------------------------------------------- what the Settings page edits
+def ui_state(prof: dict | None = None) -> dict:
+    """The stock-page layout as the Settings page edits it. Every value is valid by
+    construction: anything out of range in the profile shows as its default."""
+    prof = prof or load()
+    b = prof.get("blocks") or {}
+    t = prof.get("tabs") or {}
+    assign = t.get("assign") or {}
+    order = [k for k in prof.get("order", []) if k in SECTIONS]
+    order += [k for k in SECTIONS if k not in order]
+    win = str((b.get("chart") or {}).get("window") or "1Y").upper()
+    rel = (b.get("relative") or {}).get("window")
+    lim = (b.get("events") or {}).get("limit")
+    return {
+        "order": order,
+        "enabled": {k: bool((b.get(k) or {}).get("enabled", True)) for k in SECTIONS},
+        "tab": {k: assign.get(k) if assign.get(k) in TAB_KEYS
+                else DEFAULT_PROFILE["tabs"]["assign"].get(k, TAB_KEYS[0]) for k in SECTIONS},
+        "tabs_on": bool(t.get("enabled", True)),
+        "default_tab": t.get("default") if t.get("default") in TAB_KEYS else TAB_KEYS[0],
+        "chart_window": win if win in CHART_WINDOW_CHOICES else "1Y",
+        "relative_window": rel if rel in RELATIVE_WINDOW_CHOICES else 252,
+        "fin_freq": (b.get("financials") or {}).get("freq") if (b.get("financials") or {}).get("freq") in ("A", "Q") else "A",
+        "growth_rows": bool((b.get("growth") or {}).get("enabled", True)),
+        "events_limit": (lim if isinstance(lim, int) and not isinstance(lim, bool)
+                         and EVENTS_LIMIT_RANGE[0] <= lim <= EVENTS_LIMIT_RANGE[1] else 10),
+    }
+
+
+def ui_defaults() -> dict:
+    return ui_state(_reconcile(json.loads(json.dumps(DEFAULT_PROFILE))))
+
+
+def apply_ui(values: Any) -> tuple[dict, list[str]]:
+    """Check what the Settings page sent and save it. Returns (the page's new state, problems).
+    NOTHING is saved when there is any problem, and only the fields the page edits change:
+    metric lists, limits and blocks the page does not show are kept as they are."""
+    errs: list[str] = []
+    if not isinstance(values, dict):
+        return ui_state(), ["expected an object of settings"]
+    want = set(ui_defaults())
+    missing, extra = sorted(want - set(values)), sorted(set(values) - want)
+    if missing:
+        errs.append(f"missing: {', '.join(missing)}")
+    if extra:
+        errs.append(f"unknown: {', '.join(extra)}")
+    if errs:
+        return ui_state(), errs
+
+    def is_int(x) -> bool:
+        return isinstance(x, int) and not isinstance(x, bool)
+
+    order, enabled, tab = values["order"], values["enabled"], values["tab"]
+    if not (isinstance(order, list) and len(order) == len(SECTIONS) and set(order) == set(SECTIONS)):
+        errs.append("order must name every section exactly once")
+    if not (isinstance(enabled, dict) and set(enabled) == set(SECTIONS)
+            and all(isinstance(v, bool) for v in enabled.values())):
+        errs.append("each section needs an on/off value")
+    if not (isinstance(tab, dict) and set(tab) == set(SECTIONS) and all(v in TAB_KEYS for v in tab.values())):
+        errs.append(f"each section needs a tab, one of: {', '.join(TAB_KEYS)}")
+    if not isinstance(values["tabs_on"], bool):
+        errs.append("tabs_on must be true or false")
+    if values["default_tab"] not in TAB_KEYS:
+        errs.append(f"default_tab must be one of: {', '.join(TAB_KEYS)}")
+    if values["chart_window"] not in CHART_WINDOW_CHOICES:
+        errs.append(f"chart_window must be one of: {', '.join(CHART_WINDOW_CHOICES)}")
+    if not (is_int(values["relative_window"]) and values["relative_window"] in RELATIVE_WINDOW_CHOICES):
+        errs.append("relative_window must be one of: " + ", ".join(map(str, RELATIVE_WINDOW_CHOICES)))
+    if values["fin_freq"] not in ("A", "Q"):
+        errs.append("fin_freq must be A or Q")
+    if not isinstance(values["growth_rows"], bool):
+        errs.append("growth_rows must be true or false")
+    lo, hi = EVENTS_LIMIT_RANGE
+    if not (is_int(values["events_limit"]) and lo <= values["events_limit"] <= hi):
+        errs.append(f"events_limit must be a whole number from {lo} to {hi}")
+    if errs:
+        return ui_state(), errs
+
+    prof = load()
+    rest = [k for k in prof["order"] if k not in SECTIONS and k != "header"]
+    prof["order"] = ["header"] + list(order) + rest
+    for k, on in enabled.items():
+        prof["blocks"].setdefault(k, {})["enabled"] = on
+    prof["tabs"] = {"enabled": values["tabs_on"], "default": values["default_tab"],
+                    "assign": {**(prof.get("tabs") or {}).get("assign", {}), **tab}}
+    prof["blocks"].setdefault("chart", {})["window"] = values["chart_window"]
+    prof["blocks"].setdefault("relative", {})["window"] = values["relative_window"]
+    prof["blocks"].setdefault("financials", {})["freq"] = values["fin_freq"]
+    prof["blocks"].setdefault("growth", {})["enabled"] = values["growth_rows"]
+    prof["blocks"].setdefault("events", {})["limit"] = values["events_limit"]
+    save(prof)
+    return ui_state(load()), []
 
 
 def set_enabled(key: str, on: bool) -> dict:
@@ -244,9 +407,64 @@ def selftest(verbose: bool = True) -> None:
 
     enabled = blocks_in_order(prof)
     assert enabled, "no blocks enabled -- the profile page would be empty"
+
+    # --- tabs and the Settings page's save, on a scratch profile: the real one is never touched
+    global PROFILE_FILE
+    import tempfile
+    from pathlib import Path
+    real = PROFILE_FILE
+    with tempfile.TemporaryDirectory() as td:
+        PROFILE_FILE = Path(td) / "_profile.json"
+        try:
+            d = ui_defaults()
+            assert set(d["order"]) == set(SECTIONS) and set(d["tab"]) == set(SECTIONS)
+            grouped = tab_groups(load(), [k for k in load()["order"] if k != "header"])
+            flat = [k for _t, _l, _s, ks in grouped for k in ks]
+            assert sorted(flat) == sorted(k for k in load()["order"] if k != "header"), \
+                "a section is in no tab or in two"
+            assert [g[0] for g in grouped] == list(TAB_KEYS) and "more" not in [g[0] for g in grouped], \
+                f"every default section should have a named tab: {grouped}"
+            # a valid change saves, and only what the page edits changes
+            v = json.loads(json.dumps(d))
+            v["order"] = list(reversed(d["order"]))
+            v["enabled"]["hype"] = False
+            v["tab"]["events"] = "news"
+            v.update(tabs_on=True, default_tab="fundamentals", chart_window="6M",
+                     relative_window=63, fin_freq="Q", growth_rows=False, events_limit=5)
+            got, errs = apply_ui(v)
+            assert not errs and got == v, (errs, got)
+            p = load()
+            assert p["order"][0] == "header" and p["blocks"]["fundamentals"]["metrics"] == \
+                DEFAULT_PROFILE["blocks"]["fundamentals"]["metrics"], "a field the page does not edit changed"
+            assert not p["blocks"]["hype"]["enabled"] and p["blocks"]["chart"]["window"] == "6M"
+            news = [ks for t, _l, _s, ks in tab_groups(p, [k for k in p["order"] if k != "header"]) if t == "news"][0]
+            assert "events" in news, news
+            # anything wrong saves NOTHING
+            before = PROFILE_FILE.read_text(encoding="utf-8")
+            for bad in ({**v, "order": v["order"][:-1]}, {**v, "default_tab": "nope"},
+                        {**v, "events_limit": True}, {**v, "events_limit": 0}, {**v, "chart_window": "2Y"},
+                        {**v, "relative_window": 64}, {**v, "tab": {**v["tab"], "chart": "x"}},
+                        {**v, "enabled": {**v["enabled"], "chart": "yes"}}, {**v, "surprise": 1},
+                        {k: x for k, x in v.items() if k != "fin_freq"}, [], "x"):
+                _s, e = apply_ui(bad)
+                assert e, f"accepted a bad value: {bad!r:.120}"
+                assert PROFILE_FILE.read_text(encoding="utf-8") == before, "a refused change was saved"
+            # a hand-edited bad value shows as its default, so the page never shows a stale choice
+            raw = json.loads(before)
+            raw["blocks"]["chart"]["window"] = "2y"
+            raw["tabs"]["default"] = "nope"
+            PROFILE_FILE.write_text(json.dumps(raw), encoding="utf-8")
+            st = ui_state()
+            assert st["chart_window"] == "1Y" and st["default_tab"] in TAB_KEYS
+            # tabs off: one long page
+            v2 = {**v, "tabs_on": False}
+            assert not apply_ui(v2)[1] and tab_groups(load(), ["chart"]) == []
+        finally:
+            PROFILE_FILE = real
     if verbose:
         print(f"  [settings] schema v{SCHEMA_VERSION}, "
-              f"{len(prof['blocks'])} block(s), {len(enabled)} enabled")
+              f"{len(prof['blocks'])} block(s), {len(enabled)} enabled; tabs cover every section; "
+              f"the Settings page's save refuses 12 kinds of bad input and saves nothing then")
 
 
 def main() -> int:

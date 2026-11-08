@@ -33,8 +33,25 @@ import math
 import re
 import sys
 
-# The menu's own rules, kept apart so `refresh_nav()` can bring an already-written page's
-# menu up to date: the markers let it find and replace exactly this block.
+# The two palettes, written ONCE: the page rules, the Settings page's theme switch and the
+# contrast test (_palettes) all come from these.
+PALETTE_LIGHT = """
+  --bg:#f7f8fa; --panel:#fff; --ink:#12161c; --muted:#5b6572; --line:#e2e6ec;
+  --accent:#2c68dc; --grid:#eef1f5; --head:#f0f2f5;
+  --pos:#1a7f37; --posbg:#dafbe1; --neg:#cf222e; --negbg:#ffebe9;
+  --warn:#9a6700; --warnbg:#fff8c5; --blk:#8250df; --blkbg:#fbefff;
+  --skip:#676f79; --skipbg:#f0f2f5;
+"""
+PALETTE_DARK = """
+  --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#262c36;
+  --accent:#589bff; --grid:#1c222b; --head:#1b2027;
+  --pos:#3fb950; --posbg:#0f2a17; --neg:#f85149; --negbg:#2d1214;
+  --warn:#d29922; --warnbg:#2b2413; --blk:#a371f7; --blkbg:#221733;
+  --skip:#8b949e; --skipbg:#1b2027;
+"""
+
+# The menu's own rules and the theme switch, kept apart so `refresh_nav()` can bring an
+# already-written page up to date: the markers let it find and replace exactly this block.
 NAV_CSS = """/* nav:start */
 /* ---- nav: the same on every page ---- */
 .nav{position:sticky;top:0;z-index:50;background:var(--panel);
@@ -83,6 +100,12 @@ border-radius:7px;background:var(--bg);color:var(--ink)}
   .nav details.dd .menu{position:absolute;left:8px;right:8px;top:calc(100% + 4px);min-width:0}
   .nav select{margin:0 0 7px 7px;max-width:calc(100% - 14px)}
 }
+/* Appearance chosen on the Settings page (2026-11-09). Without a choice the palette follows the
+   system setting (the rules at the top of ui.CSS); a choice overrides it on every page, the old
+   dated ones included, because this block is what refresh_nav() brings up to date. */
+:root{color-scheme:light dark}
+:root[data-theme="light"]{color-scheme:light;""" + PALETTE_LIGHT + """}
+:root[data-theme="dark"]{color-scheme:dark;""" + PALETTE_DARK + """}
 /* nav:end */
 """
 
@@ -90,20 +113,8 @@ border-radius:7px;background:var(--bg);color:var(--ink)}
 # Colour + type. ONE vocabulary.
 # ===========================================================================
 CSS = """
-:root{
-  --bg:#f7f8fa; --panel:#fff; --ink:#12161c; --muted:#5b6572; --line:#e2e6ec;
-  --accent:#2c68dc; --grid:#eef1f5; --head:#f0f2f5;
-  --pos:#1a7f37; --posbg:#dafbe1; --neg:#cf222e; --negbg:#ffebe9;
-  --warn:#9a6700; --warnbg:#fff8c5; --blk:#8250df; --blkbg:#fbefff;
-  --skip:#676f79; --skipbg:#f0f2f5;
-}
-@media (prefers-color-scheme:dark){:root{
-  --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#262c36;
-  --accent:#589bff; --grid:#1c222b; --head:#1b2027;
-  --pos:#3fb950; --posbg:#0f2a17; --neg:#f85149; --negbg:#2d1214;
-  --warn:#d29922; --warnbg:#2b2413; --blk:#a371f7; --blkbg:#221733;
-  --skip:#8b949e; --skipbg:#1b2027;
-}}
+:root{""" + PALETTE_LIGHT + """}
+@media (prefers-color-scheme:dark){:root{""" + PALETTE_DARK + """}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
 font:13.5px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
@@ -137,6 +148,19 @@ font-weight:400;text-transform:none;letter-spacing:0;white-space:normal}
 .tile .s{font-size:11.5px;color:var(--muted)}
 .cols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;align-items:start}
 .cols2>*{min-width:0}
+/* ---- tabs (2026-11-09, the stock page): see tabs() ---- */
+.tabbar{position:sticky;top:var(--navh,44px);z-index:30;display:flex;gap:2px;margin:8px 0 16px;
+background:var(--bg);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.tabbar::-webkit-scrollbar{display:none}
+.tabbar [role=tab]{padding:10px 14px;font-size:13px;font-weight:600;color:var(--muted);
+white-space:nowrap;border-bottom:2px solid transparent;margin-bottom:-1px}
+.tabbar [role=tab]:hover{color:var(--ink);text-decoration:none}
+.tabbar [role=tab].on{color:var(--accent);border-bottom-color:var(--accent)}
+.tabbar [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:-3px;border-radius:7px 7px 0 0}
+.tabbar .ts{display:none}
+.js .tabpanel:not(.on){display:none}
+.tabpanel>h2:first-child{margin-top:6px}
+@media (max-width:700px){.tabbar [role=tab]{padding:10px 10px}.tabbar .tl{display:none}.tabbar .ts{display:inline}}
 
 /* ---- controls ---- */
 input,select,button{font:12px inherit;padding:5px 9px;border:1px solid var(--line);
@@ -370,6 +394,7 @@ NAV = [
     ("sentiment", "Sentiment", "sentiment/latest.html"),
     ("fundamental", "Fundamental", "fundamental/latest.html"),
     ("profiles", "Profiles", "stock/index.html"),
+    ("settings", "Settings", "settings.html"),
     ("metrics", "Metrics", "metrics.html"),
 ]
 
@@ -516,6 +541,97 @@ def info(text: str) -> str:
     live behind this, not as paragraphs on the page. `text` is HTML the caller escaped."""
     return ('<details class="info"><summary title="what is this?">i</summary>'
             f'<div class="tip">{text}</div></details>')
+
+
+# The tabs' behaviour. Plain links underneath: with scripting off every panel shows and a tab is a
+# jump link to its panel; with it, one panel shows at a time. `#t-<key>` opens a tab directly and
+# survives a reload; switching replaces the address rather than adding history, so Back still
+# leaves the page. Arrow keys, Home and End move between tabs. A panel is hidden until shown, so
+# its wide tables measured 0; a resize event lets every listener re-measure.
+TABS_JS = r"""<script>
+(function(){
+  if (window.__scrTabs) return; window.__scrTabs = 1;
+  var root = document.documentElement;
+  function navH(){ var n = document.querySelector('.nav'); return n ? n.getBoundingClientRect().height : 0; }
+  function setNavH(){ root.style.setProperty('--navh', navH() + 'px'); }
+  function toTop(bar){
+    var s = document.getElementById(bar.id + '-top'); if (!s) return;
+    var y = s.getBoundingClientRect().top + window.scrollY - navH();
+    if (window.scrollY > y) window.scrollTo(0, y);
+  }
+  function select(bar, key, o){
+    o = o || {};
+    var tabs = bar.querySelectorAll('[role=tab]'), hit = null;
+    tabs.forEach(function(t){ if (t.getAttribute('data-tab') === key) hit = t; });
+    if (!hit) return false;
+    tabs.forEach(function(t){
+      var on = t === hit;
+      t.classList.toggle('on', on); t.setAttribute('aria-selected', on ? 'true' : 'false'); t.tabIndex = on ? 0 : -1;
+    });
+    document.querySelectorAll('.tabpanel[data-tabs="' + bar.id + '"]').forEach(function(p){
+      p.classList.toggle('on', p.getAttribute('data-tab') === key);
+    });
+    if (o.focus) hit.focus();
+    if (o.hash) { try { history.replaceState(null, '', '#t-' + key); } catch (e) {} }
+    if (o.scroll) toTop(bar);
+    try { window.dispatchEvent(new Event('resize')); } catch (e) {}
+    return true;
+  }
+  function fromHash(){
+    var m = /^#t-([\w-]+)$/.exec(location.hash || ''); if (!m) return;
+    document.querySelectorAll('.tabbar[role=tablist]').forEach(function(b){
+      if (select(b, m[1], {})) { var s = document.getElementById(b.id + '-top');
+        if (s) window.scrollTo(0, Math.max(0, s.getBoundingClientRect().top + window.scrollY - navH())); }
+    });
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest ? e.target.closest('.tabbar [role=tab]') : null; if (!t) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button > 0) return;
+    e.preventDefault();
+    select(t.closest('.tabbar'), t.getAttribute('data-tab'), {hash: true, scroll: true});
+  });
+  document.addEventListener('keydown', function(e){
+    var t = e.target.closest ? e.target.closest('.tabbar [role=tab]') : null; if (!t) return;
+    var bar = t.closest('.tabbar'), tabs = Array.prototype.slice.call(bar.querySelectorAll('[role=tab]'));
+    var i = tabs.indexOf(t), j = -1;
+    if (e.key === 'ArrowRight') j = (i + 1) % tabs.length;
+    else if (e.key === 'ArrowLeft') j = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') j = 0;
+    else if (e.key === 'End') j = tabs.length - 1;
+    if (j < 0) return;
+    e.preventDefault();
+    select(bar, tabs[j].getAttribute('data-tab'), {hash: true, focus: true});
+  });
+  window.addEventListener('hashchange', fromHash);
+  window.addEventListener('resize', setNavH);
+  setNavH(); fromHash();
+})();
+</script>"""
+
+
+def tabs(bar_id: str, items: list[tuple[str, str, str, str]], default: str | None = None) -> str:
+    """A tab bar and its panels. `items` = (key, label, short label for a phone, panel html).
+    The bar sticks under the menu. `default` (else the first item) is open when the page loads;
+    `#t-<key>` in the address opens another. Keys and the bar id are slugs, checked here."""
+    assert re.fullmatch(r"[a-z][\w-]*", bar_id), bar_id
+    keys = [k for k, _l, _s, _h in items]
+    assert keys and len(set(keys)) == len(keys) and all(re.fullmatch(r"[a-z][\w-]*", k) for k in keys), keys
+    on = default if default in keys else keys[0]
+    tabs_html, panels = [], []
+    for k, label, short, h in items:
+        sel = k == on
+        tabs_html.append(
+            f'<a role="tab" id="{bar_id}-tab-{k}" href="#t-{k}" data-tab="{k}" aria-controls="t-{k}" '
+            f'aria-selected="{"true" if sel else "false"}" tabindex="{0 if sel else -1}"'
+            + (' class="on"' if sel else '') +
+            f'><span class="tl">{esc(label)}</span><span class="ts">{esc(short or label)}</span></a>')
+        panels.append(
+            f'<section class="tabpanel{" on" if sel else ""}" id="t-{k}" role="tabpanel" '
+            f'aria-labelledby="{bar_id}-tab-{k}" data-tabs="{bar_id}" data-tab="{k}">{h}</section>')
+    tabs_html, panels = "".join(tabs_html), "".join(panels)
+    return (f'<div id="{bar_id}-top"></div>'
+            f'<div class="tabbar" id="{bar_id}" role="tablist" aria-label="Sections">{tabs_html}</div>'
+            f'{panels}{TABS_JS}')
 
 
 def card(title: str | None, body: str) -> str:
@@ -1019,7 +1135,8 @@ NAV_GROUPS = [
                   ("insider", "directors' and officers' buying"), ("house", "House members' trades"),
                   ("sentiment", "news tone"), ("fundamental", "business quality")]),
     ("Stocks", [("profiles", "every stock page")]),
-    ("System", [("hub", "jobs, data and runs"), ("metrics", "what every number means")]),
+    ("System", [("hub", "jobs, data and runs"), ("settings", "layout, lists and appearance"),
+                ("metrics", "what every number means")]),
 ]
 
 NAV_JS = r"""<script>
@@ -1030,6 +1147,28 @@ NAV_JS = r"""<script>
     if (t) location.href = up + 'stock/index.html?t=' + encodeURIComponent(t);
     return false;
   };
+  // Preferences kept in THIS browser (the Settings page writes them): the theme, and Today's
+  // cards. Storage can be blocked (private windows, some file:// setups): every read and write
+  // is guarded, and a page without them simply shows its defaults.
+  var PKEY = 'scr.prefs';
+  window.scrPrefs = {
+    get: function(){
+      try { var p = JSON.parse(localStorage.getItem(PKEY) || '{}');
+            return (p && typeof p === 'object' && !Array.isArray(p)) ? p : {}; }
+      catch (e) { return {}; }
+    },
+    set: function(p){
+      try { localStorage.setItem(PKEY, JSON.stringify(p || {})); return true; } catch (e) { return false; }
+    },
+    applyTheme: function(t){
+      var r = document.documentElement;
+      if (t === 'light' || t === 'dark') r.setAttribute('data-theme', t); else r.removeAttribute('data-theme');
+    }
+  };
+  window.scrPrefs.applyTheme(window.scrPrefs.get().theme);
+  window.addEventListener('storage', function(e){
+    if (e.key === PKEY) window.scrPrefs.applyTheme(window.scrPrefs.get().theme);
+  });
   // Menus and (i) notes: one open at a time, closed by a click elsewhere or Escape.
   var OPEN = '.nav details.dd[open], details.info[open]';
   function closeAll(except){
@@ -1108,6 +1247,13 @@ def nav(active: str = "", depth: int = 0, extra: str = "") -> str:
 # highlighted entry. The markers make it exact; pages from before the markers are recognised by
 # the old menu's one fixed shape. Unchanged pages are not rewritten, so running it again is cheap.
 NAV_START, NAV_END = "<!--nav:start-->", "<!--nav:end-->"
+# First thing in <head>: the chosen theme before the first paint (no flash of the wrong one),
+# and a `js` class so script-driven pieces (tabs) can hide what they will manage without a
+# flash either, while a page with scripting off still shows everything.
+EARLY_JS = ('<script id="scr-early">(function(){var r=document.documentElement;r.classList.add("js");'
+            'try{var t=JSON.parse(localStorage.getItem("scr.prefs")||"{}").theme;'
+            'if(t==="light"||t==="dark")r.setAttribute("data-theme",t)}catch(e){}})()</script>')
+_EARLY_RE = re.compile(r'<script id="scr-early">.*?</script>', re.S)
 EXTRA_START, EXTRA_END = "<!--nav:extra-->", "<!--nav:/extra-->"
 _CSS_START, _CSS_END = "/* nav:start */", "/* nav:end */"
 _OLD_NAV = re.compile(r'<div class="nav"><div class="inner">(.*?)</div></div>', re.S)
@@ -1192,6 +1338,10 @@ def refresh_nav(root=None, verbose: bool = True) -> dict:
             elif "</head>" in new:
                 k = new.index("</head>")
                 new = new[:k] + f"<style>{NAV_CSS}</style>" + new[k:]
+            if _EARLY_RE.search(new):
+                new = _EARLY_RE.sub(lambda _m: EARLY_JS, new, count=1)
+            elif '<meta charset="utf-8">' in new:
+                new = new.replace('<meta charset="utf-8">', '<meta charset="utf-8">' + EARLY_JS, 1)
         else:
             out["no_menu"].append(str(f.relative_to(root)))
         for a, b in _HUB_LINKS:
@@ -1246,7 +1396,10 @@ SCROLL_SYNC_JS = """
       if(lock)return; lock=true; box.scrollLeft=bar.scrollLeft; lock=false;});
     box.addEventListener('scroll',function(){
       if(lock)return; lock=true; bar.scrollLeft=box.scrollLeft; lock=false;});
-    window.addEventListener('resize',sync);
+    // Resizes re-measure; a box that was hidden when the page loaded (a closed tab, 2026-11-09)
+    // also gets its first pin to the newest column then -- once, so a later resize never yanks
+    // a reader's own scroll position back to the end.
+    window.addEventListener('resize',function(){ sync(); if(!pinned) toEnd(); });
     try{
       new MutationObserver(sync).observe(box,{childList:true,subtree:true});
       // The annual/quarterly and 6m/1y/5y toggles flip an inline `style` on an
@@ -1260,15 +1413,26 @@ SCROLL_SYNC_JS = """
     // table that is the newest period, which is the one the reader came for --
     // and it lands on the true end, where letting the browser choose settled
     // 11px short and clipped the last value mid-character.
-    function toEnd(){
-      if(!box.classList.contains('start-end')) return;
-      if(box.scrollWidth<=box.clientWidth) return;
+    var pinned=false;
+    function pin(){
       // Hold the lock across BOTH writes. Without it the bar's scroll event
       // fires mid-pin and copies its own clamped value back over the box.
       lock=true;
       box.scrollLeft=box.scrollWidth;
       bar.scrollLeft=box.scrollLeft;
       lock=false;
+    }
+    function toEnd(){
+      if(!box.classList.contains('start-end')) return;
+      if(!box.clientWidth || box.scrollWidth<=box.clientWidth) return;
+      pin();
+      if(!pinned){
+        pinned=true;
+        // A box first shown by a tab narrows once its own vertical scrollbar appears, after
+        // this pin: measured 11px short of the newest column at 375px (2026-11-09). One
+        // settle pass re-pins it; later resizes never do (see the resize listener).
+        setTimeout(function(){ sync(); if(box.scrollLeft+box.clientWidth<box.scrollWidth-1) pin(); },150);
+      }
     }
     function syncEnd(){ sync(); toEnd(); }
     sync(); toEnd();
@@ -1300,7 +1464,7 @@ def page(title: str, body: str, subtitle: str = "", active: str = "",
     # forgets to opt in is the one with the unreachable table.
     combined = SCROLL_SYNC_JS + (script or "")
     js = f"<script>{combined}</script>"
-    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">{EARLY_JS}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title) or "Screener"}</title><style>{CSS}</style>{head}</head>
 <body>{nav(active, depth, nav_extra)}<div class="wrap">
@@ -1489,7 +1653,7 @@ def selftest(verbose: bool = True) -> None:
                    '<a class="" href="../index.html">Status</a><a class="on" href="../stock/index.html">'
                    'Profiles</a><span class="spacer"></span>' + picker + '</div></div>')
         (root / "stock" / "X.html").write_text(
-            '<html><head><style>.nav{}</style></head><body>' + old_nav + '<div class="wrap">'
+            '<html><head><meta charset="utf-8"><style>.nav{}</style></head><body>' + old_nav + '<div class="wrap">'
             '<a href="../index.html">status hub</a></div></body></html>', encoding="utf-8")
         (root / "m.html").write_text(page("M", "<p>x</p>", active="metrics"), encoding="utf-8")
         (root / "plain.html").write_text("<html><body>no menu</body></html>", encoding="utf-8")
@@ -1500,6 +1664,7 @@ def selftest(verbose: bool = True) -> None:
         assert EXTRA_START + picker + EXTRA_END in x, "the session picker was lost"
         assert 'class="dd on"><summary>Stocks' in x, "the highlighted entry was lost"
         assert 'href="../system.html">Status</a>' in x and "status hub" not in x
+        assert x.count('id="scr-early"') == 1, "the early theme script was not added exactly once"
         assert refresh_nav(root, verbose=False)["updated"] == 0, "a second run rewrote pages"
 
     # --- CSS COLLISION GUARD ------------------------------------------------
@@ -1509,7 +1674,7 @@ def selftest(verbose: bool = True) -> None:
     # Nothing errored; the controls simply vanished. Any generic class name
     # added to ui.CSS will do this again, so it is asserted rather than trusted.
     shared = _class_names(CSS)
-    for mod_name in ("explore", "dashboard", "stock_profile", "today_page"):
+    for mod_name in ("explore", "dashboard", "stock_profile", "today_page", "settings_page"):
         try:
             mod = __import__(mod_name)
         except Exception:                                        # noqa: BLE001

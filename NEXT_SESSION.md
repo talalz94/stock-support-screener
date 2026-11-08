@@ -176,6 +176,56 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-09 (later) — STOCK PAGES IN TABS, AND A SETTINGS PAGE
+
+**Asked:** "yes go ahead with the stock page tabs", then "also there is a config page that is professional that can be used to tweak settings/configs, please be neat and elegant and consistent and bug free".
+
+**Stock pages in tabs:**
+- The header (name, price, sector) stays above the tabs: Overview (chart, vs market and sector, radar), Fundamentals (financials, metrics), Insiders & filings, News & sentiment.
+- Measured on AAPL: 7,012 px -> 2,007 px at 1280 wide; 14,193 -> 4,437 px on a phone (the Overview tab).
+- The tab bar sticks under the menu. On a phone it uses short labels and fits without scrolling.
+- `#t-<tab>` opens a tab directly. Arrow keys, Home and End move between tabs. With scripting off every section shows, as before.
+- `ui.tabs()` is a shared component, so other pages can use it.
+- The grouping is a setting (`settings.TABS`, `tab_groups`). A section no tab names goes to a "More" tab, never nowhere.
+- The subtitle's "scores from ..." list and the old footer paragraph now sit behind an (i).
+- **Found while testing:** a wide table in a tab hidden at load never jumped to its newest column. It jumped at width 0, and when shown it was 11 px short because its own scrollbar appeared after the jump. `SCROLL_SYNC_JS` now pins once when the table is first visible, plus one settle pass, and never yanks a reader's scroll on later resizes.
+
+**The Settings page** (`settings_page.py` -> `reports/settings.html`, System -> Settings; Today has a "Customize" link):
+- **This browser** (localStorage `scr.prefs`, applied by the menu script on every page):
+  - **Theme:** Auto / Light / Dark. An early head script applies it before the first paint, and the theme rules live in the refreshed menu style block, so old dated pages follow it too.
+  - **Today's cards:** order and visibility. Today can never be left blank.
+- **Project file** (needs `python serve.py --open`; opened as a file these sections are read-only and say how to change them):
+  - **Stock page:** sections on/off, tab, order, the tab it opens on, chart and comparison windows, Annual or Quarterly first, growth rows, number of filings. Saved to `data/_profile.json`.
+  - **Shortlist:** first ranking (its evidence shown under the choice), size, "skip warning filings", and the maximum distance above the level (0.5-6%; candidates end at 6%). Saved to `shortlist_recipes.json`, editing only the changed lines in place, so the git diff is exactly those lines.
+- **Saving:**
+  - Every save goes through the file owner's validator (`settings.apply_ui`, `shortlist.apply_ui`); nothing is saved when any value is wrong.
+  - The server route is `POST /api/settings`: header-guarded and limited to 64 KB.
+  - The shortlist redraws its page and Today at once.
+  - The Rebuild buttons reuse `/api/run/profiles` and `/api/run/shortlist`, with progress and the result from the job table. A shortlist rebuild then refreshes Today.
+- **Behaviour:**
+  - Unsaved changes are marked, and leaving the page asks first.
+  - Invalid values disable Save with a plain message.
+  - "Restore defaults" fills the form; Save keeps it.
+  - Export and import cover this browser's choices; project settings load into their forms for review.
+
+**Checked:**
+- In the browser, live mode:
+  - **Stock save:** saved with the file checked; one page built with a non-default layout.
+  - **Shortlist save:** the file changed on exactly 2 lines, and Today switched to that ranking's top 5.
+  - **Restore defaults and save:** the file matched git exactly.
+  - **Browser settings:** theme, card order and hiding, all reflected on Today.
+- **The Rebuild button, end to end:**
+  - It ran `profiles` through the server: ok, 501 s, "139 of 139 profile page(s), 20 for the shortlist", recorded in the job table.
+  - The page showed the progress and then that result.
+  - Reloaded mid-run, the page picked the running rebuild back up.
+- **After the rebuild:** all 139 stock pages have tabs. NVDA's annual and quarterly tables open on their newest column at 375 px (exactly at the end, not 11 px short).
+- **File mode:** a static server stood in for a file. Project sections locked with the banner; theme and Today still work.
+- **Whole site:** the page audit is clean on 433 pages, and a second menu refresh changes 0 pages.
+- **Phone width:** no sideways scroll on Settings or on the stock page; the tab bar fits.
+- **Tests:**
+  - Self-tests in `settings`, `shortlist` (`--selftest`), `settings_page` (`--selftest`), `ui` and `stock_profile`. They run on scratch copies; the real files are untouched.
+  - Every inline script on 11 page types compiles under Node.
+
 ## State at 2026-11-09 — UI PHASE 1: A "TODAY" HOME, A GROUPED MENU ON ALL 432 PAGES, NO DEAD LINKS
 
 **Asked:** "yes mock up the Today page and menu first and continue building and checking, no bugs please".

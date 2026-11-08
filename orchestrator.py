@@ -1671,10 +1671,12 @@ def _step_dashboard(asof: str) -> tuple[int, str]:
     on the page it just built -- which is honest, not a bug.
     """
     import dashboard
+    import settings_page
     import today_page
     import ui
     p = dashboard.build(verbose=False)
     t = today_page.build(verbose=False)
+    settings_page.build(verbose=False)       # its values as of tonight, for when it is opened as a file
     # Every page already written gets the current menu: most are dated snapshots no step
     # rebuilds. Unchanged pages are not rewritten (measured: ~4s for 412 pages). A failure here
     # is NAMED in the detail but does not fail the step: Today and Status are already written.
@@ -1903,7 +1905,7 @@ REGISTRY: tuple[Step, ...] = (
     # Session-indexed too: it summarises the newest session, so a new session
     # must refresh it. It costs 0.5s, so there is no reason to be frugal here.
     Step("dashboard", _step_dashboard, config.CADENCE_DAILY, timeout=120,
-         desc="rebuild Today (reports/index.html) and Status (reports/system.html)"),
+         desc="rebuild Today (reports/index.html), Status (system.html) and Settings"),
     Step("docs", _step_docs, config.CADENCE_DAILY, timeout=300,
          session_indexed=False,
          desc="regenerate measured cost/storage tables in the handover docs"),

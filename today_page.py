@@ -38,7 +38,12 @@ CSS = """
 .today-status{font-size:12.5px;color:var(--muted);margin:-8px 0 14px}
 .today-status .ok{color:var(--pos);font-weight:600}
 .today-status .bad{color:var(--neg);font-weight:600}
-.today .card{margin-bottom:16px}
+.today-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start;
+grid-auto-flow:row dense}
+.today-grid>.card{grid-column:1/-1;min-width:0}
+.today-grid>.card.half{grid-column:auto}
+.today-grid>[hidden]{display:none}
+@media (max-width:900px){.today-grid{grid-template-columns:minmax(0,1fr)}}
 .today .card>h3{display:flex;align-items:center;gap:2px}
 .today .card>h3 .more{margin-left:auto;font-size:12px;font-weight:500}
 .today .tile .v.up{color:var(--pos)}
@@ -53,6 +58,26 @@ CSS = """
 .today-earn{font-size:11px;font-weight:600;color:var(--warn);white-space:nowrap}
 @media (max-width:700px){.today .hs{display:none}}
 """
+
+# The cards' order and visibility from the Settings page (kept in this browser). Inline, straight
+# after the cards, so they never show in the default order first. A choice that would hide every
+# card is ignored: Today is never blank.
+ORDER_JS = r"""<script>
+(function(){
+  var t = window.scrPrefs ? window.scrPrefs.get().today : null;
+  if (!t || typeof t !== 'object') return;
+  var grid = document.querySelector('.today-grid'); if (!grid) return;
+  var order = Array.isArray(t.order) ? t.order : [], hidden = Array.isArray(t.hidden) ? t.hidden : [];
+  var cards = Array.prototype.slice.call(grid.querySelectorAll(':scope > [data-card]'));
+  var keys = cards.map(function(c){ return c.getAttribute('data-card'); });
+  if (keys.every(function(k){ return hidden.indexOf(k) >= 0; })) hidden = [];
+  cards.forEach(function(c, i){
+    var j = order.indexOf(keys[i]);
+    c.style.order = j < 0 ? 100 + i : j;
+    c.hidden = hidden.indexOf(keys[i]) >= 0;
+  });
+})();
+</script>"""
 
 
 def _num(v, fmt: str = "{:,.2f}") -> str:
@@ -83,9 +108,13 @@ def _day(d: str) -> str:
         return ui.esc(d)
 
 
+HALF = {"watchlists", "narrative"}       # half-width cards; two share a row on a wide screen
+
+
 def _card(key: str, title: str, note: str, body: str, more: str = "") -> str:
-    """`data-card` names the card for the customisation panel (hide / reorder) to come."""
-    return f'<div class="card" data-card="{key}"><h3>{title}{note}{more}</h3>{body}</div>'
+    """`data-card` is the name the Settings page orders and hides cards by (settings_page.TODAY_CARDS)."""
+    cls = "card half" if key in HALF else "card"
+    return f'<div class="{cls}" data-card="{key}"><h3>{title}{note}{more}</h3>{body}</div>'
 
 
 def _unavailable(key: str, title: str, why: str) -> str:
@@ -371,11 +400,11 @@ def build(asof: str | None = None, verbose: bool = True) -> Path:
                       if st["bad"] else f'all {st["steps"]} steps fine'))
     except Exception:                                            # noqa: BLE001
         pass
-    status += ' &middot; <a href="system.html">Status</a>'
+    status += ' &middot; <a href="system.html">Status</a> &middot; <a href="settings.html#today">Customize</a>'
     body = (f'<div class="today"><div class="today-status">{status}</div>'
-            + cards["market"] + cards["shortlist"] + cards["week"]
-            + f'<div class="cols2">{cards["watchlists"]}{cards["narrative"]}</div>'
-            + '<p class="today-foot">Research screens, not investment advice.</p></div>')
+            '<div class="today-grid">'
+            + "".join(cards[k] for k in ("market", "shortlist", "week", "watchlists", "narrative"))
+            + f'</div>{ORDER_JS}<p class="today-foot">Research screens, not investment advice.</p></div>')
     html = ui.page("Today", body, active="today", depth=0, head=f"<style>{CSS}</style>")
     OUT.write_text(html, encoding="utf-8")
     if verbose:

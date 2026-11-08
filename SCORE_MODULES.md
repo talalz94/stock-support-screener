@@ -57,6 +57,7 @@ backtest just quietly improves.
 | **`orchestrator.py`** | **the one scheduled entry point** | `--status`, `--dry-run`, `--step N` |
 | **`dashboard.py`** | **master hub, `reports/system.html`** (Status) | `--open`, `--print` |
 | **`today_page.py`** | **Today, `reports/index.html`** (the home page) | `--open` |
+| **`settings_page.py`** | **Settings, `reports/settings.html`**; `state()` / `save()` back `GET` / `POST /api/settings` in `serve.py` | `--selftest` |
 | **`stock_profile.py`** | **per-stock sheet: radar + financials** | `AAPL PLTR --open`, `--flags` |
 | `settings.py` | what the profile view shows | `--show`, `--enable X`, `--order` |
 | `serve.py` | opt-in local server; makes hub buttons live | `--open`, `--port` |
@@ -121,6 +122,7 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 | file | written by | what it is |
 |---|---|---|
 | `reports/index.html` | **`today_page.py`** | **Today**, the home page — market, shortlist top 5, watchlists, this week |
+| `reports/settings.html` | **`settings_page.py`** | **Settings** — appearance, Today's cards, stock-page sections and tabs, the shortlist |
 | `reports/system.html` | **`dashboard.py`** | **Status** — job status, stores, run history, links |
 | `reports/metrics.html` | `metrics_doc.py` | the metric dictionary |
 | `reports/explore/latest.html` | `explore.py` | every stock x every score |
