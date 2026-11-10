@@ -148,6 +148,23 @@ font-weight:400;text-transform:none;letter-spacing:0;white-space:normal}
 .tile .s{font-size:11.5px;color:var(--muted)}
 .cols2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:16px;align-items:start}
 .cols2>*{min-width:0}
+/* ---- view bar (2026-11-09): named column sets over a table, Explore and the Shortlist; see
+   viewbar(). Tab-like on a wide screen, a dropdown on a phone. ---- */
+.viewbar{display:flex;align-items:center;gap:2px;margin:0 0 10px;border-bottom:1px solid var(--line)}
+.viewbar .vb{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;min-width:0}
+.viewbar .vb::-webkit-scrollbar{display:none}
+.viewbar button[data-view]{border:0;border-radius:0;background:none;padding:9px 13px;font-size:13px;
+font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.viewbar button[data-view]:hover{color:var(--ink);border-bottom-color:transparent}
+.viewbar button[data-view].on{color:var(--accent);border-bottom-color:var(--accent)}
+.viewbar .vtools{margin-left:auto;display:flex;align-items:center;gap:10px;padding:4px 0 4px 12px;flex:none}
+.viewbar .vsel{display:none;font-size:13px;padding:6px 9px;margin:4px 0}
+@media (max-width:700px){
+  .viewbar{border-bottom:0;flex-wrap:wrap;position:relative}
+  .viewbar .vb{display:none}
+  .viewbar .vsel{display:inline-block}
+  .viewbar .vtools{padding-left:4px;flex:1 1 auto;min-width:0;flex-wrap:wrap;justify-content:space-between}
+}
 /* ---- tabs (2026-11-09, the stock page): see tabs() ---- */
 .tabbar{position:sticky;top:var(--navh,44px);z-index:30;display:flex;gap:2px;margin:8px 0 16px;
 background:var(--bg);border-bottom:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
@@ -632,6 +649,19 @@ def tabs(bar_id: str, items: list[tuple[str, str, str, str]], default: str | Non
     return (f'<div id="{bar_id}-top"></div>'
             f'<div class="tabbar" id="{bar_id}" role="tablist" aria-label="Sections">{tabs_html}</div>'
             f'{panels}{TABS_JS}')
+
+
+def viewbar(bar_id: str, views: list[tuple[str, str, str]], select_id: str, tools: str = "") -> str:
+    """The view bar's markup: one button per view (key, label, hint) and the same choices as a
+    dropdown for a phone. The page's own script marks the chosen one (`.on`, aria-pressed) and
+    keeps the dropdown in step; `tools` sits at the right end (a count, a column chooser)."""
+    assert re.fullmatch(r"[a-z][\w-]*", bar_id) and re.fullmatch(r"[a-zA-Z][\w-]*", select_id)
+    btns = "".join(f'<button type="button" data-view="{esc(k)}" aria-pressed="false" title="{esc(h)}">'
+                   f'{esc(label)}</button>' for k, label, h in views)
+    opts = "".join(f'<option value="{esc(k)}">{esc(label)}</option>' for k, label, _h in views)
+    return (f'<div class="viewbar" id="{bar_id}"><div class="vb" role="group" aria-label="Columns shown">{btns}'
+            f'</div><select class="vsel" id="{select_id}" aria-label="Columns shown">{opts}</select>'
+            f'<div class="vtools">{tools}</div></div>')
 
 
 def card(title: str | None, body: str) -> str:
@@ -1674,7 +1704,7 @@ def selftest(verbose: bool = True) -> None:
     # Nothing errored; the controls simply vanished. Any generic class name
     # added to ui.CSS will do this again, so it is asserted rather than trusted.
     shared = _class_names(CSS)
-    for mod_name in ("explore", "dashboard", "stock_profile", "today_page", "settings_page"):
+    for mod_name in ("explore", "dashboard", "stock_profile", "today_page", "settings_page", "shortlist"):
         try:
             mod = __import__(mod_name)
         except Exception:                                        # noqa: BLE001

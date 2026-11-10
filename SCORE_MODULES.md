@@ -138,7 +138,7 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 | `reports/zones/floor.html` | `floor_page.py` | floor retests after a big run |
 | `reports/sectors/latest.html` | `sectors_page.py` | sector and sub-industry readings, the validated sector score |
 | `reports/watchlist/index.html` | `watchlist_page.py` | saved lists re-measured nightly |
-| `reports/shortlist/latest.html` | `shortlist.py` | the daily shortlist: every ranking, the trade plan, each ranking's forward record |
+| `reports/shortlist/latest.html` | `shortlist.py` | the daily shortlist in three tabs (the list in column views, the forward record, how it works); `--selftest` |
 
 Before this there were 74 files in one flat directory under four naming
 conventions — `explore_<date>` lowercase beside `Pattern_<date>`,

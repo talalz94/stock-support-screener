@@ -440,65 +440,175 @@ COLS = [  # (key, header, kind) -- kind: t text, p price, pc percent (x100), n n
     ("rs_sub_63", "vs sub-ind 3m", "pc"), ("rs_mkt_63", "vs market 3m", "pc"), ("earn_sessions", "Earnings in (sessions)", "i"),
     ("warning", "Warning", "t"), ("insider", "Insider", "t"), ("narrative", "Narrative (group)", "t"),
 ]
+# Column views (2026-11-09: 28 columns at once was "too much info"). Rank, ticker and name always
+# show; earnings, a warning filing and insider buying ride on the ticker as tags in every view.
+# (key, label, what it shows, columns -- None = all of them)
+IDENTITY = ("rank", "ticker", "name")
+VIEWS = (
+    ("plan", "Trade plan", "the price, the support level and the tested plan: buy limit, target +3%, stop -8%",
+     ["price", "level", "above_level_pct", "limit", "target", "stop", "atr_pct"]),
+    ("alt", "Alternative plan", "the symmetric plan that tested about the same: target +5%, stop -5%",
+     ["price", "level", "limit", "target_alt", "stop_alt", "atr_pct"]),
+    ("scores", "Scores", "the business and combined scores, and how often the name runs and recovers",
+     ["sector", "fund", "combo_h60", "combo_h20", "gain_days", "rally_count", "recovery_rate"]),
+    ("strength", "Strength", "against its sector, sub-industry and the market, and the group's narrative",
+     ["sector", "subind", "rs_sec_63", "rs_sub_63", "rs_mkt_63", "narrative"]),
+    ("all", "All columns", "every column", None),
+)
+DEFAULT_VIEW = "plan"
+# Off on a phone, in every view: the default view's table was 623px in a 309px box at 375 wide.
+# What is left there -- ticker, price, buy limit, target, stop -- is the plan itself.
+PHONE_HIDE = ("rank", "name", "level", "above_level_pct", "atr_pct")   # rows stay in rank order
+CSS = """
+.sl{font-size:13px}
+.sl td.n,.sl th.n{text-align:right;font-variant-numeric:tabular-nums}
+.sl td.tk{white-space:nowrap;font-weight:600}
+.sl td.nm{color:var(--muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctl{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:0 0 8px}
+.ctl input[type=number]{width:64px}
+.sl-ev{color:var(--muted);font-size:12px;margin:0 0 12px;max-width:90ch;line-height:1.45}
+.sl-market{font-size:12.5px;color:var(--muted);margin:0 0 14px}
+.sl-market b{color:var(--ink)}
+.tg{margin-left:6px;padding:0 6px;border-radius:9px;font-size:10px;font-weight:600;white-space:nowrap}
+.tg-e{background:var(--warnbg);color:var(--warn)}
+.tg-w{background:var(--negbg);color:var(--neg)}
+.tg-i{background:var(--blkbg);color:var(--blk)}
+.sl-how dl{margin:0;display:grid;grid-template-columns:minmax(0,170px) minmax(0,1fr);gap:12px 20px}
+.sl-how dt{font-weight:600}
+.sl-how dd{margin:0;line-height:1.55;max-width:82ch}
+@media (max-width:700px){
+  .sl .ph{display:none}
+  /* measured 430px of table in a 309px box at 375 wide: the tags sit under the ticker, the
+     headers wrap, and the cells are tighter, so the plan fits without sideways scrolling */
+  .sl td,.sl th{padding:6px}
+  .sl th{white-space:normal}
+  .sl td.tk{white-space:normal}
+  .sl td.tk .tg{display:table;margin:2px 0 0}
+  .ctl label:first-child{flex:1 1 100%}
+  .ctl select{max-width:100%}
+  .sl-how dl{grid-template-columns:minmax(0,1fr);gap:2px}
+  .sl-how dd{margin-bottom:12px}
+}
+"""
 
 PAGE_JS = r"""
 const D = JSON.parse(document.getElementById('sl-data').textContent);
 const sel = document.getElementById('sl-recipe'), num = document.getElementById('sl-n'),
-      hideE = document.getElementById('sl-earn'), tb = document.getElementById('sl-body'),
-      ev = document.getElementById('sl-evidence'), cnt = document.getElementById('sl-count');
+      hideE = document.getElementById('sl-earn'), head = document.getElementById('sl-head'),
+      tb = document.getElementById('sl-body'), ev = document.getElementById('sl-evidence'),
+      cnt = document.getElementById('sl-count'), ncols = document.getElementById('sl-ncols');
+const KIND = {}, LABEL = {};
+D.cols.forEach(([k, h, kind]) => { KIND[k] = kind; LABEL[k] = h; });
+const VKEYS = D.views.map(v => v.key), BUILT = new Set(D.built), PHONE = new Set(D.phone_hide);
+// The view lives in this browser, like Explore's (scr.prefs.shortlist), and the Settings page edits it.
+const PREFS = window.scrPrefs || {get: () => ({}), set: () => false};
+function viewKey() { const s = PREFS.get().shortlist; const v = s && s.view; return VKEYS.indexOf(v) >= 0 ? v : D.default_view; }
 D.recipes.forEach(r => { const o = document.createElement('option'); o.value = r.name;
-  o.textContent = r.label + (r.name === D.default ? ' (best tested)' : ''); sel.appendChild(o); });
+  o.textContent = r.label + (r.name === D.default ? ' (first by your settings)' : ''); sel.appendChild(o); });
 sel.value = D.default; num.value = D.n; num.max = D.max_n;
 function fmt(v, k) { if (v === null || v === undefined || v === '' || (typeof v === 'number' && isNaN(v))) return '—';
   if (k === 'p') return Number(v).toFixed(2); if (k === 'pc') return (Number(v) * 100).toFixed(1) + '%';
   if (k === 'n') return Number(v).toFixed(1); if (k === 'i') return String(Math.round(Number(v))); return String(v); }
+function esc(s) { return String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c])); }
+// A stock page when one is built, else the stock list with the ticker filled in (never a dead link).
+function href(t) { return BUILT.has(t) ? '../stock/' + encodeURIComponent(t) + '.html'
+                                       : '../stock/index.html?t=' + encodeURIComponent(t); }
+const WARN = [['unregistered', 'share sale'], ['material agreement', 'deal ended'], ['restat', 'restatement'],
+              ['auditor', 'auditor change'], ['delist', 'delisting notice']];
+function warnShort(t) { t = String(t).toLowerCase(); for (const [k, s] of WARN) if (t.indexOf(k) >= 0) return s; return 'warning'; }
+const HOUR = {bmo: 'before the open', amc: 'after the close'};
+function tags(x) {
+  let h = '';
+  const es = x.earn_sessions;
+  if (es !== null && es !== undefined && es <= D.earn_soon && x.earnings) {
+    const [d, hr] = String(x.earnings).split(' ');
+    h += '<span class="tg tg-e" title="reports ' + esc(d) + (HOUR[hr] ? ' ' + HOUR[hr] : '') + '; the market reacts in '
+       + Math.round(es) + ' session' + (Math.round(es) === 1 ? '' : 's') + '">earnings ' + esc(d.slice(5)) + '</span>';
+  }
+  if (x.warning) h += '<span class="tg tg-w" title="' + esc(x.warning) + '">⚠ ' + warnShort(x.warning) + '</span>';
+  if (x.insider) h += '<span class="tg tg-i" title="' + esc(x.insider) + '">insider</span>';
+  return h;
+}
 function draw() {
-  const r = D.recipes.find(x => x.name === sel.value);
+  const r = D.recipes.find(x => x.name === sel.value) || D.recipes[0];
   ev.textContent = r.evidence;
+  const vk = viewKey(), view = D.views.find(v => v.key === vk);
+  const cols = ['rank', 'ticker', 'name'].concat(view.cols);
+  document.querySelectorAll('#sl-views button[data-view]').forEach(b => {
+    const on = b.getAttribute('data-view') === vk; b.classList.toggle('on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+  document.getElementById('sl-viewsel').value = vk;
+  ncols.textContent = view.cols.length + ' of ' + (D.cols.length - 3) + ' columns';
+  head.textContent = '';
+  // Text columns carry `lab`: the shared table style right-aligns every cell that does not.
+  cols.forEach(k => { const th = document.createElement('th'); th.textContent = LABEL[k];
+    th.className = (KIND[k] !== 't' ? 'n' : 'lab') + (PHONE.has(k) ? ' ph' : ''); head.appendChild(th); });
   let rows = r.rows;
   if (hideE.checked) rows = rows.filter(x => !(x.earn_sessions !== null && x.earn_sessions <= D.earn_soon));
   const n = Math.max(1, Math.min(D.max_n, parseInt(num.value || D.n, 10)));
   rows = rows.slice(0, n);
   cnt.textContent = rows.length + ' of ' + r.rows.length + ' shown';
-  tb.textContent = '';
-  rows.forEach((x, i) => { const tr = document.createElement('tr');
-    D.cols.forEach(([k, h, kind]) => { const td = document.createElement('td');
-      if (kind !== 't') td.className = 'n';
-      if (k === 'ticker') { const a = document.createElement('a'); a.href = '../stock/' + encodeURIComponent(x.ticker) + '.html';
-        a.textContent = x.ticker; td.appendChild(a); }
-      else if (k === 'rank') td.textContent = String(i + 1);
-      else td.textContent = fmt(x[k], kind);
+  const frag = document.createDocumentFragment();
+  rows.forEach(x => { const tr = document.createElement('tr');
+    cols.forEach(k => { const td = document.createElement('td');
+      if (k === 'ticker') { td.className = 'tk lab'; td.innerHTML = '<a href="' + href(x.ticker) + '">' + esc(x.ticker) + '</a>' + tags(x); }
+      else if (k === 'name') { td.className = 'nm lab ph'; td.textContent = x.name || ''; td.title = x.name || ''; }
+      else { td.className = (KIND[k] !== 't' ? 'n' : 'lab') + (PHONE.has(k) ? ' ph' : ''); td.textContent = fmt(x[k], KIND[k]); }
       tr.appendChild(td); });
-    tb.appendChild(tr); });
+    frag.appendChild(tr); });
+  tb.textContent = ''; tb.appendChild(frag);
 }
+function setView(v) { const p = PREFS.get(); p.shortlist = Object.assign({}, p.shortlist, {view: v}); PREFS.set(p); draw(); }
+document.getElementById('sl-views').addEventListener('click', e => { const b = e.target.closest('button[data-view]'); if (b) setView(b.getAttribute('data-view')); });
+document.getElementById('sl-viewsel').addEventListener('change', function () { setView(this.value); });
+window.addEventListener('storage', e => { if (e.key === 'scr.prefs') draw(); });
 sel.onchange = draw; num.oninput = draw; hideE.onchange = draw; draw();
 """
 
 
-def _regime(asof: str) -> list[str]:
-    import trade_rules_study as TR
-    out = []
+def _market_line(asof: str) -> str:
+    """One line of market context, the same readings and words as Today (today_page), each
+    dated when it lags the session. Notes behind the (i)."""
+    import today_page as TP
+    import ui
+    bits = []
     try:
-        r = TR.regimes([asof]).iloc[0]
-        m = pd.read_parquet(config.DATA / "_macro.parquet")
-        m["session"] = m.session.astype(str).str[:10]
-        vix = m[m.session <= asof].vix.dropna()
-        out.append(f"S&amp;P {'above' if r.m2 == 1 else 'below'} its 50-day, {'above' if r.m1 == 1 else 'below'} its 200-day")
-        if len(vix):
-            out.append(f"VIX {vix.iloc[-1]:.1f} ({'20 or higher' if vix.iloc[-1] >= 20 else 'under 20'})")
-    except Exception as exc:                                     # noqa: BLE001
-        out.append(f"market regime unavailable ({type(exc).__name__})")
-    return out
+        t = TP.spy_trend(asof)
+        if t:
+            bits.append(f"S&amp;P 500 {t['vs50'] * 100:+.1f}% vs its 50-day, {t['vs200'] * 100:+.1f}% vs its 200-day"
+                        + (f" (close of {TP._day(t['session'])})" if t["session"] != asof else ""))
+    except Exception:                                            # noqa: BLE001
+        pass
+    try:
+        r = TP.vix_reading(asof)
+        if r:
+            bits.append(f"VIX {r[0]:.1f}, " + ("20 or more: a nervous market" if r[0] >= 20 else "under 20: calm")
+                        + (f" (reading of {TP._day(r[1])})" if r[1] != asof else ""))
+    except Exception:                                            # noqa: BLE001
+        pass
+    if not bits:
+        return ""
+    note = ui.info("Measured on 2018-2026 bounce trades: trading only when the S&amp;P 500 was above its averages "
+                   "did <b>not</b> help; a VIX of 20 or more helped in both periods but not reliably enough to keep. "
+                   "Context, not a filter.")
+    return "<b>Market</b> &middot; " + " &middot; ".join(bits) + note
+
+
+FORWARD_NOTE = ("Net of 0.10% a round trip. The top N of each ranking per day (N = the size on the Settings page); a "
+                "day counts once its 13-session window has passed (3 days for the limit to fill, 10 to hold). Scored "
+                "on daily bars with the fill day pessimistic (its stop counts, its target does not), so a little "
+                "below the 30-minute backtest.")
 
 
 def _forward_table(cfg: dict) -> str:
     import ui
     if not OUTCOMES.exists():
-        return "<p class='muted'>No entry scored yet: each needs its 3 limit days and 10 hold days to pass.</p>"
+        return ("<p class='muted' style='margin:0'>No entry scored yet: each needs its 3 limit days and 10 hold days "
+                "to pass. The first scores appear about 13 sessions after the first list (2026-11-06).</p>")
     o = pd.read_parquet(OUTCOMES)
     o = o[o["rank"] <= int(cfg["n"])]
     if o.empty:
-        return "<p class='muted'>No entry scored yet.</p>"
+        return ("<p class='muted' style='margin:0'>No entry scored yet: each needs its 3 limit days and 10 hold "
+                "days to pass.</p>")
     rows = []
     for r in cfg["recipes"]:
         x = o[o.recipe == r["name"]]
@@ -511,13 +621,10 @@ def _forward_table(cfg: dict) -> str:
                     f"<td class='n'>{(x.limit_kind == 1).sum() / max(len(lim), 1) * 100:.0f}% / {(x.limit_kind == -1).sum() / max(len(lim), 1) * 100:.0f}%</td>"
                     f"<td class='n'>{x.limit55_ret.dropna().mean() * 100:+.2f}%</td>"
                     f"<td class='n'>{x.open_ret.dropna().mean() * 100:+.2f}%</td></tr>")
-    return ("<table class='sl'><thead><tr><th>Ranking</th><th class='n'>Days</th><th class='n'>Entries</th>"
-            "<th class='n'>Limit filled</th><th class='n'>Limit +3/-8, mean a trade</th><th class='n'>Target / stop hit</th>"
-            "<th class='n'>Limit +5/-5</th><th class='n'>Open +5/-5</th></tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
-            "<p class='muted'>Net of 0.10% a round trip. Top "
-            f"{int(cfg['n'])} of each ranking per day; a day counts once its 13-session window has passed. Scored on "
-            "daily bars (the fill day pessimistic: its stop counts, its target does not), so a little below the "
-            "30-minute backtest.</p>")
+    return ("<div class='scroll'><table class='sl'><thead><tr><th>Ranking</th><th class='n'>Days</th>"
+            "<th class='n'>Entries</th><th class='n'>Limit filled</th><th class='n'>Limit +3/-8, mean a trade</th>"
+            "<th class='n'>Target / stop hit</th><th class='n'>Limit +5/-5</th><th class='n'>Open +5/-5</th></tr></thead>"
+            "<tbody>" + "".join(rows) + "</tbody></table></div>")
 
 
 def render(asof: str) -> Path:
@@ -533,7 +640,7 @@ def render(asof: str) -> Path:
         narr = {(r.level, r.group): f"{r.now:+d} now / {r.m3:+d} 3m" for r in nl.itertuples()}
     except Exception:                                            # noqa: BLE001
         pass
-    keys = [k for k, _, _ in COLS]
+    keys = [k for k, _, _ in COLS] + ["earnings"]           # `earnings` dates the earnings tag
     recs = []
     for r in cfg["recipes"]:
         p = d / f"{r['name']}.csv"
@@ -542,41 +649,65 @@ def render(asof: str) -> Path:
         rows = [{k: (None if (isinstance(v, float) and not np.isfinite(v)) else v) for k, v in zip(keys, vals)}
                 for vals in x.reindex(columns=keys).itertuples(index=False, name=None)]
         recs.append({"name": r["name"], "label": r["label"], "evidence": r["evidence"], "rows": rows})
+    listed = {str(row["ticker"]) for rec in recs for row in rec["rows"] if row.get("ticker")}
+    others = [k for k, _, _ in COLS if k not in IDENTITY]
     data = {"default": cfg["default"], "n": int(cfg["n"]), "max_n": int(cfg["max_n"]), "earn_soon": NE.EARN_SOON,
-            "cols": COLS, "recipes": recs}
+            "cols": COLS, "recipes": recs, "default_view": DEFAULT_VIEW,
+            "views": [{"key": k, "label": label, "cols": list(cols) if cols else others}
+                      for k, label, _h, cols in VIEWS],
+            "built": sorted(listed & ui.built_profiles()), "phone_hide": list(PHONE_HIDE)}
     blob = json.dumps(data, default=str).replace("</", "<\\/")
-    head = ("<style>.sl td.n,.sl th.n{text-align:right;font-variant-numeric:tabular-nums}"
-            ".sl{font-size:13px}.ctl{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:4px 0 10px}"
-            ".ctl input[type=number]{width:64px}</style>")
-    th = "".join(f"<th{' class=n' if kind != 't' else ''}>{ui.esc(h)}</th>" for _, h, kind in COLS)
-    market = " &middot; ".join(_regime(asof))
-    body = (ui.card("Market today", f"<p>{market}</p><p class='muted'>Measured 2018-2026: trading only when the "
-                    "S&amp;P is above its averages did NOT help these trades; a VIX of 20 or more helped in both "
-                    "periods but not reliably. Context, not a filter.</p>")
-            + ui.card("Shortlist", "<div class='ctl'><label>Ranking <select id='sl-recipe'></select></label>"
-                      "<label>Show <input id='sl-n' type='number' min='1'></label>"
-                      f"<label><input id='sl-earn' type='checkbox'> hide earnings within {NE.EARN_SOON} sessions</label>"
-                      "<span id='sl-count' class='muted'></span></div>"
-                      "<p id='sl-evidence' class='muted'></p>"
-                      f"<div class='scroll'><table class='sl'><thead><tr>{th}</tr></thead><tbody id='sl-body'></tbody></table></div>")
-            + ui.card("How each ranking has done since tracking began", _forward_table(cfg))
-            + ui.card("How to read this",
-                      "<p><b>Trade plan</b> (item 1's rule, chosen on 2018-21 dates with 30-minute bars): a buy limit at "
-                      "the level + 0.5%, live for 3 sessions; target +3% and stop -8% from the fill; out after 10 "
-                      "sessions. Measured on 2022-26 with fills that must trade 0.2% through the limit and the fill day "
-                      "in 30-minute order: +0.36% a trade net of costs (t 2.42), positive in 8 of 9 years; about 54% of "
-                      "orders fill. The stop is wider than the target: it wins often and loses more when it loses. "
-                      "The alternative +5% / -5% did about the same (+0.38%, t 2.37). Buying at the next open earned "
-                      "about nothing after costs; buying an hour after the open made no difference.</p>"
-                      "<p><b>Rankings</b>: the default is the one that tested best; every ranking is built and tracked "
-                      "forward each night (data/shortlist/), so the others keep competing. Change the default, size and "
-                      "filters in shortlist_recipes.json.</p>"
-                      "<p class='muted'>Research screens, not investment advice. Narrative: the weekly AI view of the "
-                      "stock's sub-industry (else its sector), shown once the first weekly run has been checked.</p>"))
-    html = ui.page("Shortlist", body, subtitle=f"as of {asof} &middot; {len(D):,} liquid names at or near support",
-                   active="shortlist", depth=1, head=head,
-                   script="") .replace("</body>", f"<script type='application/json' id='sl-data'>{blob}</script>"
-                                                  f"<script>{PAGE_JS}</script></body>")
+    label = next((r["label"] for r in cfg["recipes"] if r["name"] == cfg["default"]), cfg["default"])
+
+    # THREE TABS (2026-11-09: "too much info that needs to be organized properly and neatly"): the
+    # list, its forward record, and how it works. Explanations sit in the last tab or behind (i).
+    market = _market_line(asof)
+    list_tab = (
+        (f'<p class="sl-market">{market}</p>' if market else '')
+        + '<div class="card"><div class="ctl">'
+        '<label>Ranking <select id="sl-recipe"></select></label>'
+        '<label>Show <input id="sl-n" type="number" min="1" inputmode="numeric"></label>'
+        f'<label><input id="sl-earn" type="checkbox"> hide earnings within {NE.EARN_SOON} sessions</label>'
+        '<span id="sl-count" class="muted"></span></div>'
+        '<p id="sl-evidence" class="sl-ev"></p>'
+        + ui.viewbar("sl-views", [(k, label_, h) for k, label_, h, _c in VIEWS], "sl-viewsel",
+                     tools='<span id="sl-ncols" class="muted" style="font-size:12px"></span>')
+        + '<div class="scroll"><table class="sl"><thead><tr id="sl-head"></tr></thead>'
+          '<tbody id="sl-body"></tbody></table></div></div>')
+    record_tab = ('<div class="card"><h3>How each ranking has done since tracking began'
+                  f'{ui.info(FORWARD_NOTE)}</h3>{_forward_table(cfg)}</div>')
+    how_tab = (
+        '<div class="card sl-how"><dl>'
+        '<dt>The trade plan</dt><dd>A buy limit at the support level + 0.5%, good for 3 sessions; then a target '
+        'of +3% and a stop of &minus;8% from the fill, out after 10 sessions. Chosen on 2018-2021 dates with '
+        '30-minute bars.</dd>'
+        '<dt>What it measured</dt><dd>On 2022-2026, counting only fills that traded 0.2% through the limit, with '
+        'the fill day in 30-minute order: +0.36% a trade after costs (t 2.42), positive in 8 of 9 years. About '
+        '54% of orders fill. The stop is wider than the target, so it wins often and loses more when it '
+        'loses.</dd>'
+        '<dt>The alternative</dt><dd>+5% / &minus;5% did about the same: +0.38% a trade (t 2.37).</dd>'
+        '<dt>When to buy</dt><dd>Buying at the next open earned about nothing after costs, and buying an hour '
+        'after the open made no difference: the limit order at the level is what measured.</dd>'
+        '<dt>The rankings</dt><dd>The first one shown is your choice on the <a href="../settings.html#shortlist">'
+        'Settings</a> page (out of the box, the one that tested best). Every ranking is built and tracked forward '
+        'each night, so the others keep competing: see Forward record. The size and the filters are set there '
+        'too.</dd>'
+        f'<dt>The tags</dt><dd><span class="tg tg-e" style="margin-left:0">earnings</span> reports within '
+        f'{NE.EARN_SOON} sessions, inside the trade&rsquo;s window (more stop-outs: 41% against 34%). '
+        '<span class="tg tg-w" style="margin-left:0">&#9888;</span> a recent warning filing, measured as negative '
+        'for the weeks after. <span class="tg tg-i" style="margin-left:0">insider</span> a rare insider buy at '
+        'the level.</dd>'
+        '<dt>Narrative</dt><dd>The weekly AI view of the stock&rsquo;s sub-industry (else its sector), shown once '
+        'the first weekly run has been checked. It carries no weight anywhere yet.</dd>'
+        '</dl><p class="muted" style="margin:16px 0 0">Research screens, not investment advice.</p></div>')
+    body = (ui.tabs("sltabs", [("list", "Today's list", "List", list_tab),
+                               ("record", "Forward record", "Record", record_tab),
+                               ("how", "How it works", "How", how_tab)], default="list")
+            + f'<script type="application/json" id="sl-data">{blob}</script>')
+    html = ui.page("Shortlist", body,
+                   subtitle=(f"as of {asof} &middot; {len(D):,} liquid names at or near support &middot; "
+                             f"first: <b>{ui.esc(label)}</b> (<a href=\"../settings.html#shortlist\">change</a>)"),
+                   active="shortlist", depth=1, head=f"<style>{CSS}</style>", script=PAGE_JS)
     PAGE.mkdir(parents=True, exist_ok=True)
     p = PAGE / "latest.html"
     p.write_text(html, encoding="utf-8")

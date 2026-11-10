@@ -372,17 +372,9 @@ background:var(--panel);z-index:1}
 .na{color:var(--muted)}
 .sorted{color:var(--accent)}
 .tv{font-size:11px;color:var(--muted);margin-left:5px}
-/* Column views (2026-11-09): tab-like, the same look as a stock page's tabs. */
-.viewbar{display:flex;align-items:center;gap:2px;margin:0 0 10px;border-bottom:1px solid var(--line)}
-.viewbar .vb{display:flex;gap:2px;overflow-x:auto;scrollbar-width:none;min-width:0}
-.viewbar .vb::-webkit-scrollbar{display:none}
-.viewbar button[data-view]{border:0;border-radius:0;background:none;padding:9px 13px;font-size:13px;
-font-weight:600;color:var(--muted);border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
-.viewbar button[data-view]:hover{color:var(--ink);border-bottom-color:transparent}
-.viewbar button[data-view].on{color:var(--accent);border-bottom-color:var(--accent)}
-.viewbar .vtools{margin-left:auto;display:flex;align-items:center;gap:10px;padding:4px 0 4px 12px;flex:none}
+/* Column views (2026-11-09): the shared view bar (ui.viewbar, styles in ui.CSS), plus this
+   page's column count, chooser and the marks for hidden and sort/filter-pinned headers. */
 #colN{color:var(--muted);font-size:12px;white-space:nowrap}
-#viewSel{display:none;font-size:13px;padding:6px 9px;margin:4px 0}
 th.off{display:none}
 th.pinned{box-shadow:inset 0 -2px 0 var(--warn)}
 /* Phones (2026-11-09). Measured at 375px: the 190px rail beside the table left the TABLE 139px
@@ -396,12 +388,8 @@ th.pinned{box-shadow:inset 0 -2px 0 var(--warn)}
   .filters{position:static}
   .filters .rule{flex-wrap:wrap;max-width:100%}
   .filters .rule select{max-width:160px}
-  .viewbar{border-bottom:0;flex-wrap:wrap;position:relative}
-  .viewbar .vb{display:none}
-  #viewSel{display:inline-block}
   /* the count can carry "(1 shown because sorted or filtered)": it wraps rather than
      pushing the page sideways (measured 402px at 375 before) */
-  .viewbar .vtools{padding-left:4px;flex:1 1 auto;min-width:0;flex-wrap:wrap;justify-content:space-between}
   #colN{white-space:normal}
   /* the column list opens the full width of the bar, never past the screen's edge */
   .viewbar .chooser{position:static}
@@ -602,13 +590,18 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
              for k, label, short, hint, want in VIEWS]
     views_js = (VIEWS_JS.replace("__VIEWS__", json.dumps(views, separators=(",", ":")))
                 .replace("__DEFAULT__", DEFAULT_VIEW))
-    view_btns = "".join(
-        f'<button type="button" data-view="{v["key"]}" aria-pressed="false" '
-        f'title="{ui.esc(v["hint"])} ({len(v["cols"])} columns)">{ui.esc(v["label"])}</button>'
-        for v in views) + ('<button type="button" data-view="custom" aria-pressed="false" '
-                           'title="your own set: tick columns under Columns">Custom</button>')
-    view_opts = "".join(f'<option value="{v["key"]}">{ui.esc(v["label"])}</option>' for v in views) \
-        + '<option value="custom">Custom</option>'
+    chooser = ('<span id="colN"></span>'
+               '<span class="chooser" id="chooser">'
+               '<button type="button" id="colsBtn" aria-label="Choose columns">Columns &#9662;</button>'
+               '<div class="pop"><div class="acts">'
+               '<button type="button" data-act="all">all</button>'
+               '<button type="button" data-act="valid" title="only metrics the study found significant at '
+               'some horizon">validated</button>'
+               '<button type="button" data-act="none">none</button></div>'
+               '<div id="colList"></div></div></span>')
+    viewbar_html = ui.viewbar(
+        "viewbar", [(v["key"], v["label"], f'{v["hint"]} ({len(v["cols"])} columns)') for v in views]
+        + [("custom", "Custom", "your own set: tick columns under Columns")], "viewSel", tools=chooser)
     sectors = sorted({s for s in (_s(r[2]) for r in rows) if s})
     sec_opts = "".join(f'<option value="{s}">{s}</option>' for s in sectors)
 
@@ -633,22 +626,7 @@ def render(cols: list[str], rows: list, prov: dict, asof: str,
 <div class="sub">{len(rows):,} tickers &middot; session <b>{asof}</b> &middot;
 scores from {src} </div>
 
-<div class="viewbar" id="viewbar">
-  <div class="vb" role="group" aria-label="Columns shown">{view_btns}</div>
-  <select id="viewSel" aria-label="Columns shown">{view_opts}</select>
-  <div class="vtools"><span id="colN"></span>
-  <span class="chooser" id="chooser">
-    <button type="button" id="colsBtn" aria-label="Choose columns">Columns &#9662;</button>
-    <div class="pop">
-      <div class="acts">
-        <button type="button" data-act="all">all</button>
-        <button type="button" data-act="valid" title="only metrics the study found significant at some horizon">validated</button>
-        <button type="button" data-act="none">none</button>
-      </div>
-      <div id="colList"></div>
-    </div>
-  </span></div>
-</div>
+{viewbar_html}
 
 <div class="filters">
   <input id="q" placeholder="ticker or name..." autocomplete="off">

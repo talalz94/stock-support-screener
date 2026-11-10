@@ -176,6 +176,40 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-11 — THE SHORTLIST PAGE ORGANIZED: THREE TABS, COLUMN VIEWS, TAGS ON THE TICKER
+
+**Asked:** "yes go ahead with the shortlist views, theres too much info that needs to be organized properly and neatly".
+
+**The page** (`shortlist.render`, `reports/shortlist/latest.html`):
+- **Three tabs** (`ui.tabs`): Today's list, Forward record, How it works.
+- **Header:** the subtitle names the ranking shown first, with a "change" link to Settings.
+- **Market line:** one line, the same readings and words as Today (`today_page.spy_trend` / `vix_reading`), each dated when it lags. Its note sits behind an (i). It replaced a card with a paragraph and the slower `trade_rules_study.regimes` call.
+- **The list:** ranking, size and the earnings filter as before, the ranking's evidence as a short line, then the view bar. Rows show each name's true rank in its ranking.
+- **Column views** (`shortlist.VIEWS`, the shared `ui.viewbar` now used by Explore too):
+  - Trade plan (the default: price, level, above level, buy limit, target, stop, ATR)
+  - Alternative plan (+5/-5)
+  - Scores
+  - Strength
+  - All (24)
+- **Tags:** earnings within 10 sessions, a warning filing and a rare insider buy are tags on the ticker in every view, not three columns.
+- **Saved and linked:** the view is kept in this browser (`scr.prefs.shortlist.view`). Stock links go straight to built pages, else to the stock list.
+- **Forward record:** the table with its method note behind the (i). Until the first entry's 13 sessions pass, it says when scores will appear.
+- **How it works:** seven short definitions in place of three paragraphs, and it points at Settings instead of "edit `shortlist_recipes.json`".
+- **On a phone:**
+  - **Hidden:** rank, name, level, above level % and ATR % (`PHONE_HIDE`).
+  - **Compacted:** tags sit under the ticker, headers wrap, and the cells are tighter.
+  - **Measured:** the default view went from 430 px of table in a 309 px box to an exact fit. The other views scroll inside their box, never the page.
+- **Text columns align left**: the shared table style right-aligns every cell without `lab`.
+
+**Settings:** the Explore card became **Tables**, with a Shortlist view choice beside Explore's (same browser setting as each page's view bar). Export, import and reset cover it.
+
+**Checked:**
+- **Desktop and phone:** every view lines up with its headers; the controls, the ranking switch, the earnings filter and size work; the view survives a reload and follows the Tables card.
+- **Phone:** the default view fits with no sideways scroll.
+- **Explore regression:** still fine on the shared view bar.
+- **Site-wide:** the page audit is clean on 451 pages, the scripts compile, and the `ui`, `shortlist`, `settings_page` and `explore` self-tests pass. The recipes file is untouched.
+- **Scheduled runs:** the 2026-11-10 run used this working copy with no errors (shortlist 81 s, explore 15 s, 153 stock pages).
+
 ## State at 2026-11-09 (evening) — EXPLORE GETS COLUMN VIEWS; ITS STRATEGY RAIL NEVER SORTED BY ITS STRATEGY
 
 **Asked:** "yes go ahead with the column presets for explore".
@@ -5154,74 +5188,74 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-09 02:20 — do not edit by hand._
+_Generated 2026-11-10 07:17 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 1.9 min | 8s | 1.9 min | 2.0 min | 67 |
-| `bars` | daily | 80s | 54s | 5.2 min | 10.0 min | 67 |
-| `macro` | daily | 2.0 min | 1.6 min | 3.8 min | 15.0 min | 67 |
-| `news` | daily | 18s | 5s | 31s | 10.0 min | 67 |
-| `news_events` | daily | 4.0 min | 4.0 min | 531.0 min ⚠ | 30.0 min | 9 |
-| `senti_cache` | daily | 9s | 3s | 12s | 10.0 min | 67 |
-| `sentiment` | daily | 40s | 18s | 40s | 15.0 min | 68 |
-| `bounce` | daily | 1.9 min | 41s | 1.9 min | 15.0 min | 68 |
-| `zones` | daily | 2.5 min | 1.6 min | 3.1 min | 30.0 min | 51 |
-| `shortvol` | daily | 11s | 4s | 11s | 10.0 min | 65 |
-| `hype` | daily | 2.7 min | 2.1 min | 3.5 min | 120.0 min | 68 |
-| `provider` | daily | 64.5 min | 65.0 min | 64.5 min | 120.0 min | 60 |
+| `universe` | daily | 8s | 8s | 1.9 min | 2.0 min | 68 |
+| `bars` | daily | 70s | 55s | 2.2 min | 10.0 min | 68 |
+| `macro` | daily | 74s | 1.6 min | 2.0 min | 15.0 min | 68 |
+| `news` | daily | 19s | 5s | 31s | 10.0 min | 68 |
+| `news_events` | daily | 4.2 min | 4.1 min | 531.0 min ⚠ | 30.0 min | 10 |
+| `senti_cache` | daily | 9s | 3s | 12s | 10.0 min | 68 |
+| `sentiment` | daily | 23s | 20s | 40s | 15.0 min | 69 |
+| `bounce` | daily | 66s | 42s | 1.9 min | 15.0 min | 69 |
+| `zones` | daily | 1.7 min | 1.6 min | 2.5 min | 30.0 min | 52 |
+| `shortvol` | daily | 4s | 4s | 11s | 10.0 min | 66 |
+| `hype` | daily | 1.9 min | 2.1 min | 2.7 min | 120.0 min | 69 |
+| `provider` | daily | 71.4 min | 65.0 min | 71.4 min | 120.0 min | 61 |
 | `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 16 |
 | `sec_gap` | weekly | 2.9 min | 5.2 min | 12.1 min | 20.0 min | 15 |
-| `sec_edgar` | daily | 7s | 37s | 581.1 min ⚠ | 30.0 min | 29 |
-| `insider` | daily | 28s | 1.9 min | 3.9 min | 30.0 min | 14 |
-| `congress` | daily | 2s | 8s | 11s | 30.0 min | 14 |
-| `fundamental` | daily | 3.8 min | 3.7 min | 7.3 min | 180.0 min | 76 |
+| `sec_edgar` | daily | 5.5 min | 43s | 581.1 min ⚠ | 30.0 min | 30 |
+| `insider` | daily | 3.4 min | 2.0 min | 3.4 min | 30.0 min | 15 |
+| `congress` | daily | 18s | 9s | 18s | 30.0 min | 15 |
+| `fundamental` | daily | 7.8 min | 3.7 min | 7.8 min | 180.0 min | 77 |
 | `events` | weekly | 8.0 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 16 |
 | `leaderboard` | weekly | 36.6 min | 40.0 min | 91.0 min ⚠ | 90.0 min | 17 |
-| `dip` | daily | 10s | 17s | 10s | 15.0 min | 76 |
-| `insider_score` | daily | 3.9 min | 5.3 min | 7.0 min | 30.0 min | 10 |
-| `combo` | daily | 11s | 18s | 11s | 15.0 min | 75 |
-| `candidates` | daily | 2s | 5s | 3s | 5.0 min | 33 |
-| `floor` | daily | 42s | 53s | 3.0 min | 15.0 min | 27 |
-| `insider_pages` | daily | 5s | 7s | 8s | 15.0 min | 10 |
-| `sectors` | daily | 70s | 2.6 min | 5.8 min | 30.0 min | 26 |
-| `validate` | daily | 9.7 min | 7.1 min | 23.8 min | 60.0 min | 62 |
-| `explore` | daily | 7s | 9s | 9s | 5.0 min | 84 |
-| `snapshots` | daily | 0s | 4s | 16s | 5.0 min | 98 |
-| `profiles` | daily | 5.9 min | 21.3 min | 58.5 min ⚠ | 15.0 min | 79 |
-| `watchlists` | daily | 3s | 3s | 5s | 10.0 min | 6 |
-| `narrative` | daily | 10s | 10s | 10s | 10.0 min | 1 |
-| `shortlist` | daily | 2.3 min | 2.3 min | 2.3 min | 15.0 min | 1 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 88 |
-| `dashboard` | daily | 1s | 0s | 9s | 2.0 min | 91 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 109 |
+| `dip` | daily | 17s | 17s | 17s | 15.0 min | 77 |
+| `insider_score` | daily | 9.7 min | 6.1 min | 9.7 min | 30.0 min | 11 |
+| `combo` | daily | 30s | 19s | 30s | 15.0 min | 76 |
+| `candidates` | daily | 8s | 6s | 8s | 5.0 min | 34 |
+| `floor` | daily | 2.5 min | 54s | 2.5 min | 15.0 min | 28 |
+| `insider_pages` | daily | 6s | 6s | 6s | 15.0 min | 11 |
+| `sectors` | daily | 1.5 min | 2.3 min | 2.3 min | 30.0 min | 27 |
+| `narrative` | daily | 4s | 7s | 10s | 10.0 min | 2 |
+| `shortlist` | daily | 81s | 1.8 min | 2.3 min | 15.0 min | 2 |
+| `validate` | daily | 12.5 min | 7.1 min | 13.1 min | 60.0 min | 63 |
+| `explore` | daily | 15s | 9s | 15s | 5.0 min | 85 |
+| `snapshots` | daily | 14s | 4s | 16s | 5.0 min | 99 |
+| `profiles` | daily | 7.0 min | 21.1 min | 8.4 min | 15.0 min | 81 |
+| `watchlists` | daily | 2s | 3s | 4s | 10.0 min | 7 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 89 |
+| `dashboard` | daily | 6s | 0s | 6s | 2.0 min | 92 |
+| `docs` | daily | 1s | 0s | 1s | 5.0 min | 110 |
 
-**Daily total ≈ 123.5 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 123.8 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-09 02:20 — do not edit by hand._
+_Generated 2026-11-10 07:17 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 123 | 251.2 | 2016-09 → 2026-11 |
-| bars 1h | 5 | 0.8 | 2026-07 → 2026-11 |
+| bars 1d | 122 | 249.9 | 2016-10 → 2026-11 |
+| bars 1h | 5 | 0.9 | 2026-07 → 2026-11 |
 | bars ETF | 125 | 2.9 | 2016-07 → 2026-11 |
-| news | 124 | 176.8 | 2016-08 → 2026-11 |
+| news | 124 | 177.2 | 2016-08 → 2026-11 |
 | sentiment cache | 124 | 12.2 | 2016-08 → 2026-11 |
-| scores | 123 | 339.0 | 2016-09 → 2026-11 |
+| scores | 122 | 340.0 | 2016-10 → 2026-11 |
 | fundamentals | 70 | 345.4 | 2009q2 → 2026q3 |
 | short volume | 76 | 57.3 | 2020-08 → 2026-11 |
-| flags | 70 | 5.9 | 2026-07-31 → 2026-11-06 |
-| rejects | 20 | 7.6 | 2026-10-12 → 2026-11-06 |
-| zones | 51 | 28.7 | 2026-08-27 → 2026-11-06 |
+| flags | 71 | 6.0 | 2026-07-31 → 2026-11-09 |
+| rejects | 21 | 7.9 | 2026-10-12 → 2026-11-09 |
+| zones | 52 | 29.3 | 2026-08-27 → 2026-11-09 |
 | fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 23 | 1.9 | 2009q4 → 2026q3 |
-| loose (macro, universe, jobs, study) | 48 | 312.2 | — |
+| fundamentals (EDGAR filings) | 24 | 2.1 | 2009q4 → 2026q4 |
+| loose (macro, universe, jobs, study) | 48 | 311.8 | — |
 
-**`data/` total ≈ 1,617 MB.** `reports/` is a further 137 MB across 412 pages.
+**`data/` total ≈ 1,618 MB.** `reports/` is a further 153 MB across 451 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -5229,22 +5263,22 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-09 02:20 — do not edit by hand._
+_Generated 2026-11-10 07:17 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 396 | 2016-09-27 → 2026-11-06 |
-| `fundamental` | 61 | 253 | 2016-09-26 → 2026-11-06 |
-| `hype` | 20 | 371 | 2016-10-25 → 2026-11-06 |
-| `dip` | 10 | 298 | 2016-09-27 → 2026-11-06 |
-| `insider` | 8 | 215 | 2016-09-06 → 2026-11-06 |
-| `combo` | 16 | 253 | 2016-11-04 → 2026-11-06 |
+| `sentiment` | 26 | 397 | 2016-09-27 → 2026-11-09 |
+| `fundamental` | 61 | 254 | 2016-09-26 → 2026-11-09 |
+| `hype` | 20 | 372 | 2016-10-25 → 2026-11-09 |
+| `dip` | 10 | 299 | 2016-09-27 → 2026-11-09 |
+| `insider` | 8 | 216 | 2016-09-06 → 2026-11-09 |
+| `combo` | 16 | 254 | 2016-11-04 → 2026-11-09 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-09 02:20 — do not edit by hand._
+_Generated 2026-11-10 07:17 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 
