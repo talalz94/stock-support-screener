@@ -21,6 +21,9 @@ is a standing request, not an optional courtesy.
 - **The GitHub repository is public.** Before every commit, scan the added lines for key-shaped
   strings and for personal information (the owner's name, email address, home folder paths).
 - Commit with `git commit --only <paths>`. Push only when the user asks.
+- Commits use the personal GitHub account `talalz94` (`git config --local user.name` /
+  `user.email`), never a machine's global identity. Before the first commit on a machine, check
+  `git config user.email`; if this repo has no local identity, ask the user to set it.
 - No real people's names in committed code. Congressional (House) trade data stays in `data/`.
 - Lists and scores are research screens, not investment advice, and the pages say so.
 - Never bypass bot protection or a site's terms of use, and never work around a refused permission.

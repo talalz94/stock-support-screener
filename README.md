@@ -188,7 +188,13 @@ over: your keys (`.env`), the data store (`data/`, 3.6 GB on 2026-11-11) and the
    git clone https://github.com/talalz94/stock-support-screener.git "Support Bounce Screener"
    cd "Support Bounce Screener"
    pip install -r requirements.txt
+   git config --local user.name talalz94
+   git config --local user.email <your personal gmail>
    ```
+
+   The last two lines matter: a clone does not carry this repo's identity, and without them
+   commits go out under the machine's global identity (on the original machine, a work address,
+   which had to be rewritten out of the public history on 2026-11-11).
 
 2. **Keys.** Copy `.env` from the old machine, or copy `.env.example` to `.env` and fill it in
    (Alpaca, Finnhub, FRED, and your contact address in `SEC_USER_AGENT`). It is gitignored: never

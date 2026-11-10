@@ -186,7 +186,8 @@ chosen on early dates, tested on later ones, against the plain at-support rule.
 - **Keys:** none of the 6 values in `.env` appears anywhere in the 91 commits' history, and `.env` was never committed (only `.env.example`, the empty template). A pattern scan of all 70,557 added lines found no key-shaped string, only a variable name.
 - **Data:** none tracked (the repository is 3.4 MB of code and docs).
 - **Names:** no House member names or party-state tags in any tracked file. The only personal item in a tracked file is the GitHub user name in `LICENSE`.
-- **Commit author:** every commit carries the git author identity (a work address); it was already public on the 75 pushed commits.
+- **Commit author, fixed the same day at the user's request:** every commit carried the machine's global git identity, a work address. The history was rewritten so all 92 commits read the personal GitHub account (author and committer); only the identities changed, and every commit's files were checked identical. The user force-pushed it (`2204556` -> `6df9fab`), and GitHub's API shows 0 commits with the work address on `main`. The old commits still open by direct link on GitHub until it garbage-collects them (GitHub Support can purge them), and they remain in the 162 clones made before.
+- **This repo now commits as the personal account** (`git config --local`). A clone does not carry that setting, so a new machine sets it first: README "Moving to a new machine", step 1.
 
 **Added for a new machine:**
 - `README.md` "Moving to a new machine": code, keys, the 3.6 GB `data/` folder (not in git: copy it), schedule, app tasks, Claude Code.
