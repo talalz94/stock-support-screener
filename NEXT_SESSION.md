@@ -176,6 +176,25 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-11 (later) — ON GITHUB, WITH WHAT A NEW MACHINE NEEDS
+
+**Asked:** "make sure this project is updated with all the docs and pushed to my github talalz94, so i can continue this project in any new laptop".
+
+**The repository:** `talalz94/stock-support-screener` (the existing `origin`). It is **PUBLIC**: it was created 2026-08-12 and pushed up to 2026-11-02. The 16 commits since then, plus this one, were pushed on 2026-11-11.
+
+**Checked before pushing** (the whole history goes up, not just the latest files):
+- **Keys:** none of the 6 values in `.env` appears anywhere in the 91 commits' history, and `.env` was never committed (only `.env.example`, the empty template). A pattern scan of all 70,557 added lines found no key-shaped string, only a variable name.
+- **Data:** none tracked (the repository is 3.4 MB of code and docs).
+- **Names:** no House member names or party-state tags in any tracked file. The only personal item in a tracked file is the GitHub user name in `LICENSE`.
+- **Commit author:** every commit carries the git author identity (a work address); it was already public on the 75 pushed commits.
+
+**Added for a new machine:**
+- `README.md` "Moving to a new machine": code, keys, the 3.6 GB `data/` folder (not in git: copy it), schedule, app tasks, Claude Code.
+- `setup_orchestrator_task.ps1` registers `Screener-Orchestrator` with the live task's settings, read from the live task: daily 05:00, every 2 hours for 12 hours, start when available, one instance, priority 7, 12-hour limit, 3 restarts 20 minutes apart. `-DryRun` was checked here against the live task; the live task was not touched. `setup_schedule.ps1` (the old 03:00 task, now a no-op) was what Quick start still named.
+- `docs/claude_app_tasks.md`: the three Claude-app tasks with their schedules and prompts, with the folder and the dashboard link left as placeholders because the repository is public. The narrative prompt comes from `python narrative.py --prompt`.
+- `CLAUDE.md`: the working agreements (hard rules, how work is done here, what bites), read by Claude Code at the start of every session. Until now they lived only in one machine's Claude memory.
+- `.env.example` gains `FINNHUB_KEY`, which the code reads but the template never listed.
+
 ## State at 2026-11-11 — THE SHORTLIST PAGE ORGANIZED: THREE TABS, COLUMN VIEWS, TAGS ON THE TICKER
 
 **Asked:** "yes go ahead with the shortlist views, theres too much info that needs to be organized properly and neatly".

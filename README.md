@@ -167,14 +167,47 @@ The same bounce rows are in `reports\Pattern_<date>.csv` for Excel.
 To make it automatic:
 
 ```bash
-powershell -ExecutionPolicy Bypass -File setup_schedule.ps1
+powershell -ExecutionPolicy Bypass -File setup_orchestrator_task.ps1
 ```
 
-That registers `PatternScan-DailyRun` at **03:00** local (= 17:00 ET the previous
-day, an hour after the close) plus an at-logon catch-up, using the same proven
-recipe as the `Stock Screener` project's live task.
+That registers `Screener-Orchestrator`, the nightly run, as it is set up on the original machine:
+05:00 local, then every 2 hours until 17:00 so a sleep or restart costs at most two hours (see
+Daily operation). `-DryRun` shows what it would register. (`setup_schedule.ps1`, which this
+section used to name, registers the old 03:00 `daily_run.py` task, which now does nothing.)
 
 ---
+
+## Moving to a new machine
+
+The repository holds the code and the docs. Three things are not in it and have to be carried
+over: your keys (`.env`), the data store (`data/`, 3.6 GB on 2026-11-11) and the scheduled jobs.
+
+1. **Code.** Install Python 3.13 (tick "Add to PATH") and Git, then:
+
+   ```bash
+   git clone https://github.com/talalz94/stock-support-screener.git "Support Bounce Screener"
+   cd "Support Bounce Screener"
+   pip install -r requirements.txt
+   ```
+
+2. **Keys.** Copy `.env` from the old machine, or copy `.env.example` to `.env` and fill it in
+   (Alpaca, Finnhub, FRED, and your contact address in `SEC_USER_AGENT`). It is gitignored: never
+   commit it.
+3. **Data.** Copy the whole `data/` folder from the old machine (a USB drive or a cloud folder),
+   and `reports/` too if you want the dated snapshots. The stores were built over months by
+   backfills recorded in `NEXT_SESSION.md`, and the forward records (the watchlists, the shortlist
+   ledger, the narrative answers, the job history) exist only there. Starting from an empty `data/`
+   has never been run end to end.
+4. **Check.** `python orchestrator.py --dry-run` lists what is due; `python serve.py --open` opens
+   the pages.
+5. **Schedule.** `powershell -ExecutionPolicy Bypass -File setup_orchestrator_task.ps1` registers
+   the nightly run as it is set up today (`-DryRun` shows it first, `-At` changes the 05:00 start
+   outside Pakistan time). The older `setup_schedule.ps1` registers a task that now does nothing:
+   skip it.
+6. **Claude-app tasks.** Recreate the weekly narrative and the dashboard tracking in the Claude
+   desktop app: [docs/claude_app_tasks.md](docs/claude_app_tasks.md).
+7. **Claude Code.** [CLAUDE.md](CLAUDE.md) carries the working agreements, and Claude reads it at
+   the start of every session. Start a session with "read NEXT_SESSION.md and continue".
 
 ## Reading the report
 
@@ -300,9 +333,9 @@ python orchestrator.py --step NAME   # one step, repeatable; bypasses the retry 
   `setup_schedule.ps1`) is still registered and still fires, but `daily_run.py`
   launched alone now exits with "The orchestrator owns this run", so it does
   nothing. `setup_schedule.ps1 -Remove` unregisters it. **That script does not
-  register the orchestrator task.** How the live task is configured, with a
-  rollback XML saved under `data/`, is recorded in `NEXT_SESSION.md`, which is
-  also the dated log from 2026-08-13 onward.
+  register the orchestrator task;** `setup_orchestrator_task.ps1` does (since 2026-11-11,
+  with the live task's settings). The history of how the task came to be set up this way is
+  in `NEXT_SESSION.md`, the dated log from 2026-08-13 onward.
 
 ---
 
