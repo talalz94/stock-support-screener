@@ -229,10 +229,6 @@ def write_html(payload: dict, asof: str) -> str:
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Fundamentals {esc(asof)}</title><style>{ui.CSS}/* Legacy variable names aliased onto the shared palette (ui.py). These two pages predate ui and use --fg/--mut/--acc/--card; aliasing keeps every existing rule working while the colours come from one place. */:root{{--fg:var(--ink);--mut:var(--muted);--acc:var(--accent);--card:var(--panel);--hi:var(--pos);--lo:var(--neg);--mid:var(--muted);--neu:var(--muted)}}
-:root{{--bg:#fff;--fg:#111;--mut:#666;--line:#e3e3e6;--card:#fafafa;
---hi:#0a7d3f;--lo:#b3261e;--mid:#8a8a92;--acc:#1a56db}}
-@media(prefers-color-scheme:dark){{:root{{--bg:#111315;--fg:#e8e8ea;--mut:#9a9aa2;
---line:#2a2d31;--card:#191c1f;--hi:#3ddc84;--lo:#ff6b6b;--mid:#8a8a92}}}}
 *{{box-sizing:border-box}}body{{margin:0;padding:18px;background:var(--bg);color:var(--fg);
 font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}}
 h1{{font-size:19px;margin:0 0 2px}}.meta{{color:var(--mut);font-size:12.5px;margin-bottom:12px}}
@@ -253,10 +249,10 @@ tr:last-child td{{border-bottom:0}}
 .num{{font-variant-numeric:tabular-nums;text-align:right}}.b{{font-weight:650}}
 .p{{display:inline-block;width:30px;text-align:center;padding:1px 0;border-radius:4px;
 font-size:11px;margin-right:3px;font-variant-numeric:tabular-nums}}
-.p.hi{{background:var(--hi);color:#fff}}.p.lo{{background:var(--lo);color:#fff}}
+.p.hi{{background:var(--hi);color:var(--onaccent)}}.p.lo{{background:var(--lo);color:var(--onaccent)}}
 .p.mid{{background:var(--line);color:var(--mut)}}
 .w{{display:inline-block;padding:1px 6px;border-radius:999px;font-size:10px;margin-right:4px}}
-.w.red{{background:var(--lo);color:#fff}}.w.amb{{background:#f0b429;color:#3a2c00}}
+.w.red{{background:var(--lo);color:var(--onaccent)}}.w.amb{{background:#f0b429;color:#3a2c00}}
 .w.gry{{background:var(--line);color:var(--mut)}}
 .na{{color:var(--mut)}}.note{{margin-top:14px;color:var(--mut);font-size:12px;max-width:780px}}
 </style></head><body>{_UI_NAV}

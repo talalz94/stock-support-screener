@@ -138,7 +138,7 @@ CSS = """
 .set-toc{position:sticky;top:calc(var(--navh,44px) + 18px);display:flex;flex-direction:column;gap:2px}
 .set-toc a{padding:7px 11px;border-radius:7px;color:var(--muted);font-weight:500;font-size:13px}
 .set-toc a:hover{background:var(--grid);color:var(--ink);text-decoration:none}
-.set-toc a.on{background:var(--grid);color:var(--accent);font-weight:600}
+.set-toc a.on{background:var(--panel);color:var(--accent);font-weight:600;box-shadow:inset 3px 0 0 var(--accent)}
 .set-main{display:flex;flex-direction:column;gap:18px;min-width:0;max-width:880px}
 .set-sec{padding:18px 20px;scroll-margin-top:calc(var(--navh,44px) + 14px)}
 .set-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}

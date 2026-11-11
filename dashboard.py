@@ -278,8 +278,8 @@ border:1px solid var(--line);white-space:nowrap}
 button.copy{font:11px/1 inherit;padding:4px 8px;margin-left:6px;
 color:var(--muted)}
 button.run{font:11px/1 inherit;padding:4px 9px;margin-right:8px;
-border-color:var(--accent);background:var(--accent);color:#fff;font-weight:600}
-button.run:hover{opacity:.88;color:#fff}
+border-color:var(--accent);background:var(--accent);color:var(--onaccent);font-weight:600}
+button.run:hover{opacity:.88;color:var(--onaccent)}
 button.run:disabled{opacity:.55;cursor:default}
 /* Scoped to the step table: bare `details`/`summary` rules also restyled the menu's
    dropdowns (2026-11-09: the bar was 6px taller on this page than on every other). */

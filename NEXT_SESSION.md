@@ -176,6 +176,35 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-11 (afternoon) — BUILDS IN THE BACKGROUND, A STOP BUTTON, DARK MODE MEASURED CLEAN, CHART READOUTS, THE INSIDER-TRADE RECORD
+
+**Asked** (with a screenshot of a build page at 66%): the build page's bar and timer "keep going back and forth"; build in the background with a popup that says when it is done; an exit button to close the server; black text in dark mode (the Fundamental page); any ticker should open its page or offer to build it; the support level and zones on the price chart behind an on/off switch; sector and sub-industry at the top of the stock page; hover readouts on the charts; measure how insider trades move the price and keep tracking it; and why PAM shows no 2026 earnings.
+
+Everything below was checked in a browser against a test server on port 8788 (the user's own server untouched), at desktop and 375 px, in both themes.
+
+**Builds (serve.py, ui.NAV_JS).** The old bar was `tick % 14 / 14`: it restarted every ~10 s inside a long stage, and its countdown jumped with it; its stage names included a module that does not exist. Now a build runs in a thread in four real stages (price history, score history of the 6 modules, SEC filings, rendering); each successful build records seconds per stage in `data/_build_times.json`, and "usually about N min" is the per-stage median of the last 30 once 3 exist (now 4.9 / 36.1 / 12.5 / 40.0 s = 93.5 s). Progress = completed stages' shares plus an approach inside the current one that never reaches it, and a page never draws a value lower than one it drew (292 samples over a 70 s refresh: never down). The tray (bottom right, every page and tab, `localStorage scr.builds`) follows each build, says "is ready / Open" (or "is refreshed / Reload" on its own page, and clears itself once you are on the new page), keeps finished cards 20 minutes, marks a background tab's title, and says when a build was lost to a server restart (`/api/build` returns `known`). A click on any stock link: built -> opens; building -> followed in the tray; not built -> a "Build it?" dialog. The waiting page (a stock URL opened directly) has "Keep browsing", which hands the build to the tray (15% there, 17% in the tray a moment later). The stock list's Build buttons use the same background build. Stock pages are written atomically now (a stopped server can no longer leave half a page).
+
+**Stop button.** A power icon at the end of the menu, only when the page is served by `serve.py`: confirm, `POST /api/shutdown` (guard header), the server replies and then stops; running builds stop with it and the tray says so. Verified end to end, also in `serve.py --selftest` on a throwaway port.
+
+**Dark mode.** The Fundamental and Sentiment pages aliased their old variable names onto the shared palette and then set them again to fixed light values (`--fg:#111`): with a theme chosen in Settings that differs from the system one, black text on a dark page. Fixed in both builders; `ui._LEGACY_CSS` (applied by `ui.py --renav`) fixed the pages already written. White text on filled buttons and badges measured 2.5-2.8:1 on the dark theme's blue/green/amber: a new `--onaccent` (white in light, near-black in dark) for buttons, toggles, chips and the Bounce page's badges; the Bounce page's own light palette (green 3.5:1, amber 3.3:1, SPEC 2.9:1 as text) moved to 4.8-7.5:1. **Measured** with a script over every visible text element and the first opaque background behind it (all tabs opened), on all 18 page types in forced dark and forced light: 33,422 text elements per theme (the Bounce page capped at its first 6,000), **none under 4.5:1** after the fixes. Before them: white badges at 2.5-2.8:1 (dark), the Bounce page's own colours at 2.9-3.5:1 (light), and the open menu's current entry at 4.48:1 (now 5.1:1).
+
+**Stock page.** Under the title: sector > sub-industry (from `sectors.groups`, the same groups as the relative chart and the Sectors page), each linking to its row on Sectors (`#sector=` / `#subind=` opens and highlights it), then exchange, SIC and the sector ETF. A Refresh button (local server only). The price chart draws the zone scan's support zones (amber band = where a low counts as a test, 3% below to 2.5% above, with the number of tests; hover a band for that level's history) beside the gate's own level; a **Levels** switch hides or shows them, remembered per browser. Hovering either chart shows a guide, a dot per line and a card: date, close, the day's move and volume; or each line's change since the start (stock, S&P 500, the sector and sub-industry by name). Line-end labels no longer overlap. The relative chart's fixed hex colours (3.1:1 and 4.1:1) became palette colours.
+
+**Insider trades: the forward record (`insider_track.py`, step 38).** From 2026-11-11 every filed trade -- director/officer buys and sales, fund buys, House buys and sales -- is written down once, the night it appears, with its features as known then; its first-session move and its 1/5/20/60-session moves against same-day stocks of the same liquidity fill in as they mature. The first rows arrive with tonight's run (the store held filings to 11-10); 20-session results from about the second week of December. **A first look on history** (trades filed 2026-10-01..11-10, measured the same way; one market stretch, overlapping events, so a description, not a test): purchases by directors and officers trailed similar stocks by -1.37pp after 5 sessions (n 285, median -1.39) and -2.75pp after 20 (n 107); sales -0.95pp / -4.85pp (n 1,611 / 688); House purchases +0.56pp after 5 (n 48). The 2016-2026 study still stands: buying in general is not significant (any $10K+ purchase, 60 sessions: mean +0.68pp, median -0.79pp, t 1.71), selling is not bearish. **A bug caught on the way:** ZONE's closes went 0.115 -> 7.14 on 2026-10-15, a reverse split the bar store had not adjusted, alone +13.7pp on the purchases' mean first-session move; the screen's own split test now flags such paths and they keep no outcome.
+
+**PAM.** A foreign private issuer: its annual report is a 20-F (XBRL), its quarterly results come on 6-K, which carries no XBRL, so the fact store holds year-ends only (latest FY2025); FY2026 arrives with the 20-F around April 2027. **Measured:** 209 of the 3,298 tradeable names with any figure for a period ending 2025 or later (6.3%) have year-end figures only: 130 file a 20-F, 78 a Canadian 40-F, 1 a 10-K. Not started (the user's decision): interim quarters for those names from a provider.
+
+**Things that bite (new, also in CLAUDE.md):** Git Bash `sed -i` rewrote four CRLF files as LF (restored; git normalises either way). A Bash heredoc collapsed `\\1` into `\1`, which Python read as the character 0x01 inside three regex replacements in `ui.py` -- caught by a control-character check, fixed: write scripts that contain backslashes with the Write tool.
+
+**Checks run:** `status.py --pages` clean (464 pages); selftests of ui, settings, shortlist, settings_page, explore, serve, stock_profile, insider_page, sectors_page, insider_track all pass under `-W error`; every inline script on the changed pages parses (`node --check`).
+
+**Still pending:**
+- The narrative task's first run is Saturday 2026-11-14; then check its answers and measure its cost.
+- The shortlist's forward record (13 sessions per entry) and the 2026-11-23 review of the 10-23 list.
+- The insider forward record: first rows after tonight's run; 20-session results from mid-December.
+- Offer: interim quarters from a provider for the 209 year-end-only names (PAM among them).
+- The price chart's labels are small on a phone (the SVG scales down; pre-existing).
+
 ## State at 2026-11-11 (later) — ON GITHUB, WITH WHAT A NEW MACHINE NEEDS
 
 **Asked:** "make sure this project is updated with all the docs and pushed to my github talalz94, so i can continue this project in any new laptop".
@@ -5208,74 +5237,74 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-10 07:17 — do not edit by hand._
+_Generated 2026-11-11 07:06 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 8s | 8s | 1.9 min | 2.0 min | 68 |
-| `bars` | daily | 70s | 55s | 2.2 min | 10.0 min | 68 |
-| `macro` | daily | 74s | 1.6 min | 2.0 min | 15.0 min | 68 |
-| `news` | daily | 19s | 5s | 31s | 10.0 min | 68 |
-| `news_events` | daily | 4.2 min | 4.1 min | 531.0 min ⚠ | 30.0 min | 10 |
-| `senti_cache` | daily | 9s | 3s | 12s | 10.0 min | 68 |
-| `sentiment` | daily | 23s | 20s | 40s | 15.0 min | 69 |
-| `bounce` | daily | 66s | 42s | 1.9 min | 15.0 min | 69 |
-| `zones` | daily | 1.7 min | 1.6 min | 2.5 min | 30.0 min | 52 |
-| `shortvol` | daily | 4s | 4s | 11s | 10.0 min | 66 |
-| `hype` | daily | 1.9 min | 2.1 min | 2.7 min | 120.0 min | 69 |
-| `provider` | daily | 71.4 min | 65.0 min | 71.4 min | 120.0 min | 61 |
+| `universe` | daily | 9s | 8s | 1.9 min | 2.0 min | 69 |
+| `bars` | daily | 1.7 min | 55s | 2.2 min | 10.0 min | 69 |
+| `macro` | daily | 66s | 1.6 min | 2.0 min | 15.0 min | 69 |
+| `news` | daily | 17s | 5s | 31s | 10.0 min | 69 |
+| `news_events` | daily | 4.0 min | 4.0 min | 531.0 min ⚠ | 30.0 min | 11 |
+| `senti_cache` | daily | 9s | 3s | 12s | 10.0 min | 69 |
+| `sentiment` | daily | 23s | 20s | 40s | 15.0 min | 70 |
+| `bounce` | daily | 54s | 42s | 1.9 min | 15.0 min | 70 |
+| `zones` | daily | 86s | 1.6 min | 2.5 min | 30.0 min | 53 |
+| `shortvol` | daily | 5s | 4s | 11s | 10.0 min | 67 |
+| `hype` | daily | 1.8 min | 2.0 min | 2.7 min | 120.0 min | 70 |
+| `provider` | daily | 65.1 min | 65.0 min | 71.4 min | 120.0 min | 62 |
 | `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 16 |
 | `sec_gap` | weekly | 2.9 min | 5.2 min | 12.1 min | 20.0 min | 15 |
-| `sec_edgar` | daily | 5.5 min | 43s | 581.1 min ⚠ | 30.0 min | 30 |
-| `insider` | daily | 3.4 min | 2.0 min | 3.4 min | 30.0 min | 15 |
-| `congress` | daily | 18s | 9s | 18s | 30.0 min | 15 |
-| `fundamental` | daily | 7.8 min | 3.7 min | 7.8 min | 180.0 min | 77 |
+| `sec_edgar` | daily | 4.6 min | 48s | 8.2 min | 30.0 min | 31 |
+| `insider` | daily | 3.5 min | 2.2 min | 3.5 min | 30.0 min | 16 |
+| `congress` | daily | 15s | 10s | 18s | 30.0 min | 16 |
+| `fundamental` | daily | 3.8 min | 3.7 min | 7.8 min | 180.0 min | 78 |
 | `events` | weekly | 8.0 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 16 |
 | `leaderboard` | weekly | 36.6 min | 40.0 min | 91.0 min ⚠ | 90.0 min | 17 |
-| `dip` | daily | 17s | 17s | 17s | 15.0 min | 77 |
-| `insider_score` | daily | 9.7 min | 6.1 min | 9.7 min | 30.0 min | 11 |
-| `combo` | daily | 30s | 19s | 30s | 15.0 min | 76 |
-| `candidates` | daily | 8s | 6s | 8s | 5.0 min | 34 |
-| `floor` | daily | 2.5 min | 54s | 2.5 min | 15.0 min | 28 |
-| `insider_pages` | daily | 6s | 6s | 6s | 15.0 min | 11 |
-| `sectors` | daily | 1.5 min | 2.3 min | 2.3 min | 30.0 min | 27 |
-| `narrative` | daily | 4s | 7s | 10s | 10.0 min | 2 |
-| `shortlist` | daily | 81s | 1.8 min | 2.3 min | 15.0 min | 2 |
-| `validate` | daily | 12.5 min | 7.1 min | 13.1 min | 60.0 min | 63 |
-| `explore` | daily | 15s | 9s | 15s | 5.0 min | 85 |
-| `snapshots` | daily | 14s | 4s | 16s | 5.0 min | 99 |
-| `profiles` | daily | 7.0 min | 21.1 min | 8.4 min | 15.0 min | 81 |
-| `watchlists` | daily | 2s | 3s | 4s | 10.0 min | 7 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 89 |
-| `dashboard` | daily | 6s | 0s | 6s | 2.0 min | 92 |
-| `docs` | daily | 1s | 0s | 1s | 5.0 min | 110 |
+| `dip` | daily | 14s | 17s | 17s | 15.0 min | 78 |
+| `insider_score` | daily | 5.6 min | 5.9 min | 9.7 min | 30.0 min | 12 |
+| `combo` | daily | 20s | 19s | 30s | 15.0 min | 77 |
+| `candidates` | daily | 3s | 5s | 8s | 5.0 min | 35 |
+| `floor` | daily | 58s | 54s | 2.5 min | 15.0 min | 29 |
+| `insider_pages` | daily | 5s | 5s | 6s | 15.0 min | 12 |
+| `sectors` | daily | 80s | 2.1 min | 2.3 min | 30.0 min | 28 |
+| `narrative` | daily | 3s | 4s | 10s | 10.0 min | 3 |
+| `shortlist` | daily | 56s | 81s | 2.3 min | 15.0 min | 3 |
+| `validate` | daily | 11.2 min | 7.1 min | 13.1 min | 60.0 min | 64 |
+| `explore` | daily | 11s | 9s | 15s | 5.0 min | 86 |
+| `snapshots` | daily | 11s | 4s | 16s | 5.0 min | 100 |
+| `profiles` | daily | 15.2 min | 21.0 min | 15.2 min ⚠ | 15.0 min | 82 |
+| `watchlists` | daily | 4s | 3s | 4s | 10.0 min | 8 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 90 |
+| `dashboard` | daily | 15s | 0s | 15s | 2.0 min | 93 |
+| `docs` | daily | 2s | 0s | 2s | 5.0 min | 111 |
 
-**Daily total ≈ 123.8 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 122.9 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-10 07:17 — do not edit by hand._
+_Generated 2026-11-11 07:06 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 249.9 | 2016-10 → 2026-11 |
-| bars 1h | 5 | 0.9 | 2026-07 → 2026-11 |
+| bars 1d | 122 | 250.1 | 2016-10 → 2026-11 |
+| bars 1h | 5 | 1.0 | 2026-07 → 2026-11 |
 | bars ETF | 125 | 2.9 | 2016-07 → 2026-11 |
-| news | 124 | 177.2 | 2016-08 → 2026-11 |
+| news | 124 | 177.6 | 2016-08 → 2026-11 |
 | sentiment cache | 124 | 12.2 | 2016-08 → 2026-11 |
-| scores | 122 | 340.0 | 2016-10 → 2026-11 |
+| scores | 122 | 341.5 | 2016-10 → 2026-11 |
 | fundamentals | 70 | 345.4 | 2009q2 → 2026q3 |
-| short volume | 76 | 57.3 | 2020-08 → 2026-11 |
-| flags | 71 | 6.0 | 2026-07-31 → 2026-11-09 |
-| rejects | 21 | 7.9 | 2026-10-12 → 2026-11-09 |
-| zones | 52 | 29.3 | 2026-08-27 → 2026-11-09 |
+| short volume | 76 | 57.4 | 2020-08 → 2026-11 |
+| flags | 72 | 6.1 | 2026-07-31 → 2026-11-10 |
+| rejects | 22 | 8.3 | 2026-10-12 → 2026-11-10 |
+| zones | 53 | 29.8 | 2026-08-27 → 2026-11-10 |
 | fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 24 | 2.1 | 2009q4 → 2026q4 |
-| loose (macro, universe, jobs, study) | 48 | 311.8 | — |
+| fundamentals (EDGAR filings) | 24 | 2.2 | 2009q4 → 2026q4 |
+| loose (macro, universe, jobs, study) | 48 | 311.9 | — |
 
-**`data/` total ≈ 1,618 MB.** `reports/` is a further 153 MB across 451 pages.
+**`data/` total ≈ 1,621 MB.** `reports/` is a further 158 MB across 462 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -5283,22 +5312,22 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-10 07:17 — do not edit by hand._
+_Generated 2026-11-11 07:06 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 397 | 2016-09-27 → 2026-11-09 |
-| `fundamental` | 61 | 254 | 2016-09-26 → 2026-11-09 |
-| `hype` | 20 | 372 | 2016-10-25 → 2026-11-09 |
-| `dip` | 10 | 299 | 2016-09-27 → 2026-11-09 |
-| `insider` | 8 | 216 | 2016-09-06 → 2026-11-09 |
-| `combo` | 16 | 254 | 2016-11-04 → 2026-11-09 |
+| `sentiment` | 26 | 397 | 2016-10-17 → 2026-11-10 |
+| `fundamental` | 61 | 254 | 2016-10-25 → 2026-11-10 |
+| `hype` | 20 | 373 | 2016-10-25 → 2026-11-10 |
+| `dip` | 10 | 299 | 2016-10-17 → 2026-11-10 |
+| `insider` | 8 | 215 | 2016-10-14 → 2026-11-10 |
+| `combo` | 16 | 255 | 2016-11-04 → 2026-11-10 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-10 07:17 — do not edit by hand._
+_Generated 2026-11-11 07:06 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

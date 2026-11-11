@@ -9,9 +9,9 @@
 
 :root{
   --bg:#f7f8fa; --panel:#ffffff; --ink:#12161c; --muted:#5b6572; --line:#e2e6ec;
-  --accent:#2f6feb; --up:#0f9d58; --down:#d93025; --warn:#c47f00;
+  --accent:#2c68dc; --up:#18753a; --down:#c4231a; --warn:#8a5a00;
   --chip:#eef1f6; --band:rgba(47,111,235,.10); --grid:#eceff3;
-  --early:#7b5cd6; --prime:#0f9d58; --spec:#c47f00; --watch:#5b6572; --late:#d93025;
+  --early:#6a48c8; --prime:#18753a; --spec:#8a5a00; --watch:#5b6572; --late:#c4231a;
 }
 @media (prefers-color-scheme: dark){
   :root{
@@ -23,9 +23,9 @@
 }
 :root[data-theme="light"]{
   --bg:#f7f8fa; --panel:#ffffff; --ink:#12161c; --muted:#5b6572; --line:#e2e6ec;
-  --accent:#2f6feb; --up:#0f9d58; --down:#d93025; --warn:#c47f00;
+  --accent:#2c68dc; --up:#18753a; --down:#c4231a; --warn:#8a5a00;
   --chip:#eef1f6; --band:rgba(47,111,235,.10); --grid:#eceff3;
-  --early:#7b5cd6; --prime:#0f9d58; --spec:#c47f00; --watch:#5b6572; --late:#d93025;
+  --early:#6a48c8; --prime:#18753a; --spec:#8a5a00; --watch:#5b6572; --late:#c4231a;
 }
 :root[data-theme="dark"]{
   --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#262c36;
@@ -76,9 +76,12 @@ label.lbl{color:var(--muted);font-size:12px;margin-right:2px}
 .chip{background:var(--chip);border-radius:5px;padding:2px 7px;font-size:11px;
   color:var(--muted);white-space:nowrap}
 .chip.b{color:var(--ink);font-weight:600}
-.chip.new{background:var(--accent);color:#fff;font-weight:650}
-.chip.promo{background:var(--up);color:#fff;font-weight:650}
-.chip.warn{background:var(--warn);color:#fff}
+/* Text on the filled chips reads in both themes (2026-11-11: white measured 2.5-2.8:1 on the
+   dark theme's green, blue and amber): --onaccent is white on the light fills, which are dark
+   enough for it, and near-black on the dark theme's bright ones. */
+.chip.new{background:var(--accent);color:var(--onaccent,#fff);font-weight:650}
+.chip.promo{background:var(--up);color:var(--onaccent,#fff);font-weight:650}
+.chip.warn{background:var(--warn);color:var(--onaccent,#fff)}
 svg.spark{width:100%;height:132px;display:block;overflow:visible}
 .sl{stroke:var(--ink);stroke-width:1.15;fill:none;vector-effect:non-scaling-stroke}
 .lvl{stroke:var(--accent);stroke-width:1.3;stroke-dasharray:5 3;fill:none}

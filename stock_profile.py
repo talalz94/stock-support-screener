@@ -594,14 +594,8 @@ def _block_header(t: str, m: dict, sc: dict, px: pd.Series, opt: dict) -> str:
     # passed the guard and `int(nan)` raised. That killed 7 of 30 profile builds
     # (ASM, DPRO, DXYZ, EXK, POET, SGML, VLN) -- the exact gotcha already
     # recorded in SCORE_MODULES.md, hit again in new code.
-    sec = m.get("sector")
-    if "sector" in show and isinstance(sec, str) and sec:
-        chips.append(f'<span class="chip">sector <b>{_esc(sec)}</b></span>')
-    sic = m.get("sic")
-    if sic is not None and pd.notna(sic):
-        chips.append(f'<span class="chip">SIC <b>{_esc(int(sic))}</b></span>')
-    if "exchange" in show and m.get("exchange"):
-        chips.append(f'<span class="chip">{_esc(m["exchange"])}</span>')
+    # Sector, sub-industry, exchange, SIC and the peer ETF moved to the line under the title
+    # (_classification, 2026-11-11); the chips keep the numbers.
     # THE REPORTING CURRENCY, and only when it is not USD.
     #
     # A non-USD filer has no P/E, P/B, EV/EBITDA or Altman Z -- those are
@@ -639,9 +633,6 @@ def _block_header(t: str, m: dict, sc: dict, px: pd.Series, opt: dict) -> str:
         mc = (sc.get("fundamental") or {}).get("mktcap")
         if isinstance(mc, float) and np.isfinite(mc):
             chips.append(f'<span class="chip">mkt cap <b>${mc / 1e9:,.1f}B</b></span>')
-    etf = m.get("sector_etf")
-    if isinstance(etf, str) and etf:
-        chips.append(f'<span class="chip">peer ETF <b>{_esc(etf)}</b></span>')
     # TradingView is the only OUTBOUND link here, so it goes last and to the
     # right: `.chips .right` takes `margin-left:auto`. Sitting mid-row among the
     # descriptive chips, it read as another fact about the company rather than
@@ -651,7 +642,56 @@ def _block_header(t: str, m: dict, sc: dict, px: pd.Series, opt: dict) -> str:
         chips.append(f'<a class="chip cta right" '
                      f'href="{report.tv_link(t, m.get("exchange"))}" '
                      f'target="_blank" rel="noopener">TradingView &nearr;</a>')
-    return f'<div class="chips">{"".join(chips)}</div>'
+    return f'<div class="chips">{"".join(chips)}</div>' if chips else ""
+
+
+_GROUPS: dict = {}
+
+
+def _groups_of(ticker: str, m: dict) -> tuple[str | None, str | None]:
+    """(sector, sub-industry) as the Sectors page and the relative chart name them
+    (sectors.groups), read once per process; the header's own sector when the name is not there."""
+    if "g" not in _GROUPS:
+        try:
+            import sectors
+            _GROUPS["g"] = sectors.groups().drop_duplicates("ticker").set_index("ticker")
+        except Exception:                                        # noqa: BLE001
+            _GROUPS["g"] = None
+    g = _GROUPS["g"]
+    if g is not None and ticker in g.index:
+        sec, sub = g.at[ticker, "sector"], g.at[ticker, "subind"]
+        return (str(sec) if isinstance(sec, str) and sec else None,
+                str(sub) if isinstance(sub, str) and sub else None)
+    sec = m.get("sector")
+    return (sec if isinstance(sec, str) and sec else None), None
+
+
+def _classification(t: str, m: dict, show: set | None) -> str:
+    """THE LINE UNDER THE TITLE (2026-11-11): sector > sub-industry, each a link to its row on the
+    Sectors page, then exchange, SIC and the sector's ETF. `show` is the header block's choice
+    (Settings); None when that block is off, which still shows the line."""
+    from urllib.parse import quote
+    sec, sub = _groups_of(t, m)
+    parts = []
+    if sec and (show is None or "sector" in show):
+        parts.append(f'<a href="../sectors/latest.html#sector={quote(sec)}" '
+                     f'title="This sector on the Sectors page">{_esc(sec)}</a>')
+        if sub:
+            parts.append('<span class="cl-sep" aria-hidden="true">&rsaquo;</span>'
+                         f'<a href="../sectors/latest.html#subind={quote(sub)}" '
+                         f'title="This sub-industry on the Sectors page">{_esc(sub)}</a>')
+    meta = []
+    if m.get("exchange") and (show is None or "exchange" in show):
+        meta.append(_esc(m["exchange"]))
+    sic = m.get("sic")
+    if sic is not None and pd.notna(sic):
+        meta.append(f"SIC {int(sic)}")
+    etf = m.get("sector_etf")
+    if isinstance(etf, str) and etf:
+        meta.append(f"sector ETF {_esc(etf)}")
+    if meta:
+        parts.append(f'<span class="cl-meta">{" &middot; ".join(meta)}</span>')
+    return f'<div class="cls">{"".join(parts)}</div>' if parts else ""
 
 
 def _axis_values(sc: dict, px: pd.Series) -> dict[str, float | None]:
@@ -735,12 +775,48 @@ def _support_level(ticker: str, asof: str) -> tuple[float | None, tuple | None]:
         return None, None
 
 
+def _chart_zones(ticker: str, asof: str, level: float | None) -> list[dict]:
+    """Support zones below the price from the newest zone scan on or before `asof` (zones.py,
+    nightly), for the price chart: each level, the band in which a bar's low counts as a test of
+    it (levels.touch_mask: 3% below to 2.5% above), and that level's own measured history for the
+    hover note. Zones AT or NEAR the price are kept inside the chart's range; farther ones show
+    when the range reaches them. A zone within 1% of the gate's level is left to that line."""
+    try:
+        files = sorted(p for p in config.ZONES.glob("*.parquet") if p.stem <= asof)
+        if not files:
+            return []
+        z = pd.read_parquet(files[-1], filters=[("ticker", "==", ticker)])
+    except Exception:                                            # noqa: BLE001
+        return []
+    out = []
+    for r in z.sort_values("level", ascending=False).itertuples(index=False):
+        L = float(getattr(r, "level", np.nan))
+        if not np.isfinite(L) or L <= 0:
+            continue
+        if level is not None and abs(L / level - 1.0) < 0.01:
+            continue
+        n = int(getattr(r, "touches", 0) or 0)
+        med, dd, ne = getattr(r, "bounce_median", np.nan), getattr(r, "dd_median", np.nan), getattr(r, "bounce_n", 0)
+        hist = (f" After a test, the median 40-bar rally was {med:+.1%} and the median drawdown "
+                f"{dd:+.1%} ({int(ne)} episodes)." if np.isfinite(med) and np.isfinite(dd) and ne else "")
+        out.append({"level": L, "lo": L * (1 - config.TOUCH_TOL_DN), "hi": L * (1 + config.TOUCH_TOL_UP),
+                    "fit": str(getattr(r, "band", "")) in ("AT", "NEAR"),
+                    "text": f"{L:,.2f} · {n} tests",
+                    "title": (f"Support zone {L:,.2f}: tested {n} times, last on {getattr(r, 'last_touch', '')}."
+                              f"{hist} {getattr(r, 'band', '')}, {float(getattr(r, 'dist_pct', np.nan)):.1%} "
+                              f"below the close of {getattr(r, 'asof', '')}.")})
+    return out
+
+
 def _block_chart(ticker: str, asof: str, opt: dict) -> str:
     """Price + volume + support, one pane per window, toggled client-side.
 
     Three server-rendered SVGs rather than one drawn in JS: it reuses the exact
     toggle pattern the financials table already uses, works with scripting off,
     and the 5y pane is only ~15 KB of polyline.
+
+    THE LEVELS SWITCH (2026-11-11): the gate's level and base band, and the support zones of the
+    nightly zone scan, sit in one layer the reader turns on or off (kept per browser).
     """
     start = (pd.Timestamp(asof) - pd.DateOffset(days=CHART_DAYS)) \
         .strftime("%Y-%m-%d")
@@ -753,6 +829,7 @@ def _block_chart(ticker: str, asof: str, opt: dict) -> str:
     bars = bars.sort_values("date")
 
     level, band = _support_level(ticker, asof)
+    zones = _chart_zones(ticker, asof, level)
     marks = insider_markers(ticker, asof)
     default = str(opt.get("window") or CHART_DEFAULT).upper()
     if default not in {n for n, _s, _b in CHART_WINDOWS}:
@@ -766,25 +843,39 @@ def _block_chart(ticker: str, asof: str, opt: dict) -> str:
                   + ui.price_chart(sub["date"].tolist(), sub["close"].tolist(),
                                    sub["volume"].tolist(), level=level,
                                    base=band, label=f"{ticker} {name}",
-                                   markers=marks)
+                                   markers=marks, zones=zones)
                   + "</div>")
         on = "on" if name == default else ""
         unit = {"D": "daily", "W": "weekly", "M": "monthly"}[how]
         btns += (f'<button data-win="{name}" class="{on}" '
                  f'title="{unit} bars">{name}</button>')
 
-    lvl_txt = (f'support <b>{level:,.2f}</b>' if level is not None
-               else '<span class="muted">no support level found by the gate</span>')
+    have = []
+    if level is not None:
+        have.append(f'<span style="color:var(--accent)">support <b>{level:,.2f}</b></span>')
+    if zones:
+        have.append(f'<span style="color:var(--warn)">{len(zones)} support zone{"s" if len(zones) != 1 else ""}</span>')
+    lvl_txt = (" &middot; ".join(have) if have
+               else '<span class="muted">no support level or zone below the price</span>')
+    about = ui.info(
+        '<b>Support</b> (blue, dashed) is the level the bounce gate itself found, with its base band: '
+        'the chart draws what the screen used, not a separate calculation. <b>Support zones</b> (amber) '
+        'come from the nightly zone scan: levels tested at least twice, below the price and within 16% '
+        'of the close; the band is where a bar&rsquo;s low counts as a test (3% below '
+        'to 2.5% above). Hover a band for its history. Measured over 325,061 episodes (zones.py): more '
+        'tests did <i>not</i> mean a bigger bounce, but did mean a smaller drawdown &mdash; a well-tested '
+        'level is a better stop than a target. <b>Levels</b> shows or hides all of them.')
     legend = ("" if not marks else
               ' &middot; <svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,1 9,9 1,9" '
               'class="pmk-buy"/></svg> insider buy <svg width="10" height="10" viewBox="0 0 10 10">'
               '<polygon points="1,1 9,1 5,9" class="pmk-sell"/></svg> insider sale '
               '<svg width="10" height="10" viewBox="0 0 10 10"><polygon points="5,0 10,5 5,10 0,5" '
-              'class="pmk-house"/></svg> House buy (at the filing date; hover for details)')
-    return ('<div class="pcbar"><div class="toggle" id="winToggle">'
-            f'{btns}</div><span class="note" style="margin:0">{lvl_txt} '
-            '&mdash; the level and base band come from the bounce gate itself, '
-            f'not from a separate calculation{legend}</span></div>' + panes)
+              'class="pmk-house"/></svg> House buy (at the filing date)')
+    switch = ('<button type="button" class="lvtog" aria-pressed="true" '
+              'title="Show or hide the support level and zones">Levels</button>' if have else "")
+    return ('<div data-lvscope><div class="pcbar"><div class="toggle" id="winToggle">'
+            f'{btns}</div>{switch}<span class="note" style="margin:0">{lvl_txt}{about}{legend}'
+            '</span></div>' + panes + '</div>')
 
 
 # ============================================================ insider + House trades
@@ -899,7 +990,10 @@ def _link(url: str | None, text: str) -> str:
 # ------------------------------------------------------------- against the market and sector
 _REL: dict = {}
 REL_WINDOWS = ((21, "1m"), (63, "3m"), (126, "6m"), (252, "1y"))
-REL_COLORS = {"stock": "currentColor", "SPY": "#8a94a6", "sector": "#2f7fd8", "sub-industry": "#d9822b"}
+# Colours from the palette, so every line and label reads in both themes (2026-11-11: fixed hex
+# colours measured 3.1:1 for the market's labels on the light page and 4.1:1 for the sector's on
+# the dark one; one fixed colour cannot reach 4.5:1 on both).
+REL_COLORS = {"stock": "var(--ink)", "SPY": "var(--muted)", "sector": "var(--accent)", "sub-industry": "var(--warn)"}
 
 
 def _rel_context(asof: str) -> dict | None:
@@ -915,7 +1009,7 @@ def _rel_context(asof: str) -> dict | None:
         C, V = C.loc[:asof].iloc[-300:], V.loc[:asof].iloc[-300:]
         E = sectors.eligible(C, V)
         R = sectors.daily_returns(C)
-        elig = E.shift(1).fillna(False).astype(bool)
+        elig = E.shift(1, fill_value=False).astype(bool)
         Rm = R.where(elig)
         g = sectors.groups().drop_duplicates("ticker").set_index("ticker")
         sums, cnts = {}, {}
@@ -937,8 +1031,12 @@ def _rel_context(asof: str) -> dict | None:
     return _REL[asof]
 
 
-def _rel_svg(dates: list[str], lines: list[tuple[str, np.ndarray]], w: int = 980, h: int = 230) -> str:
-    """Rebased lines (100 = the first day), hand-built SVG as ui.price_chart (pages open offline)."""
+def _rel_svg(dates: list[str], lines: list[tuple[str, np.ndarray]], w: int = 980, h: int = 230,
+             names: dict | None = None) -> str:
+    """Rebased lines (100 = the first day), hand-built SVG as ui.price_chart (pages open offline).
+    Hovering reads out each line's change since the first day (ui.CHART_JS, `data-hover`);
+    `names` gives the sector and sub-industry their own names in that readout."""
+    import json
     vals = np.concatenate([v[np.isfinite(v)] for _, v in lines if np.isfinite(v).any()])
     if not len(vals):
         return ""
@@ -949,23 +1047,38 @@ def _rel_svg(dates: list[str], lines: list[tuple[str, np.ndarray]], w: int = 980
     X = lambda i: 40 + (w - 120) * i / max(n - 1, 1)
     Y = lambda v: 10 + (h - 30) * (hi - v) / (hi - lo)
     out = [f'<svg viewBox="0 0 {w} {h}" class="pchart" role="img" aria-label="stock against market, sector and sub-industry">',
-           f'<line x1="40" x2="{w - 80}" y1="{Y(100):.1f}" y2="{Y(100):.1f}" stroke="#8a94a6" stroke-dasharray="4 4" stroke-width="1"/>',
-           f'<text x="4" y="{Y(100) + 4:.1f}" font-size="11" fill="#8a94a6">100</text>',
-           f'<text x="4" y="{Y(hi - pad) + 4:.1f}" font-size="11" fill="#8a94a6">{hi - pad:.0f}</text>',
-           f'<text x="4" y="{Y(lo + pad) + 4:.1f}" font-size="11" fill="#8a94a6">{lo + pad:.0f}</text>',
-           f'<text x="40" y="{h - 4}" font-size="11" fill="#8a94a6">{ui.esc(dates[0])}</text>',
-           f'<text x="{w - 80}" y="{h - 4}" font-size="11" fill="#8a94a6" text-anchor="end">{ui.esc(dates[-1])}</text>']
+           f'<line x1="40" x2="{w - 80}" y1="{Y(100):.1f}" y2="{Y(100):.1f}" style="stroke:var(--muted)" '
+           'stroke-dasharray="4 4" stroke-width="1" opacity=".6"/>',
+           f'<text x="4" y="{Y(100) + 4:.1f}" class="pax">100</text>',
+           f'<text x="4" y="{Y(hi - pad) + 4:.1f}" class="pax">{hi - pad:.0f}</text>',
+           f'<text x="4" y="{Y(lo + pad) + 4:.1f}" class="pax">{lo + pad:.0f}</text>',
+           f'<text x="40" y="{h - 4}" class="pax">{ui.esc(dates[0])}</text>',
+           f'<text x="{w - 80}" y="{h - 4}" class="pax" text-anchor="end">{ui.esc(dates[-1])}</text>']
+    series, labels = [], []
     for name, v in lines:
         pts = " ".join(f"{X(i):.1f},{Y(x):.1f}" for i, x in enumerate(v) if np.isfinite(x))
         if not pts:
             continue
         sw = 2.4 if name == "stock" else 1.6
-        out.append(f'<polyline points="{pts}" fill="none" stroke="{REL_COLORS[name]}" stroke-width="{sw}"/>')
+        out.append(f'<polyline points="{pts}" fill="none" style="stroke:{REL_COLORS[name]}" stroke-width="{sw}"/>')
         last = v[np.isfinite(v)][-1]
-        out.append(f'<text x="{w - 76}" y="{Y(last) + 4:.1f}" font-size="11" fill="{REL_COLORS[name]}">'
-                   f'{ui.esc(name)} {last - 100:+.0f}%</text>')
+        labels.append((Y(last) + 4, f'{ui.esc(name)} {last - 100:+.0f}%', REL_COLORS[name]))
+        shown = {"SPY": "S&P 500"}.get(name, name)
+        if names and names.get(name):
+            shown = f"{name}: {names[name]}"
+        series.append({"n": shown, "f": "reb", "c": REL_COLORS[name],
+                       "v": [round(float(x), 2) if np.isfinite(x) else None for x in v]})
+    # End labels at least 12px apart: lines that finish close together (the market, the sector
+    # and the sub-industry often do) printed their labels over one another.
+    labels.sort()
+    for y, (_y, text, col) in zip(ui.spread_labels([y for y, _t, _c in labels], 12, 14, h - 22), labels):
+        out.append(f'<text x="{w - 76}" y="{y:.1f}" font-size="11" style="fill:{col}">{text}</text>')
     out.append("</svg>")
-    return "".join(out)
+    hov = {"x0": 40, "x1": w - 80, "yt": 10, "ybot": h - 20,
+           "ya": round(10 + (h - 30) * hi / (hi - lo), 4), "yb": round(-(h - 30) / (hi - lo), 6),
+           **ui._hover_dates(dates), "s": series}
+    out[0] = out[0].replace('class="pchart"', f'class="pchart" data-hover="{ui.esc(json.dumps(hov, separators=(",", ":")))}"', 1)
+    return '<div class="pcw">' + "".join(out) + "</div>"
 
 
 def _block_relative(ticker: str, asof: str, opt: dict) -> str:
@@ -998,7 +1111,7 @@ def _block_relative(ticker: str, asof: str, opt: dict) -> str:
         if r.reindex(idx).notna().mean() < 0.8:
             v[:] = np.nan
         lines.append((name, v))
-    svg = _rel_svg([str(d) for d in idx], lines)
+    svg = _rel_svg([str(d) for d in idx], lines, names=names)
     rows = []
     for k, lab in REL_WINDOWS:
         sl = R.index[-k:]
@@ -1549,8 +1662,16 @@ def build(ticker: str, verbose: bool = True,
         "inside this company's own stored history. A hatched bar means no data, which is not the "
         'same as ranking last.<br><b>The financial history is not point-in-time:</b> the latest '
         'restatement wins, which is right for reading and wrong for backtesting.')
-    sub = (f'session <b>{ui.esc(asof)}</b> &middot; page built <b>{_built:%Y-%m-%d %H:%M}</b>'
-           f'{about}')
+    # The Refresh button shows only when the local server is running (ui.NAV_JS); it rebuilds this
+    # page in the background and the corner of the page says when it is done. Not on a dated
+    # snapshot, which is a record of its session rather than a page to bring up to date.
+    hdr = next((o for k, o in blocks if k == "header"), None)
+    refresh = ("" if session is not None else
+               f' <button type="button" class="refresh" data-scr-refresh="{ui.esc(ticker)}" hidden '
+               'title="Build this page again now, in the background">&#8635; Refresh</button>')
+    sub = (_classification(ticker, m, set((hdr or {}).get("show") or []) if hdr is not None else None)
+           + f'session <b>{ui.esc(asof)}</b> &middot; page built <b>{_built:%Y-%m-%d %H:%M}</b>'
+           f'{refresh}{about}')
 
     extra_css = (
         "<style>"
@@ -1569,6 +1690,14 @@ def build(ticker: str, verbose: bool = True,
         "white-space:nowrap;font-weight:600}"
         ".warn{background:var(--warnbg);border:1px solid var(--line);"
         "border-radius:8px;padding:9px 12px;font-size:12px;margin:12px 0}"
+        # the line under the title: sector > sub-industry, then exchange and codes
+        ".cls{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 7px;font-size:13.5px;"
+        "margin:1px 0 5px;color:var(--ink)}"
+        ".cls a{font-weight:600}.cl-sep{color:var(--muted)}"
+        ".cl-meta{color:var(--muted);font-size:12px;margin-left:6px}"
+        ".sub .refresh{margin-left:5px;padding:1px 10px;font-size:11.5px;border-radius:12px;vertical-align:1px}"
+        # on a phone the exchange line and the Refresh button wrap: no indent on their own line
+        "@media(max-width:700px){.cl-meta{margin-left:0;flex-basis:100%}.sub .refresh{margin-left:0}}"
         "</style>")
 
     js = (
@@ -1621,7 +1750,12 @@ def build(ticker: str, verbose: bool = True,
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     name = f"{ticker}.html" if session is None else f"{ticker}_{session}.html"
     out = OUT_DIR / name
-    out.write_text(html, encoding="utf-8")
+    # Atomic: the local server builds pages in a background thread and can be stopped from a page
+    # mid-build (2026-11-11); a half-written page would be served as a broken one.
+    tmp = out.with_name(f".{out.name}.tmp")
+    tmp.write_text(html, encoding="utf-8")
+    import os
+    os.replace(tmp, out)
     if verbose:
         print(f"  {ticker}: {out}  ({len(hist)} period(s), "
               f"{len(sc)} module(s) with scores)")
@@ -1777,13 +1911,12 @@ def write_index(verbose: bool = True) -> Path:
         '<div class="note"><b>Search any of the '
         + f'{len(universe) + len(pages):,}' +
         ' tradeable names above</b>, not just the ones already built. '
-        'Pages are pre-built for each session\'s bounce flags; anything else '
-        'renders on demand when <code>serve.py</code> is running '
-        '(<code>python serve.py --open</code>). MEASURED: the FIRST build after '
-        'starting the server takes a couple of minutes -- it loads the modules '
-        'and scans the stores cold -- and every one after that is about 20 '
-        'seconds. Once built the page is a static file and opens instantly. '
-        'From a terminal instead: <code>python stock_profile.py TICKER</code>.'
+        'Pages are pre-built each night for the bounce flags and the shortlist; anything else '
+        'is built on request when <code>serve.py</code> is running '
+        '(<code>python serve.py --open</code>): in the background, with its progress in the '
+        'corner of every page, which says when it is ready. Once built the page is a static '
+        'file and opens instantly. From a terminal instead: '
+        '<code>python stock_profile.py TICKER</code>.'
         '</div>')
 
     js = """
@@ -1839,48 +1972,23 @@ function apply(){
 }
 q.addEventListener('input', apply);
 
-// Build on demand, with a status line rather than a 20-second blank stare.
+// Build on demand IN THE BACKGROUND (2026-11-11): the build runs on the local server, the tray in
+// the corner of every page follows it (ui.NAV_JS) and says when it is ready, and this page stays
+// usable meanwhile. The old version held this page on a timed bar while the request ran.
 document.addEventListener('click', function(e){
   // `.mk`, not `a.mk`: this is a <button> now, and the old anchor
   // selector matched nothing, so the button did nothing at all.
   var a=e.target.closest('.mk'); if(!a) return;
   e.preventDefault();
   var tk=a.getAttribute('data-t');
-  // MEASURED, not guessed: ~20s once the server is warm, ~200s for the first
-  // build after it starts (cold module load + first store scan). The bar is
-  // driven off whichever budget applies, and the elapsed clock keeps running
-  // past it -- a bar that sticks at 100% still says "working", where a bare
-  // spinner after two minutes is indistinguishable from a hang.
-  var warm = sessionStorage.getItem('builtOne') ? 20 : 200;
-  hint.innerHTML='<div class="loader"><span class="spin"></span>'
-    +'<div><b>Building '+tk+'</b>'
-    +'<div class="st" id="st">reading bars and fact store...</div>'
-    +'<div class="pbar"><i id="pb"></i></div>'
-    +'<div class="el" id="el">0s elapsed &middot; usually about '+warm+'s</div>'
-    +'</div></div>';
-  var msgs=['reading bars and fact store...','scoring against peers...',
-            'comparing with its own history...','rendering the sheet...'];
-  var i=0, t0=Date.now();
-  var tick=setInterval(function(){
-    var sec=(Date.now()-t0)/1000;
-    var st=document.getElementById('st'), pb=document.getElementById('pb'),
-        el=document.getElementById('el');
-    if(st && i<msgs.length-1 && sec > (i+1)*warm/4) st.textContent=msgs[++i];
-    if(pb) pb.style.width=Math.min(99, sec/warm*100).toFixed(0)+'%';
-    if(el) el.textContent=sec.toFixed(0)+'s elapsed · '
-      +(sec>warm*1.5 ? 'longer than usual, still working'
-                     : 'usually about '+warm+'s');
-  }, 500);
-  // The server BUILDS the page on this request and returns it when ready.
-  fetch(tk+'.html', {cache:'no-store'}).then(function(r){
-    clearInterval(tick);
-    if(r.ok){ sessionStorage.setItem('builtOne','1'); location.href = tk+'.html'; }
-    else { hint.innerHTML='<div class="banner err">Could not build '+tk
-             +'. It may have no stored data.</div>'; }
-  }).catch(function(){
-    clearInterval(tick);
-    hint.innerHTML='<div class="banner warn">Build failed &mdash; is '
-      +'<code>serve.py</code> running?</div>';
+  if(!window.scrBuild){ location.href = encodeURIComponent(tk)+'.html'; return; }
+  a.disabled=true; a.textContent='Starting '+tk+'...';
+  window.scrBuild.start(tk).then(function(){
+    a.textContent='Building '+tk+' in the background';
+  }, function(){
+    a.disabled=false; a.textContent='Build '+tk;
+    hint.insertAdjacentHTML('afterbegin', '<div class="banner warn">Could not start the build &mdash; is '
+      +'<code>serve.py</code> running?</div>');
   });
 });
 
@@ -2082,6 +2190,31 @@ def selftest(verbose: bool = True) -> None:
         if tk in with_buys:
             assert "sec.gov/Archives/edgar/data/" in html and "pmk-buy" in html, f"{tk}: no SEC link or bars"
             nb += 1
+    # THE CHART LAYERS AND HOVER DATA (2026-11-11). The levels sit in one switchable group; a zone
+    # marked `fit` widens the range, one that is not is drawn only inside it; the hover numbers
+    # map each close onto the very point the line is drawn at.
+    import html as _htmlmod
+    import json as _json
+    svg = ui.price_chart(["2026-01-02", "2026-01-05", "2026-01-06"], [10, 11, 12], [100, 200, 300],
+                         level=10.5, zones=[{"level": 9.0, "lo": 8.73, "hi": 9.225, "fit": True,
+                                             "text": "9.00 · 3 tests", "title": "z"},
+                                            {"level": 2.0, "lo": 1.9, "hi": 2.05, "text": "far"}])
+    assert svg.count('<g class="plv">') == 1 and "9.00 · 3 tests" in svg and ">far<" not in svg, \
+        "zone layer: the fitted zone drawn, the out-of-range one not"
+    hov = _json.loads(_htmlmod.unescape(re.search(r'data-hover="([^"]+)"', svg).group(1)))
+    assert hov["d0"] == "2026-01-02" and hov["o"] == [0, 3, 4] and hov["vol"] == [100, 200, 300], hov
+    pts = re.search(r'<polyline points="([^"]+)" class="pline', svg).group(1).split()
+    for (x_, y_), v in zip((map(float, p.split(",")) for p in pts), (10, 11, 12)):
+        assert abs(hov["ya"] + hov["yb"] * v - y_) < 0.15, ("hover y off the line", v, y_)
+    assert abs(float(pts[0].split(",")[0]) - hov["x0"]) < 0.15 and abs(float(pts[-1].split(",")[0]) - hov["x1"]) < 0.15
+    rel = _rel_svg(["2026-01-02", "2026-01-05"], [("stock", np.array([100.0, 103.0])), ("SPY", np.array([100.0, np.nan]))],
+                   names={"sector": "x"})
+    hr = _json.loads(_htmlmod.unescape(re.search(r'data-hover="([^"]+)"', rel).group(1)))
+    assert [s["n"] for s in hr["s"]] == ["stock", "S&P 500"] and hr["s"][1]["v"] == [100.0, None], hr["s"]
+    assert "#8a94a6" not in rel and "#2f7fd8" not in rel, "relative chart still uses fixed colours"
+    cls = _classification("AAPL", meta("AAPL"), None)
+    assert "../sectors/latest.html#sector=" in cls and "#subind=" in cls, cls
     if verbose:
         print(f"  [stock_profile] {checked} financial table(s) aligned, "
-              f"QoQ/YoY labelled per frequency; insider block checked on {nb} buyer + 1 non-filer")
+              f"QoQ/YoY labelled per frequency; insider block checked on {nb} buyer + 1 non-filer; "
+              "chart levels layer, hover data and the sector line checked")

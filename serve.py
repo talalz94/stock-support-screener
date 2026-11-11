@@ -61,6 +61,7 @@ DEFAULT_PORT = 8787
 GUARD_HEADER = "X-Screener-Control"     # must be present on any POST
 
 _run_lock = threading.Lock()
+_SERVER = None              # the running ThreadingHTTPServer, for the page's stop button
 _last_request = [time.time()]   # list so the watchdog thread can mutate it
 _current: dict = {"step": None, "started": None, "pid": None}
 
@@ -164,187 +165,219 @@ _BUILDS: dict[str, dict] = {}
 _BUILDS_LOCK = threading.Lock()
 
 
-# Measured stage costs for a cold single-ticker build, from the JNJ build on
-# 2026-08-13 (160s total under load). These drive a REAL progress bar: the
-# worker reports which stage it is in and the page interpolates within it, so
-# the ETA reflects work actually done rather than a spinner that means nothing.
-# Weights are fractions of total elapsed time, in execution order.
-_STAGES: list[tuple[str, float]] = [
-    ("Reading price history",        0.10),
-    ("Loading bounce scores",        0.14),
-    ("Loading hype scores",          0.14),
-    ("Loading dip scores",           0.14),
-    ("Loading combo scores",         0.12),
-    ("Reading SEC filings",          0.24),
-    ("Rendering charts and tables",  0.12),
-]
+# THE STAGES OF ONE BUILD, named after what is actually read (2026-11-11: the old list named a
+# "bounce scores" module that does not exist and skipped three that do). Their durations are
+# MEASURED: every successful build records seconds per stage in BUILD_TIMES, and progress and
+# "usually about N min" come from the median of the last 30. Until three builds are recorded the
+# defaults below stand in (the old JNJ total of ~160-250s, spread over the stages).
+BUILD_TIMES = config.DATA / "_build_times.json"
+
+
+def _stages() -> list[str]:
+    return ["Reading price history",
+            f"Loading score history ({len(config.SCORE_MODULES)} modules)",
+            "Reading SEC filings",
+            "Rendering charts and tables"]
+
+
+_DEFAULT_SECS = [20.0, 90.0, 60.0, 30.0]
+
+
+def _expected() -> list[float]:
+    """Median seconds per stage over the last 30 recorded builds; defaults until there are 3."""
+    try:
+        runs = json.loads(BUILD_TIMES.read_text(encoding="utf-8")).get("runs", [])[-30:]
+        good = [r["secs"] for r in runs if r.get("stages") == _stages()]
+        if len(good) >= 3:
+            import statistics
+            return [round(statistics.median(s[i] for s in good), 1) for i in range(len(_stages()))]
+    except Exception:                                            # noqa: BLE001
+        pass
+    return list(_DEFAULT_SECS)
+
+
+def _record_times(tk: str, secs: list[float]) -> None:
+    try:
+        doc = json.loads(BUILD_TIMES.read_text(encoding="utf-8")) if BUILD_TIMES.exists() else {}
+    except Exception:                                            # noqa: BLE001
+        doc = {}
+    runs = (doc.get("runs") or [])[-59:]
+    runs.append({"tk": tk, "at": datetime.now().isoformat(timespec="seconds"), "stages": _stages(),
+                 "secs": [round(s, 1) for s in secs]})
+    tmp = BUILD_TIMES.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps({"runs": runs}, indent=1), encoding="utf-8")
+    tmp.replace(BUILD_TIMES)
 
 
 def _stage(tk: str, i: int) -> None:
     with _BUILDS_LOCK:
         st = _BUILDS.get(tk)
         if st is not None:
-            st["stage"] = i
+            st["stage"], st["stage_t"] = i, time.time()
 
 
 def _build_worker(tk: str) -> None:
-    """Prime, then build one profile, reporting stage progress as it goes."""
-    err = None
+    """Prime, then build one profile, reporting each stage as it starts."""
+    err, secs = None, []
+    t0 = time.time()
+
+    def mark(i: int) -> None:
+        nonlocal t0
+        now = time.time()
+        if i > 0:
+            secs.append(now - t0)
+        t0 = now
+        _stage(tk, i)
+
     try:
         import stock_profile
-        one = [tk]
-        # PRIME FIRST, exactly as the batch path does. `build()` alone
-        # re-scans every score partition per module and the fact store twice
-        # (annual + quarterly for the toggle). The nightly step primes once
-        # for the whole batch and gets ~20s a page; unprimed, a single build
-        # pays the full cold cost -- measured at 252s.
-        _stage(tk, 0)
-        for i, _m in enumerate(config.SCORE_MODULES):
-            _stage(tk, min(1 + i, len(_STAGES) - 3))
-            try:
-                stock_profile.prime_history(_m, one, _asof_now())
-            except Exception:                                    # noqa: BLE001
-                pass
-        _stage(tk, len(_STAGES) - 2)
+        one, asof = [tk], _asof_now()
+        # PRIME FIRST, exactly as the nightly step does, or one build pays the full cold cost of
+        # re-scanning every score partition per module (measured 252s once).
+        mark(0)
         try:
-            import fundamentals as _FD
-            _FD.prime_history(one, 16, "Q")
+            stock_profile.prime_bars(one, asof)
         except Exception:                                        # noqa: BLE001
             pass
-        _stage(tk, len(_STAGES) - 1)
+        mark(1)
+        try:
+            stock_profile.prime_histories(list(config.SCORE_MODULES), one, asof)
+        except Exception:                                        # noqa: BLE001
+            pass
+        mark(2)
+        try:
+            import fundamentals as _FD
+            _FD.prime_history(one, stock_profile.PERIODS_ALL, "A")
+        except Exception:                                        # noqa: BLE001
+            pass
+        mark(3)
         stock_profile.build(tk, verbose=False)
+        secs.append(time.time() - t0)
     except Exception as exc:                                     # noqa: BLE001
         err = f"{exc!r}"[:300]
         _log(f"on-demand build FAILED for {tk}: {err}")
     else:
-        _log(f"on-demand build done for {tk} "
-             f"({time.time() - _BUILDS[tk]['started']:.0f}s)")
+        _log(f"on-demand build done for {tk} ({sum(secs):.0f}s: "
+             + ", ".join(f"{s:.0f}" for s in secs) + ")")
+        if len(secs) == len(_stages()):
+            _record_times(tk, secs)
     with _BUILDS_LOCK:
-        _BUILDS[tk].update(done=True, error=err)
+        _BUILDS[tk].update(done=True, error=err, ended=time.time())
 
 
 def _start_build(tk: str) -> dict:
-    """Return the build state for `tk`, starting one if none is running."""
+    """The build state for `tk`, starting one if none is running. A finished build is started
+    again, so the same call both builds a missing page and refreshes an existing one."""
     with _BUILDS_LOCK:
         st = _BUILDS.get(tk)
         if st is not None and not st["done"]:
             return st                       # already building; don't restart
-        _BUILDS[tk] = {"started": time.time(), "done": False, "error": None,
-                       "stage": 0}
+        now = time.time()
+        _BUILDS[tk] = {"started": now, "done": False, "error": None, "stage": 0, "stage_t": now}
     _log(f"building profile for {tk} on demand (background)")
     threading.Thread(target=_build_worker, args=(tk,), daemon=True).start()
     return _BUILDS[tk]
 
 
-def _waiting_page(tk: str) -> bytes:
-    """The profile page's own shell, with real staged progress and an ETA.
+_TK_RE = re.compile(r"[A-Z][A-Z0-9.\-]{0,9}")
 
-    Deliberately NOT a bare spinner on a blank page. Arriving here means the
-    user clicked a ticker and expects that ticker's profile, so the page shows
-    the profile's header and skeleton immediately and fills the content area
-    with progress. Stages come from the build worker over /api/build, so the
-    bar tracks work actually completed; the ETA is the measured total (160s
-    warm, up to 250s cold) minus elapsed, and it degrades to "any moment now"
-    rather than counting into negative numbers when a build runs long.
-    """
-    steps = "".join(
-        f'<li data-i="{i}"><span class="dot"></span>{name}</li>'
-        for i, (name, _w) in enumerate(_STAGES))
-    weights = ",".join(str(w) for _n, w in _STAGES)
-    return f"""<!doctype html><html><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{tk} &middot; building</title>
-<style>
- :root{{--bg:#0d1117;--panel:#161b22;--line:#30363d;--ink:#e6edf3;
-   --dim:#8b949e;--accent:#2f81f7;--ok:#3fb950}}
- *{{box-sizing:border-box}}
- body{{background:var(--bg);color:var(--ink);margin:0;
-   font:15px/1.6 -apple-system,'Segoe UI',system-ui,sans-serif}}
- .wrap{{max-width:70rem;margin:0 auto;padding:1.6rem 1.4rem 3rem}}
- header{{border-bottom:1px solid var(--line);padding-bottom:1rem;
-   margin-bottom:1.8rem}}
- h1{{font-size:1.7rem;margin:0 0 .3rem;letter-spacing:-.02em}}
- .sub{{color:var(--dim);font-size:.88rem}}
- .card{{background:var(--panel);border:1px solid var(--line);
-   border-radius:10px;padding:1.5rem 1.6rem}}
- .pct{{font-size:2.4rem;font-weight:600;letter-spacing:-.03em;
-   font-variant-numeric:tabular-nums;line-height:1.1}}
- .eta{{color:var(--dim);font-size:.9rem;margin-top:.15rem}}
- .track{{height:6px;background:#21262d;border-radius:3px;overflow:hidden;
-   margin:1.2rem 0 1.4rem}}
- .fill{{height:100%;width:0;background:linear-gradient(90deg,var(--accent),
-   #58a6ff);border-radius:3px;transition:width .6s cubic-bezier(.4,0,.2,1)}}
- ul{{list-style:none;margin:0;padding:0;
-   display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));
-   gap:.35rem .9rem}}
- li{{color:var(--dim);font-size:.87rem;display:flex;align-items:center;
-   gap:.55rem;padding:.12rem 0;transition:color .3s}}
- li.done{{color:var(--ink)}}
- li.now{{color:var(--accent)}}
- .dot{{width:7px;height:7px;border-radius:50%;background:#30363d;
-   flex:0 0 auto;transition:background .3s,box-shadow .3s}}
- li.done .dot{{background:var(--ok)}}
- li.now .dot{{background:var(--accent);
-   box-shadow:0 0 0 0 rgba(47,129,247,.6);animation:p 1.4s infinite}}
- @keyframes p{{70%{{box-shadow:0 0 0 7px rgba(47,129,247,0)}}
-   100%{{box-shadow:0 0 0 0 rgba(47,129,247,0)}}}}
- .note{{margin-top:1.5rem;color:var(--dim);font-size:.82rem;
-   border-top:1px solid var(--line);padding-top:1rem}}
- .skel{{margin-top:1.4rem;display:grid;gap:.55rem}}
- .skel div{{height:11px;border-radius:5px;
-   background:linear-gradient(90deg,#1b2129 25%,#242c36 50%,#1b2129 75%);
-   background-size:200% 100%;animation:sh 1.5s infinite}}
- @keyframes sh{{0%{{background-position:200% 0}}100%{{background-position:-200% 0}}}}
- .err{{color:#f85149}}
-</style></head><body><div class="wrap">
-<header>
-  <h1>{tk}</h1>
-  <div class="sub">Building this profile now &mdash; it was not pre-rendered.
-    Once built it opens instantly.</div>
-</header>
-<div class="card">
-  <div class="pct" id="pct">0%</div>
-  <div class="eta" id="eta">estimating&hellip;</div>
-  <div class="track"><div class="fill" id="fill"></div></div>
-  <ul id="steps">{steps}</ul>
-  <div class="skel"><div style="width:88%"></div><div style="width:64%"></div>
-    <div style="width:75%"></div></div>
-  <div class="note" id="note">Price history, four score modules and the SEC
-    filing history are being read for {tk}.</div>
-</div></div>
-<script>
-var W=[{weights}],TK="{tk}",T0=Date.now(),EXP=170000;
-function fmt(ms){{var s=Math.max(0,Math.round(ms/1000));
-  return s>=60?(Math.floor(s/60)+"m "+(s%60)+"s"):(s+"s");}}
-function paint(stage,frac){{
-  var base=0;for(var i=0;i<stage&&i<W.length;i++)base+=W[i];
-  var p=Math.min(.99,base+(W[stage]||0)*frac);
-  document.getElementById("fill").style.width=(p*100).toFixed(1)+"%";
-  document.getElementById("pct").textContent=Math.round(p*100)+"%";
-  var el=Date.now()-T0, left=p>0.04?el*(1-p)/p:EXP-el;
-  document.getElementById("eta").textContent=
-    left>1500?("about "+fmt(left)+" remaining"):"any moment now";
-  var li=document.querySelectorAll("#steps li");
-  for(var j=0;j<li.length;j++){{li[j].className=
-    j<stage?"done":(j===stage?"now":"");}}
-}}
-var stage=0,tick=0;
-setInterval(function(){{tick++;paint(stage,Math.min(1,tick%14/14));}},700);
-function poll(){{
-  fetch("/api/build?tk="+TK,{{cache:"no-store"}}).then(function(r){{
-    return r.json();}}).then(function(j){{
-      if(j.error){{document.getElementById("note").innerHTML=
-        '<span class="err">Build failed: '+j.error+'</span>';return;}}
-      if(j.done){{document.getElementById("fill").style.width="100%";
-        document.getElementById("pct").textContent="100%";
-        document.getElementById("eta").textContent="opening\\u2026";
-        setTimeout(function(){{location.reload();}},500);return;}}
-      if(typeof j.stage==="number"){{stage=j.stage;tick=0;}}
-      setTimeout(poll,1200);
-    }}).catch(function(){{setTimeout(poll,2500);}});
-}}
-poll();
-</script></body></html>""".encode("utf-8")
+
+def _ticker(raw: str) -> str | None:
+    """A ticker from a query string, or None: letters, digits, '.' and '-' only."""
+    tk = (raw or "").strip().upper()
+    return tk if _TK_RE.fullmatch(tk) else None
+
+
+def _query(path: str, key: str) -> str:
+    from urllib.parse import parse_qs, urlsplit
+    return (parse_qs(urlsplit(path).query).get(key) or [""])[0]
+
+
+def _status(tk: str) -> dict:
+    """Everything a page needs to show one stock's page and build: is it built and when, and the
+    build's stage, elapsed time and measured stage durations. `known` is False when this server
+    has no record of a build for `tk` (none was started here, or the server was restarted since),
+    so a page following a build can tell "finished" from "lost with the old server"."""
+    page = config.REPORTS / "stock" / f"{tk}.html"
+    with _BUILDS_LOCK:
+        st = dict(_BUILDS.get(tk) or {})
+    now = time.time()
+    try:
+        mtime = page.stat().st_mtime
+    except OSError:
+        mtime = None
+    return {"tk": tk, "built": mtime is not None,
+            "built_at": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M") if mtime else None,
+            "built_ts": round(mtime, 1) if mtime else None,
+            "known": bool(st), "started": st.get("started"), "ended": st.get("ended"),
+            "building": bool(st) and not st.get("done"), "done": bool(st.get("done")),
+            "error": st.get("error"), "stage": int(st.get("stage") or 0),
+            "elapsed": round((st.get("ended") or now) - st["started"], 1) if st else 0.0,
+            "stage_elapsed": round(now - st.get("stage_t", now), 1) if st else 0.0,
+            "stages": _stages(), "expected": _expected()}
+
+
+def _waiting_page(tk: str) -> bytes:
+    """Arriving on a stock page that was never built: the build runs in the background and this
+    page shows it. Progress only moves forward (2026-11-11: the old bar restarted every ~10 seconds
+    inside a long stage, and its countdown jumped with it); the time shown is time elapsed, which
+    cannot run backwards, beside the measured usual total. "Keep browsing" hands the build to the
+    tray in the corner of every page, which says when it is ready."""
+    import ui
+    steps = "".join(f'<li data-i="{i}">{ui.esc(n)}</li>' for i, n in enumerate(_stages()))
+    css = ("<style>.bw{max-width:720px}.bw-pct{font-size:34px;font-weight:650;letter-spacing:-.02em;"
+           "font-variant-numeric:tabular-nums;line-height:1.1}.bw-meta{color:var(--muted);font-size:13px;margin-top:2px}"
+           ".bw-track{height:6px;background:var(--grid);border-radius:3px;overflow:hidden;margin:16px 0 18px}"
+           ".bw-track i{display:block;height:100%;width:0;background:var(--accent);border-radius:3px;"
+           "transition:width .8s cubic-bezier(.4,0,.2,1)}"
+           ".bw-steps{list-style:none;margin:0;padding:0;display:grid;gap:6px}"
+           ".bw-steps li{color:var(--muted);font-size:13px;padding-left:20px;position:relative}"
+           ".bw-steps li:before{content:'';position:absolute;left:3px;top:6px;width:8px;height:8px;border-radius:50%;"
+           "background:var(--line)}.bw-steps li.done{color:var(--ink)}.bw-steps li.done:before{background:var(--pos)}"
+           ".bw-steps li.now{color:var(--accent);font-weight:600}.bw-steps li.now:before{background:var(--accent)}"
+           ".bw-acts{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:18px;padding-top:14px;"
+           "border-top:1px solid var(--line)}.bw-acts .muted{font-size:12.5px}.bw-err{color:var(--neg)}</style>")
+    body = (f'<div class="card bw"><div class="bw-pct" id="bw-pct">0%</div>'
+            '<div class="bw-meta" id="bw-meta">starting&hellip;</div>'
+            '<div class="bw-track"><i id="bw-fill"></i></div>'
+            f'<ol class="bw-steps" id="bw-steps">{steps}</ol>'
+            '<div class="bw-acts"><button type="button" class="primary" id="bw-away">Keep browsing</button>'
+            '<span class="muted">This page opens by itself when it is ready, and the corner of every page '
+            'says so too.</span></div></div>')
+    js = ("""
+(function(){
+  var TK = %s, B = window.scrBuild, lis = document.querySelectorAll('#bw-steps li');
+  function show(s){
+    // No record here means the server was restarted: asking for the page again starts a new build
+    // (or serves the page, if it was written first).
+    if (!s.known){ location.reload(); return true; }
+    if (s.error){ document.getElementById('bw-meta').innerHTML = '<span class="bw-err">The build failed: '
+        + String(s.error).replace(/[&<>]/g, '') + '</span> &middot; <a href="">try again</a>'; return true; }
+    if (s.done){ document.getElementById('bw-fill').style.width = '100%%';
+      document.getElementById('bw-pct').textContent = '100%%';
+      document.getElementById('bw-meta').textContent = 'ready: opening…';
+      setTimeout(function(){ location.reload(); }, 400); return true; }
+    var p = B.progress(s);
+    document.getElementById('bw-fill').style.width = (p * 100).toFixed(1) + '%%';
+    document.getElementById('bw-pct').textContent = Math.round(p * 100) + '%%';
+    document.getElementById('bw-meta').textContent = B.mmss(s.elapsed) + ' elapsed \\u00b7 usually ' + B.about(s);
+    for (var i = 0; i < lis.length; i++) lis[i].className = i < s.stage ? 'done' : (i === s.stage ? 'now' : '');
+    return false;
+  }
+  function poll(){
+    B.api('/api/build?tk=' + encodeURIComponent(TK)).then(function(s){
+      if (!show(s)) setTimeout(poll, 1500);
+    }, function(){ setTimeout(poll, 3000); });
+  }
+  document.getElementById('bw-away').addEventListener('click', function(){
+    B.track(TK);
+    if (history.length > 1) history.back(); else location.href = '/index.html';
+  });
+  if (B) poll();
+})();
+""" % json.dumps(tk))
+    return ui.page(tk, body, subtitle="Building this stock&rsquo;s page now: it was not built yet. Once built "
+                   "it opens instantly.", active="profiles", depth=1, head=css, script=js).encode("utf-8")
 
 
 def _failed_page(tk: str, err: str) -> bytes:
@@ -487,25 +520,19 @@ class Handler(BaseHTTPRequestHandler):
 
         # Polled by the waiting page. Reports the stage the worker is in, so
         # the progress bar reflects real work instead of a timer.
-        if path == "/api/build":
-            q = self.path.split("?", 1)[1] if "?" in self.path else ""
-            tk = ""
-            for part in q.split("&"):
-                if part.startswith("tk="):
-                    tk = part[3:].upper()
-            with _BUILDS_LOCK:
-                st = dict(_BUILDS.get(tk) or {})
-            if not st:
-                # No record: either already built, or this server restarted
-                # mid-build. Either way the page should reload and find out.
-                done = (config.REPORTS / "stock" / f"{tk}.html").exists()
-                return self._json(200, {"done": done, "stage": 0,
-                                        "error": None, "unknown": True})
-            return self._json(200, {
-                "done": bool(st.get("done")), "error": st.get("error"),
-                "stage": int(st.get("stage") or 0),
-                "elapsed": round(time.time() - st.get("started", time.time()), 1),
-                "stages": [n for n, _w in _STAGES]})
+        # Pages ask this once to know they are served (and so may offer builds and the stop
+        # button); a page opened as a file, or under another server, gets no answer.
+        if path == "/api/ping":
+            return self._json(200, {"ok": True, "server": "screener", "builds": len(_BUILDS)})
+
+        # One stock's page and build, polled by the build tray on every page and by the waiting
+        # page. `built` says whether a page exists; `known` whether this server has a record of
+        # a build (see _status).
+        if path in ("/api/stock", "/api/build"):
+            tk = _ticker(_query(self.path, "tk"))
+            if not tk:
+                return self._json(400, {"error": "tk must be a ticker: letters, digits, '.' or '-'"})
+            return self._json(200, _status(tk))
 
         if path == "/api/status":
             try:
@@ -610,6 +637,28 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:                             # noqa: BLE001
                 return self._json(500, {"ok": False, "errors": [repr(exc)[:200]]})
 
+        # Build one stock's page in the background, or rebuild one that exists (the Refresh
+        # button and the build offer on any stock link). Returns the build's status at once.
+        if path == "/api/build":
+            tk = _ticker(_query(self.path, "tk"))
+            if not tk:
+                return self._json(400, {"ok": False, "error": "tk must be a ticker"})
+            _start_build(tk)
+            return self._json(200, {"ok": True, **_status(tk)})
+
+        # The stop button. The reply goes out first; the server then stops in another thread,
+        # because shutdown() waits for the serving loop, which is busy answering this request.
+        # Builds in progress here stop with it (they run in this process); a nightly step
+        # started from the Status page runs in its own process and carries on.
+        if path == "/api/shutdown":
+            with _BUILDS_LOCK:
+                running = sorted(t for t, s in _BUILDS.items() if not s.get("done"))
+            self._json(200, {"ok": True, "stopped_builds": running})
+            _log("stop requested from a page" + (f"; stopping builds of {', '.join(running)}" if running else ""))
+            if _SERVER is not None:
+                threading.Thread(target=_SERVER.shutdown, daemon=True).start()
+            return
+
         if not path.startswith("/api/run/"):
             return self._json(404, {"error": "not found"})
 
@@ -641,9 +690,64 @@ def selftest(verbose: bool = True) -> None:
     assert not _is_victim("python serve.py --port 8787", 999, 999),         "--stop would terminate itself by pid"
     assert _is_victim("python serve.py --port 8787", 111, 999),         "--stop would miss a real running server"
     assert not _is_victim("python study.py", 111, 999),         "--stop would terminate an unrelated process"
+
+    # Tickers from a query string: only letters, digits, '.' and '-' ever reach a file name.
+    for good in ("AAPL", "brk.b", "BF-B", "A"):
+        assert _ticker(good) == good.upper(), good
+    for bad in ("", "../x", "A B", "<b>", "AAPL.html/..", "TOOLONGTICK", "1ABC", "A/B"):
+        assert _ticker(bad) is None, bad
+    assert len(_stages()) == len(_DEFAULT_SECS) == len(_expected()), "stages and durations differ in length"
+    assert all(x > 0 for x in _expected()), _expected()
+    s = _status("ZZZZQ")
+    assert not s["known"] and not s["building"] and not s["done"] and s["started"] is None, s
+
+    # The endpoints, end to end, on a throwaway port: ping, a bad ticker, a POST without the header.
+    import urllib.error
+    import urllib.request
+    global _SERVER
+    srv = ThreadingHTTPServer((HOST, 0), Handler)
+    port = srv.server_address[1]
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://{HOST}:{port}"
+
+    def call(path, post=False, header=True):
+        req = urllib.request.Request(base + path, data=b"{}" if post else None, method="POST" if post else "GET")
+        if post and header:
+            req.add_header(GUARD_HEADER, "1")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}")
+    try:
+        code, j = call("/api/ping")
+        assert code == 200 and j.get("server") == "screener", (code, j)
+        assert call("/api/stock?tk=../../.env")[0] == 400
+        assert call("/api/build?tk=", post=True)[0] == 400
+        assert call("/api/shutdown", post=True, header=False)[0] == 403, "shutdown without the guard header"
+        code, j = call("/api/stock?tk=ZZZZQ")
+        assert code == 200 and j["known"] is False and j["built"] is False, j
+        # The stop button: replies first, then the server stops.
+        prev, _SERVER = _SERVER, srv
+        try:
+            code, j = call("/api/shutdown", post=True)
+            assert code == 200 and j.get("ok"), (code, j)
+            for _ in range(50):
+                try:
+                    call("/api/ping")
+                except (urllib.error.URLError, ConnectionError, OSError):
+                    break
+                time.sleep(0.1)
+            else:
+                raise AssertionError("the server still answers after /api/shutdown")
+        finally:
+            _SERVER = prev
+    finally:
+        srv.shutdown()
+        srv.server_close()
     if verbose:
-        print(f"  [serve] traversal blocked, unknown steps rejected, "
-              f"bound to {HOST} only")
+        print(f"  [serve] traversal blocked, unknown steps rejected, bound to {HOST} only; "
+              "ticker filter, build status, ping and the guarded stop endpoint checked end to end")
 
 
 def main() -> int:
@@ -696,7 +800,8 @@ def main() -> int:
         _log(f"could not rebuild Today or Settings ({exc!r}); serving whatever exists")
 
     url = f"http://{HOST}:{a.port}/index.html"
-    srv = ThreadingHTTPServer((HOST, a.port), Handler)
+    global _SERVER
+    srv = _SERVER = ThreadingHTTPServer((HOST, a.port), Handler)
     _log(f"serving {config.REPORTS} at {url}")
     _log("buttons on the Status page (system.html) are live while this runs. Ctrl-C to stop.")
     if a.idle_exit:

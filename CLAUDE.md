@@ -66,7 +66,11 @@ is a standing request, not an optional courtesy.
 - Claude-app scheduled tasks run only while the app is open. Data work belongs in the orchestrator;
   app tasks are only for what needs Claude itself (`docs/claude_app_tasks.md`).
 - Pages are static files: a menu change reaches pages already written through `python ui.py
-  --renav` (the nightly `dashboard` step runs it too).
+  --renav` (the nightly `dashboard` step runs it too). A style fix inside a page's own CSS
+  reaches them only through `ui._LEGACY_CSS`, which the same command applies.
+- The working tree is CRLF and Git Bash `sed -i` rewrites a file as LF; a Bash heredoc collapses
+  `\\` (a regex's `\\1` became the character 0x01 once). Edit with the Edit tool, and write any
+  script that contains backslashes to a file with the Write tool before running it.
 
 ## Checks
 

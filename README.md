@@ -162,6 +162,16 @@ page cannot spawn a process. It binds `127.0.0.1` only, validates every step
 name against the registry, and refuses to start while another run holds the
 lock. Without it the hub still works exactly as before, with copy-able commands.
 
+While it runs, every page also gets (2026-11-11; nothing changes for a page opened as a file):
+- **Stock pages built in the background.** Clicking a ticker with no page yet asks "Build it?";
+  the build runs on the server while you keep browsing, and a card in the bottom-right corner of
+  every page (and every tab) shows its stage and progress and says when it is ready. Progress only
+  moves forward; the usual duration is the median of the last builds, measured per stage
+  (`data/_build_times.json`). Each stock page has a **Refresh** button that rebuilds it the same way.
+- **A stop button** (the power icon at the end of the menu) that shuts the server down after a
+  confirmation. Builds still running stop with it; a nightly step started from the Status page runs
+  in its own process and carries on.
+
 The same bounce rows are in `reports\Pattern_<date>.csv` for Excel.
 
 To make it automatic:
@@ -289,11 +299,12 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **37 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
+- **38 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
   shortvol, hype, provider, sec_facts, sec_gap, sec_edgar, insider, congress,
   fundamental, events, leaderboard, dip, insider_score, combo, candidates, floor,
-  insider_pages, sectors, narrative, shortlist, validate, explore, snapshots, profiles,
-  watchlists, retention, dashboard, docs`. `narrative` writes the weekly AI narrative task's
+  insider_track, insider_pages, sectors, narrative, shortlist, validate, explore, snapshots, profiles,
+  watchlists, retention, dashboard, docs`. `insider_track` (2026-11-11) keeps the forward record of
+  every insider and House trade filed since that day and what its stock did after it. `narrative` writes the weekly AI narrative task's
   inputs and checks its answers; `shortlist` builds every ranking's list of names at support with the
   tested trade plan and scores the forward ledger. Both run BEFORE `explore`, whose support and
   trade-plan columns read that night's shortlist (until 2026-11-09 they ran after it, so Explore
@@ -527,7 +538,8 @@ as bankruptcy text and asserts no metric moves.
 | `news_events.py` | stock news EVENTS in `data/news_events/`: every SEC filing by type since 2016 (8-K items, deal and activist forms, acceptance to the second), PR Newswire M&A / FDA-approval and FDA press feeds, a daily Finnhub earnings-calendar snapshot (point in time); `page_flags(asof)` feeds the warning and earnings tags. The `news_events` step. `--backfill`, `--update`, `--stats`, `--selftest`. NOT `events.py` (severity calibration) |
 | `news_events_study.py` | what each event type predicts, vs the liquidity fifth AND the same stock's own non-event days, split halves; `data/_news_events_study_summary.json`. Nothing qualified as a buy signal; 3.02 / 4.02 / 1.02 are warnings |
 | `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
-| **`orchestrator.py`** | **THE scheduled entry point** — 37-step registry, watermark catch-up, `data/_jobs.parquet` |
+| **`orchestrator.py`** | **THE scheduled entry point** — 38-step registry, watermark catch-up, `data/_jobs.parquet` |
+| `insider_track.py` | the forward record (2026-11-11): every insider and House trade filed since, one row per filing in `data/insider/_forward.parquet` with its features as known that night, and its stock's move over the first session and 1/5/20/60 sessions against same-day stocks of the same liquidity, filled in as each matures; unadjusted splits flagged and left out; summary in `data/_insider_forward_summary.json`, a line on the Insiders and House pages. `--show`, `--selftest` |
 | **`dashboard.py`** | **the status hub**, `reports/system.html` — read-only, never triggers work |
 | **`today_page.py`** | **Today**, `reports/index.html` (the home page) — market, shortlist top 5, watchlists, this week, narrative |
 | **`settings_page.py`** | **Settings**, `reports/settings.html` — theme and Today's cards (this browser); stock-page sections and tabs, shortlist ranking, size and filters (project files, saved through `serve.py`) |

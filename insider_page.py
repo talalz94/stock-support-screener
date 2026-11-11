@@ -205,6 +205,7 @@ def insider_evidence(ev: dict) -> str:
                       if sell["t"] > -2 else "measured bearish.") + "</div>")
     out.append('<details><summary>every test, with both halves</summary>'
                + evidence_table(ev, list(FILTER_TESTS.values()) + [IS.SELL_SIGNAL], "insider") + "</details>")
+    out.append(_forward_note(("buy", "sell", "other_buy")))
     out.append("<div><b>Read with:</b> only stocks still in our bar store are measured, and half of all purchases "
                "are in companies since delisted (often failures), so these results are FLATTERED. Small-company "
                "spreads and costs are not modelled. A research screen, not advice.</div>")
@@ -632,9 +633,19 @@ def house_evidence(ev: dict, led: pd.DataFrame | None) -> str:
     out.append("<div><b>What is missing:</b> THE SENATE &mdash; its disclosure site refuses automated access, and "
                "getting past that would mean defeating its bot protection. PAPER filings are scanned images, counted "
                f"but not read{(' (' + cov + ')') if cov else ''}. Amounts are the form's ranges.</div>")
+    out.append(_forward_note(("house_buy", "house_sell")))
     out.append("<div><b>Use:</b> 5 U.S.C. 13107(c) bars commercial use of these reports. This page is built for the "
                "owner's own research, stays on this machine, and is never published. Not advice.</div>")
     return "".join(out)
+
+
+def _forward_note(kinds: tuple[str, ...]) -> str:
+    """The forward record's line (insider_track.py); a page still renders if it cannot be read."""
+    try:
+        import insider_track
+        return insider_track.page_note(kinds)
+    except Exception as exc:                                     # noqa: BLE001
+        return f"<div><b>Forward record:</b> could not be read ({ui.esc(type(exc).__name__)}).</div>"
 
 
 _HOUSE_TEMPLATE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">

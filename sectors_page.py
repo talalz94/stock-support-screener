@@ -148,6 +148,8 @@ table.sct{width:100%;border-collapse:collapse;font-size:12.5px;min-width:1100px}
 .scbar{display:inline-block;height:8px;background:var(--accent);border-radius:2px;vertical-align:middle;margin-right:6px}
 .scm{color:var(--muted)}
 .scpos{color:var(--pos)} .scneg{color:var(--neg)}
+.sct tr.scflash td{animation:scflash 2.4s ease-out}
+@keyframes scflash{0%,35%{background:var(--warnbg)}100%{background:transparent}}
 </style></head><body>
 @@NAV@@
 <div class="scwrap">
@@ -208,9 +210,26 @@ function table(id, level, withScore){
   t.tHead.addEventListener('click',function(e){var th=e.target.closest('th'); if(!th)return; var k=th.dataset.k; if(k===sc)sd=-sd; else{sc=k;sd=(k==='group')?1:-1;} render();});
   t.tBodies[0].addEventListener('click',function(e){if(e.target.closest('a'))return; var tr=e.target.closest('tr.scr'); if(!tr)return; var g=tr.dataset.g; open[g]=!open[g]; render();});
   render();
+  // Open one group's row and bring it into view (a stock page links here as #sector=... or #subind=...).
+  return function(g){
+    if(!rows.some(function(r){return r.group===g;})) return;
+    open[g]=true; render();
+    function row(){ return [].filter.call(t.tBodies[0].rows,function(x){return x.dataset.g===g;})[0]; }
+    var tr=row(); if(!tr) return;
+    tr.classList.add('scflash'); tr.scrollIntoView({block:'center'});
+    // The browser restores its own scroll position after load (a reload, the back button), which
+    // undid the scroll above: once more after that, if the row is out of view.
+    function again(){ setTimeout(function(){ var x=row(); if(!x) return; var r=x.getBoundingClientRect();
+      if(r.top<0||r.bottom>innerHeight) x.scrollIntoView({block:'center'}); },60); }
+    if(document.readyState==='complete') again(); else window.addEventListener('load',again);
+  };
 }
-table('tsec','sector',true);
-table('tsub','subind',false);
+var OPEN={sector:table('tsec','sector',true), subind:table('tsub','subind',false)};
+function fromHash(){
+  var m=/^#(sector|subind)=(.+)$/.exec(location.hash||''); if(!m) return;
+  try{ OPEN[m[1]](decodeURIComponent(m[2])); }catch(e){}
+}
+fromHash(); window.addEventListener('hashchange',fromHash);
 })();
 </script></body></html>
 """

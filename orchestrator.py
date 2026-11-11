@@ -730,6 +730,27 @@ def _step_insider_score(asof: str) -> tuple[int, str]:
                f"{sc}{'; derived table rebuilt' if stale else ''}")
 
 
+def _step_insider_track(asof: str) -> tuple[int, str]:
+    """The forward record of insider and House trades (insider_track.py, asked for 2026-11-11):
+    each trade filed since 2026-11-11 written down once, with its features as known then, and
+    the price's move after it filled in as each horizon (first session, 1, 5, 20, 60) matures.
+    Reads the Form 4 and House stores and the derived table as they are: a failed `insider` or
+    `congress` step tonight only means tonight's filings arrive tomorrow."""
+    import insider_track
+    before = 0
+    try:
+        before = len(__import__("pandas").read_parquet(insider_track.LEDGER, columns=["kind"]))
+    except Exception:                                            # noqa: BLE001
+        pass
+    L = insider_track.update(asof, verbose=False)
+    s = insider_track.read_summary() or {}
+    k = s.get("kinds") or {}
+    by = ", ".join(f"{(k.get(x) or {}).get('recorded', 0):,} {x.replace('_', ' ')}" for x in insider_track.KINDS)
+    matured = sum(((k.get(x) or {}).get("horizons") or {}).get("20", {}).get("n", 0) for x in insider_track.KINDS)
+    return len(L), (f"{len(L) - before:,} new; {len(L):,} recorded since {insider_track.START} ({by}); "
+                    f"{matured:,} with a 20-session result")
+
+
 def _step_insider_pages(asof: str) -> tuple[int, str]:
     """The Insiders page (insider/latest.html) and the House trades page (house.html).
     Each prints the measured result of its filters from the study files. The House
@@ -1836,6 +1857,13 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("bars", "fundamental", "hype", "sentiment"), timeout=900,
          desc="the Floor-retest page: a big run, a deep pullback, a multi-month "
               "floor, the close back at it (measured result printed on the page)"),
+    # The forward record of what insider and House trades did to the price (2026-11-11). After
+    # zones (the support band at filing) and before the pages that print its summary; nothing
+    # depends on it, and the insider steps are not its dependencies either (see the docstring).
+    Step("insider_track", _step_insider_track, config.CADENCE_DAILY,
+         depends_on=("bars", "zones"), timeout=1200,
+         desc="every insider and House trade filed since 2026-11-11, with what its stock did "
+              "after it (first session, 1, 5, 20, 60 sessions) against stocks of the same liquidity"),
     # After zones and fundamental (support status, market cap, fund score per row).
     Step("insider_pages", _step_insider_pages, config.CADENCE_DAILY,
          depends_on=("zones", "fundamental"), timeout=900,

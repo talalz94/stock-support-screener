@@ -40,14 +40,14 @@ PALETTE_LIGHT = """
   --accent:#2c68dc; --grid:#eef1f5; --head:#f0f2f5;
   --pos:#1a7f37; --posbg:#dafbe1; --neg:#cf222e; --negbg:#ffebe9;
   --warn:#9a6700; --warnbg:#fff8c5; --blk:#8250df; --blkbg:#fbefff;
-  --skip:#676f79; --skipbg:#f0f2f5;
+  --skip:#676f79; --skipbg:#f0f2f5; --onaccent:#ffffff;
 """
 PALETTE_DARK = """
   --bg:#0e1116; --panel:#161b22; --ink:#e6edf3; --muted:#8b949e; --line:#262c36;
   --accent:#589bff; --grid:#1c222b; --head:#1b2027;
   --pos:#3fb950; --posbg:#0f2a17; --neg:#f85149; --negbg:#2d1214;
   --warn:#d29922; --warnbg:#2b2413; --blk:#a371f7; --blkbg:#221733;
-  --skip:#8b949e; --skipbg:#1b2027;
+  --skip:#8b949e; --skipbg:#1b2027; --onaccent:#0e1116;
 """
 
 # The menu's own rules and the theme switch, kept apart so `refresh_nav()` can bring an
@@ -83,7 +83,7 @@ border:1px solid var(--line);border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,
 padding:6px;z-index:60}
 .nav details.dd .menu a{display:block;padding:7px 10px;border-radius:6px;border-bottom:0;color:var(--ink)}
 .nav details.dd .menu a:hover{background:var(--grid)}
-.nav details.dd .menu a.on{color:var(--accent);background:var(--grid)}
+.nav details.dd .menu a.on{color:var(--accent);background:transparent;box-shadow:inset 3px 0 0 var(--accent);font-weight:600}
 .nav details.dd .menu .hint{display:block;font-size:11px;color:var(--muted);font-weight:400}
 .nav form.find{margin:0 0 0 6px;display:flex}
 .nav form.find input{width:110px;padding:5px 8px;font-size:12.5px;border:1px solid var(--line);
@@ -100,10 +100,49 @@ border-radius:7px;background:var(--bg);color:var(--ink)}
   .nav details.dd .menu{position:absolute;left:8px;right:8px;top:calc(100% + 4px);min-width:0}
   .nav select{margin:0 0 7px 7px;max-width:calc(100% - 14px)}
 }
+/* Live features (2026-11-11), on pages served by serve.py only: the stop button, the build tray
+   in the corner, and the dialogs. */
+.nav .scr-power{margin-left:6px;padding:6px 8px;border:1px solid var(--line);border-radius:7px;
+background:var(--panel);color:var(--muted);line-height:0;cursor:pointer}
+.nav .scr-power:hover{color:var(--neg);border-color:var(--neg)}
+.scr-tray{position:fixed;right:16px;bottom:16px;z-index:70;display:flex;flex-direction:column;gap:8px;
+width:min(330px,calc(100vw - 32px))}
+.scr-item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;
+box-shadow:0 10px 28px rgba(0,0,0,.18);font-size:12.5px}
+.scr-item .scr-row{display:flex;align-items:center;gap:8px}
+.scr-item .scr-row b{font-size:13px}
+.scr-item .scr-row .scr-what{color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scr-item .scr-x{border:0;background:none;color:var(--muted);font-size:16px;line-height:1;padding:0 2px;cursor:pointer}
+.scr-item .scr-x:hover{color:var(--ink)}
+.scr-item .scr-bar{height:5px;background:var(--grid);border-radius:3px;overflow:hidden;margin:8px 0 6px}
+.scr-item .scr-bar i{display:block;height:100%;width:0;background:var(--accent);border-radius:3px;
+transition:width .9s cubic-bezier(.4,0,.2,1)}
+.scr-item .scr-meta{color:var(--muted);font-size:11.5px}
+.scr-item.ok{border-color:var(--pos)}
+.scr-item.ok .scr-what{color:var(--pos)}
+.scr-item.err{border-color:var(--neg)}
+.scr-item.err .scr-what{color:var(--neg)}
+.scr-item .scr-open{font-weight:600;color:var(--accent);white-space:nowrap}
+.scr-dialog{border:1px solid var(--line);border-radius:12px;padding:20px 22px;max-width:min(420px,calc(100vw - 32px));
+background:var(--panel);color:var(--ink);box-shadow:0 18px 50px rgba(0,0,0,.3)}
+.scr-dialog::backdrop{background:rgba(0,0,0,.35)}
+.scr-dialog h3{margin:0 0 8px;font-size:15px}
+.scr-dialog p{margin:0 0 16px;color:var(--muted);font-size:13px;line-height:1.5}
+.scr-dialog .scr-acts{display:flex;justify-content:flex-end;gap:8px}
+.scr-dialog .scr-acts button{font:inherit;font-size:13px;padding:6px 14px;border:1px solid var(--line);border-radius:7px;
+background:var(--panel);color:var(--ink);cursor:pointer}
+.scr-dialog .scr-acts button:hover{border-color:var(--accent)}
+.scr-dialog .scr-acts button.go{background:var(--accent);border-color:var(--accent);color:var(--onaccent);font-weight:600}
+.scr-dialog .scr-acts button.danger{background:var(--neg);border-color:var(--neg);color:var(--onaccent);font-weight:600}
+.scr-dialog .scr-acts button.go:hover,.scr-dialog .scr-acts button.danger:hover{opacity:.9}
 /* Appearance chosen on the Settings page (2026-11-09). Without a choice the palette follows the
    system setting (the rules at the top of ui.CSS); a choice overrides it on every page, the old
    dated ones included, because this block is what refresh_nav() brings up to date. */
 :root{color-scheme:light dark}
+/* Text on a filled accent or alert colour (2026-11-11): white on the dark theme's blue measured 2.8:1.
+   Also defined here, not only in the palettes, so pages written earlier get it from refresh_nav(). */
+:root{--onaccent:#ffffff}
+@media (prefers-color-scheme:dark){:root{--onaccent:#0e1116}}
 :root[data-theme="light"]{color-scheme:light;""" + PALETTE_LIGHT + """}
 :root[data-theme="dark"]{color-scheme:dark;""" + PALETTE_DARK + """}
 /* nav:end */
@@ -184,13 +223,13 @@ input,select,button{font:12px inherit;padding:5px 9px;border:1px solid var(--lin
 border-radius:6px;background:var(--panel);color:var(--ink)}
 button{cursor:pointer}
 button:hover{border-color:var(--accent);color:var(--accent)}
-button.primary{background:var(--accent);color:#fff;border-color:var(--accent);
+button.primary{background:var(--accent);color:var(--onaccent);border-color:var(--accent);
 font-weight:600}
-button.primary:hover{opacity:.9;color:#fff}
+button.primary:hover{opacity:.9;color:var(--onaccent)}
 .toggle{display:inline-flex;border:1px solid var(--line);border-radius:7px;
 overflow:hidden}
 .toggle button{border:0;border-radius:0;padding:5px 13px;background:var(--panel)}
-.toggle button.on{background:var(--accent);color:#fff;font-weight:600}
+.toggle button.on{background:var(--accent);color:var(--onaccent);font-weight:600}
 
 /* ---- surfaces ---- */
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
@@ -205,7 +244,7 @@ padding:3px 11px;font-size:12px;white-space:nowrap}
    outlined rather than sitting flat among the descriptive chips. */
 .chip.px{font-size:15px;padding:5px 13px;border-color:var(--accent)}
 .chip.px b{font-size:17px}
-.chip.cta{background:var(--accent);color:#fff;border-color:var(--accent);
+.chip.cta{background:var(--accent);color:var(--onaccent);border-color:var(--accent);
 font-weight:600}
 .chip.cta:hover{text-decoration:none;opacity:.9}
 /* A chip that qualifies the numbers rather than describing the company --
@@ -310,6 +349,30 @@ border:1px solid var(--line);border-radius:9px}
 .pmk-buy{fill:var(--pos)}
 .pmk-sell{fill:var(--neg)}
 .pmk-house{fill:var(--blk)}
+/* Support zones from the zone scan (2026-11-11): the band where a bar's low counts as a test,
+   and its level. Amber, apart from the gate's own level (accent) and the price line (green/red). */
+.pzone{fill:var(--warn);opacity:.08}
+.pzline{stroke:var(--warn);stroke-width:1;opacity:.8}
+.pztxt{fill:var(--warn);font-size:10.5px;font-weight:600}
+.nolv .plv{display:none}
+.lvtog{display:inline-flex;align-items:center;gap:6px;border-radius:20px;padding:4px 11px 4px 9px}
+.lvtog:before{content:"";width:22px;height:12px;border-radius:7px;background:var(--line);
+box-shadow:inset 0 0 0 1px var(--line);transition:background .15s}
+.lvtog[aria-pressed="true"]:before{background:var(--accent);
+background-image:radial-gradient(circle at 16px 6px,var(--panel) 4px,transparent 4.5px)}
+.lvtog[aria-pressed="false"]:before{background-image:radial-gradient(circle at 6px 6px,var(--panel) 4px,transparent 4.5px)}
+/* Hover readout on charts (CHART_JS): a dashed guide, a dot on each line and a small card. */
+.pcw{position:relative}
+.phov-line{stroke:var(--muted);stroke-width:1;stroke-dasharray:3 3;pointer-events:none}
+.phov-dot{stroke:var(--panel);stroke-width:1.5;pointer-events:none}
+.ptip{position:absolute;z-index:20;pointer-events:none;background:var(--panel);color:var(--ink);
+border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:11.5px;line-height:1.5;
+box-shadow:0 6px 18px rgba(0,0,0,.16);min-width:140px;white-space:nowrap}
+.ptip .pt-d{font-weight:650;margin-bottom:2px}
+.ptip .pt-r{display:flex;align-items:center;gap:6px}
+.ptip .pt-r b{margin-left:auto;padding-left:14px;font-weight:600;font-variant-numeric:tabular-nums}
+.ptip .pt-r i{width:9px;height:3px;border-radius:2px;display:inline-block;flex:none}
+.ptip .pt-m{color:var(--muted)}
 table{width:100%;border-collapse:collapse;font-size:12.5px;
 background:var(--panel);border:1px solid var(--line);border-radius:8px;
 overflow:hidden}
@@ -874,9 +937,44 @@ def nice_ticks(lo: float, hi: float, target: int = 5,
     return best or ticks_for(nice_step(span, target))
 
 
+def spread_labels(ys: list[float], gap: float = 12.0, top: float = 0.0, bottom: float = 1e9) -> list[float]:
+    """Label positions at least `gap` apart and inside [top, bottom], in the order given (sorted
+    ascending): pushed down past each other first, then the tail pulled back above `bottom`."""
+    out: list[float] = []
+    for y in ys:
+        out.append(max(y, top, out[-1] + gap) if out else max(y, top))
+    limit = bottom
+    for i in range(len(out) - 1, -1, -1):
+        if out[i] > limit:
+            out[i] = limit
+        limit = out[i] - gap
+    return out
+
+
+def _hover_dates(ds: list[str]) -> dict:
+    """Dates for a chart's hover data, compactly: the first date and each one's offset in days.
+    A 250-point pane carries 'YYYY-MM-DD' 250 times otherwise (CHART_JS rebuilds them in UTC)."""
+    import pandas as pd
+    try:
+        t = pd.to_datetime(pd.Series(ds).astype(str).str[:10])
+        return {"d0": t.iloc[0].strftime("%Y-%m-%d"), "o": [int(x) for x in (t - t.iloc[0]).dt.days]}
+    except Exception:                                            # noqa: BLE001
+        return {"d": [str(x)[:10] for x in ds]}
+
+
+def _hover_num(v, nd: int = 2):
+    """A finite float rounded for hover data, or None (JSON has no NaN)."""
+    import math as _m
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return round(f, nd) if _m.isfinite(f) else None
+
+
 def price_chart(dates, closes, volumes=None, level=None, base=None,
                 w: int = 980, h: int = 270, label: str = "",
-                markers=None) -> str:
+                markers=None, zones=None) -> str:
     """Close line + volume + the support level, as one inline SVG.
 
     HAND-BUILT because every page here must open from `file://` with no network,
@@ -898,7 +996,16 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
     purchases (purple). Each lands on the first bar ON OR AFTER its date (a weekly
     or monthly bar holds the dates inside it); several on one bar become one mark
     whose tooltip lists them. Outside the window: not drawn.
+
+    `zones` (2026-11-11): support zones from the nightly zone scan, as dicts with `level`, `lo`
+    and `hi` (the band in which a bar's low counts as a test of the level, levels.touch_mask),
+    `text` (the label) and `title` (the hover note); `fit` puts the zone inside the y-range,
+    otherwise it is drawn only when the price range already reaches it. The level, the base band
+    and the zones sit in one group (`.plv`) that the page's Levels switch shows or hides.
+    Hovering the chart (CHART_JS) reads out the date, close, the move from the bar before and
+    the volume, from the `data-hover` numbers on the SVG.
     """
+    import json
     import numpy as np
     import pandas as pd
 
@@ -921,6 +1028,8 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
     cands = [lo, hi] + ([float(level)] if level and np.isfinite(float(level)) else [])
     if base and all(b is not None and np.isfinite(float(b)) for b in base):
         cands += [float(base[0]), float(base[1])]
+    zones = [z for z in (zones or []) if z.get("level") is not None and np.isfinite(float(z["level"]))]
+    cands += [float(z["level"]) for z in zones if z.get("fit")]
     lo, hi = min(cands), max(cands)
     rng = (hi - lo) or 1.0
     lo -= rng * 0.06
@@ -945,7 +1054,22 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
         out.append(f'<text x="{padl - 6}" y="{y + 3.5:.1f}" class="pax" '
                    f'text-anchor="end">{v:,.{dec}f}</text>')
 
-    # the base band, then the level on top of it
+    # THE LEVELS GROUP: support zones (bands, then their lines), the base band, the gate's level on
+    # top. Labels at the right edge are kept 12px apart so two close zones stay readable.
+    out.append('<g class="plv">')
+    labels = []
+    y_top, y_bot = padt, pb
+    for z in zones:
+        L = float(z["level"])
+        if not (lo <= L <= hi):
+            continue
+        zlo, zhi = float(z.get("lo") or L), float(z.get("hi") or L)
+        ya_, yb_ = max(Y(min(zhi, hi)), y_top), min(Y(max(zlo, lo)), y_bot)
+        tip = f'<title>{esc(z.get("title") or "")}</title>' if z.get("title") else ""
+        out.append(f'<rect x="{padl}" y="{ya_:.1f}" width="{plot_w}" height="{max(yb_ - ya_, 1):.1f}" '
+                   f'class="pzone">{tip}</rect>')
+        out.append(f'<line x1="{padl}" y1="{Y(L):.1f}" x2="{w - padr}" y2="{Y(L):.1f}" class="pzline"/>')
+        labels.append((Y(L), z.get("text") or f"{L:,.2f}", "pztxt"))
     if base and all(b is not None and np.isfinite(float(b)) for b in base):
         b0, b1 = sorted((float(base[0]), float(base[1])))
         y0, y1 = Y(b1), Y(b0)
@@ -955,8 +1079,11 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
         y = Y(float(level))
         out.append(f'<line x1="{padl}" y1="{y:.1f}" x2="{w - padr}" y2="{y:.1f}" '
                    f'class="plevel"/>')
-        out.append(f'<text x="{w - padr - 2}" y="{y - 5:.1f}" class="plevtxt" '
-                   f'text-anchor="end">support {float(level):,.2f}</text>')
+        labels.append((y, f"support {float(level):,.2f}", "plevtxt"))
+    labels.sort()
+    for ty, (_y, text, cls) in zip(spread_labels([y - 5 for y, _t, _c in labels], 12, padt + 9, pb - 3), labels):
+        out.append(f'<text x="{w - padr - 2}" y="{ty:.1f}" class="{cls}" text-anchor="end">{esc(text)}</text>')
+    out.append('</g>')
 
     # volume
     if volumes is not None:
@@ -974,7 +1101,8 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
 
     # the price line, coloured by the direction of the whole window
     poly = " ".join(f"{X(i):.1f},{Y(v):.1f}" for i, v in enumerate(cs))
-    cls = "pline up" if cs[-1] >= cs[0] else "pline down"
+    up = cs[-1] >= cs[0]
+    cls = "pline up" if up else "pline down"
     out.append(f'<polyline points="{poly}" class="{cls}"/>')
 
     if markers:
@@ -1024,7 +1152,17 @@ def price_chart(dates, closes, volumes=None, level=None, base=None,
                    f'text-anchor="{anc}">{esc(lab_txt)}</text>')
 
     out.append("</svg>")
-    return "".join(out)
+    # Hover data: y = ya + yb * value maps a close onto the plot (Y above, solved for a line).
+    nd = 2 if max(cs) >= 1 else 4
+    hov = {"x0": padl, "x1": w - padr, "yt": padt, "ybot": h - 4,
+           "ya": round(pb + (pb - padt) * lo / rng, 4), "yb": round(-(pb - padt) / rng, 6),
+           **_hover_dates(ds),
+           "s": [{"n": "close", "f": "px", "c": "var(--pos)" if up else "var(--neg)",
+                  "v": [_hover_num(v, nd) for v in cs]}]}
+    if volumes is not None:
+        hov["vol"] = [int(v) for v in vs]
+    out[0] = out[0].replace('class="pchart"', f'class="pchart" data-hover="{esc(json.dumps(hov, separators=(",", ":")))}"', 1)
+    return '<div class="pcw">' + "".join(out) + "</div>"
 
 
 # Geometry for radar(). The viewBox is WIDER THAN TALL on purpose: axis labels
@@ -1236,6 +1374,250 @@ NAV_JS = r"""<script>
     if (d.matches('.nav details.dd') || d.matches('details.info')) closeAll(d);
     if (d.matches('details.info')) fitTip(d);
   }, true);
+
+  // ---- LIVE FEATURES (2026-11-11): only on pages served by serve.py -----------------------------
+  // A page asks /api/ping once. When the server answers: the stop button shows; a stock link whose
+  // page is not built offers to build it in the background; the tray in the corner follows every
+  // build across pages and tabs (localStorage scr.builds) and says when it is ready; stock pages'
+  // Refresh buttons work. Progress only moves forward: inside a stage it approaches that stage's
+  // measured share without reaching it, a new stage only adds to it, and no reading lower than one
+  // already shown is ever drawn (the old bar restarted inside long stages and its countdown jumped).
+  if (location.protocol !== 'file:') (function(){
+    var BKEY = 'scr.builds', KEEP_MS = 20 * 60 * 1000, PROG = {}, LIVE = false, timer = null, busy = false,
+        tray = null, fails = 0, READY = [], TITLE0 = null;
+    var LOADED = (window.performance && performance.timeOrigin) || Date.now();
+    function getB(){
+      try { var b = JSON.parse(localStorage.getItem(BKEY) || '{}');
+            return (b && typeof b === 'object' && !Array.isArray(b)) ? b : {}; } catch (e) { return {}; }
+    }
+    function setB(b){ try { localStorage.setItem(BKEY, JSON.stringify(b)); } catch (e) {} }
+    function put(tk, v){ var b = getB(); if (v) b[tk] = v; else delete b[tk]; setB(b); }
+    function api(path, post){
+      return fetch(path, post ? {method: 'POST', body: '{}',
+                                 headers: {'X-Screener-Control': '1', 'Content-Type': 'application/json'}}
+                              : {cache: 'no-store'})
+        .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    }
+    function mmss(s){ s = Math.max(0, Math.round(s || 0)); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
+    function total(s){ return (s.expected || []).reduce(function(a, x){ return a + x; }, 0); }
+    function about(s){ var t = total(s); return t ? 'about ' + Math.max(1, Math.round(t / 60)) + ' min' : 'a few minutes'; }
+    function progress(s){
+      if (s.done) return 1;
+      var exp = s.expected || [], tot = total(s) || 1, st = s.stage || 0, base = 0, i;
+      for (i = 0; i < st && i < exp.length; i++) base += exp[i];
+      var cur = exp[st] || 1, key = (s.tk || '') + '@' + (s.started || '');
+      var p = Math.min(0.99, (base + 0.95 * cur * (1 - Math.exp(-(s.stage_elapsed || 0) / cur))) / tot);
+      var mem = PROG[s.tk], it = getB()[s.tk];
+      if (mem && mem.k === key && mem.p > p) p = mem.p;
+      if (it && it.k === key && it.p > p) p = it.p;
+      PROG[s.tk] = {k: key, p: p};
+      return p;
+    }
+    function stockHref(tk){ return '/stock/' + encodeURIComponent(tk) + '.html'; }
+    function el(tk, keep){
+      if (!tray) {
+        tray = document.createElement('div'); tray.className = 'scr-tray';
+        tray.setAttribute('role', 'status'); tray.setAttribute('aria-live', 'polite');
+        document.body.appendChild(tray);
+      }
+      var x = tray.querySelector('[data-tk="' + tk + '"]');
+      if (!x) {
+        x = document.createElement('div'); x.className = 'scr-item'; x.setAttribute('data-tk', tk);
+        if (keep) x.setAttribute('data-keep', '1');
+        x.innerHTML = '<div class="scr-row"><b></b><span class="scr-what"></span><a class="scr-open" hidden></a>'
+          + '<button type="button" class="scr-x" aria-label="Dismiss" title="Dismiss">&times;</button></div>'
+          + '<div class="scr-bar"><i></i></div><div class="scr-meta"></div>';
+        x.querySelector('b').textContent = tk;
+        x.querySelector('.scr-x').addEventListener('click', function(){ if (!keep) put(tk, null); x.remove(); });
+        tray.appendChild(x);
+      }
+      return x;
+    }
+    function drop(tk){ var x = tray && tray.querySelector('[data-tk="' + tk + '"]'); if (x) x.remove(); }
+    function set(x, cls, what, meta, link){
+      x.className = 'scr-item' + (cls ? ' ' + cls : '');
+      x.querySelector('.scr-what').textContent = what;
+      x.querySelector('.scr-meta').textContent = meta;
+      x.querySelector('.scr-bar').hidden = !!cls;
+      var a = x.querySelector('.scr-open');
+      a.hidden = !link;
+      if (link) { a.textContent = link.text; a.href = link.href || '#'; a.onclick = link.click || null; }
+    }
+    function show(tk, s){
+      var x;
+      if (s.error) {
+        x = el(tk);
+        set(x, 'err', 'could not be built', String(s.error).slice(0, 160),
+            {text: 'Try again', click: function(e){ e.preventDefault(); start(tk).catch(function(){}); }});
+      } else if (s.done) {
+        var here = location.pathname === stockHref(tk);
+        // Already looking at the page this build wrote: nothing left to say.
+        if (here && s.ended && LOADED >= s.ended * 1000) { put(tk, null); drop(tk); return; }
+        x = el(tk);
+        set(x, 'ok', here ? 'is refreshed' : 'is ready', s.elapsed ? 'built in ' + mmss(s.elapsed) : 'built',
+            {text: here ? 'Reload' : 'Open', href: here ? location.pathname + location.search : stockHref(tk),
+             click: function(){ put(tk, null); }});
+      } else {
+        x = el(tk);
+        var p = progress(s), meta = Math.round(p * 100) + '% · ' + mmss(s.elapsed) + ' elapsed';
+        meta = fails > 2 ? 'the server is not answering · ' + meta : meta + ' · usually ' + about(s);
+        set(x, '', (s.stages || [])[s.stage || 0] || 'Building', meta, null);
+        x.querySelector('.scr-bar i').style.width = (p * 100).toFixed(1) + '%';
+        var b = getB();
+        if (b[tk] && b[tk].state === 'building') { b[tk].p = p; b[tk].k = PROG[tk].k; b[tk].last = s; setB(b); }
+      }
+    }
+    function nudge(tk){
+      // A tab in the background says it in its title, until it is looked at.
+      if (!document.hidden) return;
+      if (TITLE0 === null) TITLE0 = document.title;
+      if (READY.indexOf(tk) < 0) READY.push(tk);
+      document.title = '✓ ' + READY.join(', ') + ' ready · ' + TITLE0;
+    }
+    document.addEventListener('visibilitychange', function(){
+      if (!document.hidden && TITLE0 !== null) { document.title = TITLE0; TITLE0 = null; READY = []; }
+    });
+    function finish(tk, s){
+      put(tk, {state: s.error ? 'error' : 'done', at: Date.now(),
+               s: {tk: tk, done: !s.error, error: s.error || null, elapsed: s.elapsed || 0, ended: s.ended || null}});
+      if (!s.error) nudge(tk);
+    }
+    function schedule(ms){ if (timer) clearTimeout(timer); timer = setTimeout(tick, ms); }
+    function tick(){
+      timer = null;
+      if (!LIVE || busy) return;
+      var b = getB(), pending = [];
+      Object.keys(b).forEach(function(tk){
+        var it = b[tk] || {};
+        if (it.state === 'done' || it.state === 'error') {
+          if (Date.now() - (it.at || 0) > KEEP_MS) { put(tk, null); drop(tk); }
+          else show(tk, it.s || {tk: tk, done: it.state === 'done', error: it.state === 'error' ? 'failed' : null});
+          return;
+        }
+        if (it.last && !(tray && tray.querySelector('[data-tk="' + tk + '"]'))) show(tk, it.last); else el(tk);
+        pending.push(tk);
+      });
+      if (tray) [].slice.call(tray.children).forEach(function(x){       // dismissed in another tab
+        if (!x.hasAttribute('data-keep') && !b[x.getAttribute('data-tk')]) x.remove();
+      });
+      var left = pending.length;
+      if (!left) return;
+      busy = true;
+      function next(){ if (--left === 0) { busy = false; schedule(fails > 2 ? 10000 : 1500); } }
+      pending.forEach(function(tk){
+        api('/api/build?tk=' + encodeURIComponent(tk)).then(function(s){
+          fails = 0;
+          var it = getB()[tk];
+          if (!it || it.state !== 'building') return;
+          if (!s.known) {
+            // The server has no record of this build: it was restarted. The page may still have been
+            // written before that; otherwise the build was lost with the server.
+            s = (s.built && (s.built_ts || 0) * 1000 >= (it.at || 0))
+              ? {tk: tk, done: true, elapsed: 0, ended: s.built_ts}
+              : {tk: tk, error: 'It stopped before it finished: the server was stopped or restarted.'};
+          }
+          if (s.done || s.error) finish(tk, s);
+          show(tk, s);
+        }, function(){
+          fails++;
+          var it = getB()[tk]; if (it && it.last) show(tk, it.last);
+        }).then(next, next);
+      });
+    }
+    function track(tk){
+      var m = PROG[tk] || {}, b = getB();
+      if (!b[tk] || b[tk].state !== 'building') { b[tk] = {state: 'building', at: Date.now(), p: m.p || 0, k: m.k || ''}; setB(b); }
+      el(tk); schedule(50);
+    }
+    function start(tk){
+      return api('/api/build?tk=' + encodeURIComponent(tk), true).then(function(s){
+        LIVE = true;
+        put(tk, {state: 'building', at: Date.now(), p: 0, k: ''});
+        show(tk, s); schedule(1500); return s;
+      }, function(err){
+        set(el(tk), 'err', 'could not start', 'The local server did not answer. Start it with: python serve.py --open', null);
+        throw err;
+      });
+    }
+    window.scrBuild = {progress: progress, mmss: mmss, about: about, api: api, track: track, start: start};
+    window.addEventListener('storage', function(e){ if (e.key === BKEY && LIVE) schedule(30); });
+    function ask(title, text, okLabel, onOk, danger){
+      var d = document.getElementById('scr-ask');
+      if (!d) {
+        d = document.createElement('dialog'); d.id = 'scr-ask'; d.className = 'scr-dialog';
+        d.setAttribute('aria-labelledby', 'scr-ask-h');
+        d.addEventListener('click', function(e){                    // a click outside the box closes it
+          if (e.target !== d) return;
+          var r = d.getBoundingClientRect();
+          if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) d.close();
+        });
+        document.body.appendChild(d);
+      }
+      d.innerHTML = '<h3 id="scr-ask-h"></h3><p></p><div class="scr-acts"><button type="button" data-v="no">Cancel</button>'
+        + '<button type="button" class="' + (danger ? 'danger' : 'go') + '" data-v="ok"></button></div>';
+      d.querySelector('h3').textContent = title; d.querySelector('p').textContent = text;
+      var ok = d.querySelector('[data-v=ok]'); ok.textContent = okLabel;
+      d.querySelector('[data-v=no]').onclick = function(){ d.close(); };
+      ok.onclick = function(){ d.close(); onOk(); };
+      if (typeof d.showModal === 'function') { if (d.open) d.close(); d.showModal(); ok.focus(); }
+      else if (window.confirm(title + '\n\n' + text)) onOk();
+    }
+    function tickerOf(a){
+      var u; try { u = new URL(a.getAttribute('href'), location.href); } catch (e) { return null; }
+      if (u.origin !== location.origin || (u.pathname === location.pathname && u.search === location.search)) return null;
+      var m = /^\/stock\/([A-Za-z0-9.\-]+)\.html$/.exec(u.pathname), t = '';
+      if (m && m[1].toLowerCase() !== 'index') t = m[1];
+      else if (u.pathname === '/stock/index.html') t = u.searchParams.get('t') || '';
+      t = t.toUpperCase();
+      return /^[A-Z][A-Z0-9.\-]{0,9}$/.test(t) ? t : null;
+    }
+    // A stock link opens its page when there is one, follows a build already running, and
+    // otherwise offers to build the page in the background.
+    document.addEventListener('click', function(e){
+      if (!LIVE || e.defaultPrevented || e.button !== 0 || e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a || (a.target && a.target !== '_self') || a.hasAttribute('download') || a.closest('.scr-tray')) return;
+      var tk = tickerOf(a); if (!tk) return;
+      e.preventDefault();
+      api('/api/stock?tk=' + encodeURIComponent(tk)).then(function(s){
+        if (s.built) { location.href = stockHref(tk) + (a.hash || ''); return; }
+        if (s.building) { track(tk); return; }
+        ask(tk + ' has no page yet', 'Build it in the background? A build takes ' + about(s) + '. Keep using the '
+            + 'app meanwhile: the corner of the page shows the progress and says when it is ready.',
+            'Build it', function(){ start(tk).catch(function(){}); });
+      }, function(){ location.href = a.href; });
+    });
+    function stopped(builds){
+      LIVE = false; if (timer) { clearTimeout(timer); timer = null; }
+      document.querySelectorAll('.nav .scr-power, [data-scr-refresh]').forEach(function(b){ b.hidden = true; });
+      (builds || []).forEach(function(tk){
+        finish(tk, {error: 'Stopped with the server before it finished.'});
+        show(tk, {tk: tk, error: 'Stopped with the server before it finished.'});
+      });
+      set(el('Server', true), 'err', builds ? 'stopped' : 'is not answering',
+          'Start it again with: python serve.py --open', null);
+    }
+    api('/api/ping').then(function(j){
+      if (!j || j.server !== 'screener') return;
+      LIVE = true;
+      document.querySelectorAll('.nav .scr-power').forEach(function(btn){
+        btn.hidden = false;
+        btn.onclick = function(){
+          ask('Stop the local server?', 'Pages already open stay readable. Building stock pages, saving settings '
+              + 'and the Run buttons stop until it is started again with: python serve.py --open',
+              'Stop the server', function(){
+                api('/api/shutdown', true).then(function(r){ stopped(r.stopped_builds || []); },
+                                                 function(){ stopped(null); });
+              }, true);
+        };
+      });
+      document.querySelectorAll('[data-scr-refresh]').forEach(function(btn){
+        btn.hidden = false;
+        btn.onclick = function(){ start(btn.getAttribute('data-scr-refresh')).catch(function(){}); };
+      });
+      schedule(0);
+    }, function(){});
+  })();
 })();
 </script>"""
 
@@ -1264,6 +1646,12 @@ def nav(active: str = "", depth: int = 0, extra: str = "") -> str:
         parts.append(f'<details class="dd{" on" if on else ""}"><summary>{group}</summary>'
                      f'<div class="menu">{links}</div></details>')
     parts.append(find("find inline"))
+    # The stop button: hidden until the page knows it came from the local server (NAV_JS).
+    parts.append('<button type="button" class="scr-power" hidden title="Stop the local server" '
+                 'aria-label="Stop the local server"><svg viewBox="0 0 24 24" width="16" height="16" '
+                 'aria-hidden="true"><path d="M12 3v8" stroke="currentColor" stroke-width="2.2" fill="none" '
+                 'stroke-linecap="round"/><path d="M6.6 6.6a7.5 7.5 0 1 0 10.8 0" stroke="currentColor" '
+                 'stroke-width="2.2" fill="none" stroke-linecap="round"/></svg></button>')
     tail = f'<span class="spacer"></span>{EXTRA_START}{extra}{EXTRA_END}' if extra else ""
     return (f'{NAV_START}<div class="nav"><div class="inner">{"".join(parts)}{tail}</div></div>'
             f'{NAV_JS}{NAV_END}')
@@ -1291,6 +1679,39 @@ _ON = re.compile(r'<a class="(?:[^"]*\s)?on(?:\s[^"]*)?" href="([^"]*)"')
 # Links in page BODIES that meant the job table, the home page until 2026-11-08.
 _HUB_LINKS = (('href="../index.html">status hub</a>', 'href="../system.html">Status</a>'),
               ('href="index.html">status hub</a>', 'href="system.html">Status</a>'))
+# Styles in page BODIES fixed after the pages were written (2026-11-11). The Fundamental and
+# Sentiment builders aliased their old variable names onto the shared palette and then set them
+# again to fixed light values, so with a theme chosen on the Settings page that differs from the
+# system one the text was black on the dark page. 155 pages on disk carried it; the builders no
+# longer write it. Text on a filled badge takes --onaccent, which reads in both themes.
+_LEGACY_CSS = (
+    (re.compile(r":root\{--bg:#fff;--fg:#111;[^}]*\}\s*"), ""),
+    (re.compile(r"@media\(prefers-color-scheme:dark\)\{:root\{--bg:#111315;[^}]*\}\}\s*"), ""),
+    (re.compile(r"@media\(prefers-color-scheme:dark\)\{\.warn\{background:#3a2c10;[^}]*\}\}\s*"), ""),
+    (re.compile(r"\.warn\{background:#fff4e5;border:1px solid #f0b429;color:#7a4b00;"),
+     ".warn{background:var(--warnbg);border:1px solid var(--warn);color:var(--warn);"),
+    (re.compile(r"(\.(?:p\.hi|p\.lo|w\.red)\{background:var\(--(?:hi|lo)\));color:#fff\}"), r"\1;color:var(--onaccent)}"),
+    (re.compile(r"\.b-CRITICAL\{background:#b3261e;color:#fff\}"), ".b-CRITICAL{background:var(--neg);color:var(--onaccent)}"),
+    (re.compile(r"\.b-HIGH\{background:#e8710a;color:#fff\}"), ".b-HIGH{background:#e8710a;color:#2b1600}"),
+    (re.compile(r"(button\.run\{[^}]*?)color:#fff;"), r"\1color:var(--onaccent);"),
+    (re.compile(r"button\.run:hover\{opacity:\.88;color:#fff\}"), "button.run:hover{opacity:.88;color:var(--onaccent)}"),
+    # the shared stylesheet each page carries a copy of (462 pages on 2026-11-11)
+    (re.compile(r"((?:button\.primary|\.toggle button\.on|\.chip\.cta)\{background:var\(--accent\);)color:#fff;"),
+     r"\1color:var(--onaccent);"),
+    (re.compile(r"button\.primary:hover\{opacity:\.9;color:#fff\}"), "button.primary:hover{opacity:.9;color:var(--onaccent)}"),
+    # the Bounce page's own badges (dashboard_template.html): white measured 2.5-2.8:1 in dark
+    (re.compile(r"\.chip\.new\{background:var\(--accent\);color:#fff;"), ".chip.new{background:var(--accent);color:var(--onaccent,#fff);"),
+    (re.compile(r"\.chip\.promo\{background:var\(--up\);color:(?:#fff|#06210f);"),
+     ".chip.promo{background:var(--up);color:var(--onaccent,#fff);"),
+    (re.compile(r"\.chip\.warn\{background:var\(--warn\);color:(?:#fff|#241600)\}"),
+     ".chip.warn{background:var(--warn);color:var(--onaccent,#fff)}"),
+    # and its light palette, as text: green 3.5:1 and amber 3.3:1 on the page measured
+    (re.compile(re.escape("--accent:#2f6feb; --up:#0f9d58; --down:#d93025; --warn:#c47f00;")),
+     "--accent:#2c68dc; --up:#18753a; --down:#c4231a; --warn:#8a5a00;"),
+    # ...and its light tier colours, text on the chips: SPEC measured 2.91:1, PRIME 3.09:1
+    (re.compile(re.escape("--early:#7b5cd6; --prime:#0f9d58; --spec:#c47f00; --watch:#5b6572; --late:#d93025;")),
+     "--early:#6a48c8; --prime:#18753a; --spec:#8a5a00; --watch:#5b6572; --late:#c4231a;"),
+)
 
 
 def built_profiles() -> set[str]:
@@ -1376,6 +1797,8 @@ def refresh_nav(root=None, verbose: bool = True) -> dict:
             out["no_menu"].append(str(f.relative_to(root)))
         for a, b in _HUB_LINKS:
             new = new.replace(a, b)
+        for rx, rep in _LEGACY_CSS:
+            new = rx.sub(rep, new)
         if new != old:
             # Atomic, and only if nothing rewrote the page meanwhile: the local server builds
             # stock pages on request, and a fresh page must never be overwritten by its old copy.
@@ -1482,6 +1905,102 @@ SCROLL_SYNC_JS = """
 })();
 """
 
+# Injected into every page, a no-op without charts (2026-11-11). HOVER: any `svg[data-hover]`
+# (price_chart, stock_profile's relative chart) reads out the date and each line's value under the
+# pointer: a dashed guide, a dot per line, a small card beside the pointer that flips at the right
+# edge. Touch works by tapping; a tap elsewhere closes it. LEVELS: a `.lvtog` button shows or hides
+# the support levels and zones (`.plv`) of the charts in its `[data-lvscope]` block, and the choice
+# is kept in this browser (scr.prefs.levels) for every stock page.
+CHART_JS = r"""
+(function(){
+  function esc(s){ return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function fmt(v, f){
+    if (v === null || v === undefined || !isFinite(v)) return '–';
+    if (f === 'px') return v >= 1000 ? v.toLocaleString('en-US', {maximumFractionDigits: 0}) : v.toFixed(v >= 1 ? 2 : 4);
+    if (f === 'reb') { var x = v - 100; return (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(1) + '%'; }
+    if (f === 'vol') { var a = Math.abs(v); return a >= 1e9 ? (v / 1e9).toFixed(2) + 'B' : a >= 1e6 ? (v / 1e6).toFixed(1) + 'M'
+                         : a >= 1e3 ? (v / 1e3).toFixed(0) + 'K' : String(Math.round(v)); }
+    return String(v);
+  }
+  function dateAt(D, i){
+    if (D.d) return D.d[i];
+    var p = D.d0.split('-');
+    return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]) + D.o[i] * 864e5).toISOString().slice(0, 10);
+  }
+  var NS = 'http://www.w3.org/2000/svg', open = null;
+  function attach(svg){
+    if (svg.__hov) return; svg.__hov = 1;
+    var D; try { D = JSON.parse(svg.getAttribute('data-hover')); } catch (e) { return; }
+    var n = D.d ? D.d.length : (D.o || []).length; if (n < 2) return;
+    var g = document.createElementNS(NS, 'g'); g.style.display = 'none';
+    var vl = document.createElementNS(NS, 'line'); vl.setAttribute('class', 'phov-line');
+    vl.setAttribute('y1', D.yt); vl.setAttribute('y2', D.ybot); g.appendChild(vl);
+    var dots = D.s.map(function(s){
+      var c = document.createElementNS(NS, 'circle'); c.setAttribute('r', 3.5); c.setAttribute('class', 'phov-dot');
+      c.style.fill = s.c || 'currentColor'; g.appendChild(c); return c;
+    });
+    svg.appendChild(g);
+    var host = svg.parentNode;
+    if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
+    var tip = document.createElement('div'); tip.className = 'ptip'; tip.hidden = true; host.appendChild(tip);
+    function hide(){ g.style.display = 'none'; tip.hidden = true; if (open === hide) open = null; }
+    function show(e){
+      var m = svg.getScreenCTM(); if (!m) return;
+      var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; p = p.matrixTransform(m.inverse());
+      var i = Math.max(0, Math.min(n - 1, Math.round((p.x - D.x0) / (D.x1 - D.x0) * (n - 1))));
+      var x = D.x0 + (D.x1 - D.x0) * i / (n - 1), rows = '';
+      vl.setAttribute('x1', x); vl.setAttribute('x2', x);
+      D.s.forEach(function(s, k){
+        var v = s.v[i], ok = v !== null && v !== undefined && isFinite(v);
+        dots[k].style.display = ok ? '' : 'none';
+        if (ok) { dots[k].setAttribute('cx', x); dots[k].setAttribute('cy', D.ya + D.yb * v); }
+        var extra = '';
+        if (s.f === 'px' && ok && i > 0 && s.v[i - 1]) {
+          var ch = (v / s.v[i - 1] - 1) * 100;
+          extra = ' <span class="pt-m">' + (ch >= 0 ? '+' : '−') + Math.abs(ch).toFixed(2) + '%</span>';
+        }
+        rows += '<div class="pt-r"><i style="background:' + (s.c || 'currentColor') + '"></i>' + esc(s.n)
+              + '<b>' + fmt(v, s.f) + extra + '</b></div>';
+      });
+      if (D.vol) rows += '<div class="pt-r pt-m">volume<b>' + fmt(D.vol[i], 'vol') + '</b></div>';
+      tip.innerHTML = '<div class="pt-d">' + esc(dateAt(D, i)) + '</div>' + rows;
+      g.style.display = ''; tip.hidden = false;
+      if (open && open !== hide) open(); open = hide;
+      // Beside the pointer (never over the point read), centred on it and kept inside the chart.
+      var hr = host.getBoundingClientRect(), tw = tip.offsetWidth, th = tip.offsetHeight;
+      var left = e.clientX - hr.left + 16;
+      if (left + tw > hr.width - 2) left = e.clientX - hr.left - tw - 16;
+      var top = Math.max(2, Math.min(e.clientY - hr.top - th / 2, hr.height - th - 2));
+      tip.style.left = Math.max(2, left) + 'px'; tip.style.top = top + 'px';
+    }
+    svg.addEventListener('pointermove', show);
+    svg.addEventListener('pointerdown', show);
+    svg.addEventListener('pointerleave', function(e){ if (e.pointerType === 'mouse') hide(); });
+  }
+  document.addEventListener('pointerdown', function(e){
+    if (open && !(e.target.closest && e.target.closest('svg[data-hover]'))) open();
+  });
+  function prefs(){ return (window.scrPrefs && window.scrPrefs.get()) || {}; }
+  function setLv(btn, on){
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    var scope = btn.closest('[data-lvscope]') || document.body;
+    scope.classList.toggle('nolv', !on);
+  }
+  document.addEventListener('click', function(e){
+    var b = e.target.closest && e.target.closest('.lvtog'); if (!b) return;
+    var on = b.getAttribute('aria-pressed') !== 'true';
+    document.querySelectorAll('.lvtog').forEach(function(x){ setLv(x, on); });
+    if (window.scrPrefs) { var p = prefs(); p.levels = on; window.scrPrefs.set(p); }
+  });
+  function all(){
+    document.querySelectorAll('svg[data-hover]').forEach(attach);
+    var on = prefs().levels !== false;
+    document.querySelectorAll('.lvtog').forEach(function(x){ setLv(x, on); });
+  }
+  if (document.readyState !== 'loading') all(); else document.addEventListener('DOMContentLoaded', all);
+})();
+"""
+
 
 def page(title: str, body: str, subtitle: str = "", active: str = "",
          depth: int = 0, nav_extra: str = "", head: str = "",
@@ -1492,7 +2011,7 @@ def page(title: str, body: str, subtitle: str = "", active: str = "",
     # SCROLL_SYNC_JS goes on every page rather than being opted into: it is a
     # no-op without a `.scroll.sticky-x` container, and the one page that
     # forgets to opt in is the one with the unreachable table.
-    combined = SCROLL_SYNC_JS + (script or "")
+    combined = SCROLL_SYNC_JS + CHART_JS + (script or "")
     js = f"<script>{combined}</script>"
     return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">{EARLY_JS}
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1558,6 +2077,7 @@ CONTRAST_PAIRS = (
     ("accent", "bg"), ("accent", "panel"),
     ("pos", "panel"), ("neg", "panel"), ("warn", "panel"),
     ("pos", "posbg"), ("neg", "negbg"), ("warn", "warnbg"),
+    ("onaccent", "accent"), ("onaccent", "neg"),
     ("blk", "blkbg"), ("skip", "skipbg"),
 )
 AA = 4.5
@@ -1714,6 +2234,21 @@ def selftest(verbose: bool = True) -> None:
         assert not clash, (
             f"{mod_name}.CSS redefines class(es) also in ui.CSS: {clash}. "
             f"Rename one -- a partial override silently breaks layout.")
+
+    # Chart end labels: apart, inside the plot, order kept (2026-11-11).
+    assert spread_labels([10, 12, 13], 12, 0, 100) == [10, 22, 34]
+    assert spread_labels([90, 95, 99], 12, 0, 100) == [76, 88, 100]
+    # The live features ship in the menu script on every page, and the legacy-style migration
+    # leaves no fixed light palette and no white text on a filled colour behind.
+    for needle in ("window.scrBuild", "/api/ping", "scr-power", "data-scr-refresh", "/api/shutdown"):
+        assert needle in NAV_JS + nav(), f"live features: {needle} missing from the menu"
+    old = (":root{--bg:#fff;--fg:#111;--mut:#666;--line:#e3e3e6;--card:#fafafa;\n--hi:#0a7d3f}"
+           "button.primary{background:var(--accent);color:#fff;border-color:var(--accent);"
+           ".p.hi{background:var(--hi);color:#fff}")
+    for rx, rep in _LEGACY_CSS:
+        old = rx.sub(rep, old)
+    assert "#fff" not in old and "--fg:#111" not in old, old
+    assert "--onaccent" in NAV_CSS and not check_contrast()
 
     if verbose:
         worst = min(contrast(pal[f"--{a}"], pal[f"--{b}"])

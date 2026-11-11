@@ -60,7 +60,8 @@ backtest just quietly improves.
 | **`settings_page.py`** | **Settings, `reports/settings.html`**; `state()` / `save()` back `GET` / `POST /api/settings` in `serve.py` | `--selftest` |
 | **`stock_profile.py`** | **per-stock sheet: radar + financials** | `AAPL PLTR --open`, `--flags` |
 | `settings.py` | what the profile view shows | `--show`, `--enable X`, `--order` |
-| `serve.py` | opt-in local server; makes hub buttons live | `--open`, `--port` |
+| `serve.py` | opt-in local server; makes hub buttons live; builds stock pages in the background (`/api/build`, `/api/stock`), the stop button (`/api/shutdown`) | `--open`, `--port`, `--stop` |
+| `insider_track.py` | the forward record of insider and House trades and what each did to the price (the `insider_track` step) | `--show`, `--selftest` |
 | `shortlist.py` | the daily shortlist: every ranking of `shortlist_recipes.json`, the tested trade plan, the forward ledger, Explore's support / plan / strength columns (the `shortlist` step) | `--build [DATE]`, `--backtest` |
 | `narrative.py` | the weekly AI narrative's inputs and the strict check of its answers (the `narrative` step; the Claude-app task `narrative-weekly` writes the answers) | `--inputs`, `--ingest`, `--prompt`, `--selftest` |
 | `industry_map.py` | Finnhub industry labels laid over the SIC sector map on every read | `--fetch`, `--compare`, `--apply` |
@@ -558,6 +559,19 @@ trades) and the "insider buying at support" badge on Candidates, Floor retest an
 level -- each part measured, the combination NOT). Numbers live in `NEXT_SESSION.md`
 and are rendered on the pages from the result files.
 
+**The forward record, `insider_track.py` (step `insider_track`, 2026-11-11).** Every trade
+filed from 2026-11-11 on -- director/officer buys and sales, fund and 10%-holder buys, House
+buys and sales -- one row per filing in `data/insider/_forward.parquet`. Features are written
+ONCE, the night the row first appears (`first_seen`): value or amount range, role, rare, track
+record, 10b5-1, routine/opportunistic, filing lag, the zone band of the filing session, the
+liquidity fifth and % of the 252-day high at entry. Outcomes are filled in as they mature:
+`react` (the first session after the filing) and 1/5/20/60 sessions from entry, raw and
+against same-day stocks of the same liquidity fifth (`event_returns`; `Panel(since=...)` keeps
+it to the recent sessions). A path that fails the screen's unadjusted-split test
+(`pattern.suspect_split`) keeps its row, flagged, with no outcome (ZONE, 2026-10-15). It is a
+record for a later search for correlations, not a signal: the summary marks any group under 30
+matured events as too few to judge.
+
 ## Module 8: shortlist, narrative and the sector map (added 2026-11-08)
 
 **The bounce trade, measured** (`trade_rules_study.py`). 180 rules on 175,937 at-support
@@ -593,7 +607,7 @@ follows the rule.
 | page | built by | what |
 |---|---|---|
 | `reports/explore/latest.html` | `explore.py` | all tickers x all metrics, sortable + filterable; since 2026-11-08 also the support, trade-plan and relative-strength columns, each header ending with what `metric_evidence.py` measured |
-| `reports/stock/<T>.html` | `stock_profile.py` | radar, financials, ratio trends; since 2026-11-08 a `relative` block (the stock against SPY, its sector and its sub-industry, rebased a year ago) |
+| `reports/stock/<T>.html` | `stock_profile.py` | radar, financials, ratio trends; since 2026-11-08 a `relative` block (the stock against SPY, its sector and its sub-industry, rebased a year ago); since 2026-11-11 the sector and sub-industry under the title (links to their rows on Sectors), a Refresh button (local server), support zones on the price chart behind a Levels switch, and a hover readout on both charts (`ui.CHART_JS`) |
 
 `explore.py`: a missing metric **sorts last in both directions and is excluded by
 a numeric filter** — never treated as 0. Rows render on demand so sorting stays

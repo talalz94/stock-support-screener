@@ -30,8 +30,18 @@ N_BUCKETS = 5
 class Panel:
     """Closes, liquidity buckets and per-bucket pool returns, built once per study."""
 
-    def __init__(self, horizons=HORIZONS):
+    def __init__(self, horizons=HORIZONS, since: str | None = None, lookback: int = 260,
+                 keep_volume: bool = False):
+        """`since` keeps only the sessions from `lookback` before that date on (2026-11-11): a
+        forward record measures a few hundred recent events and needs neither the decade before
+        nor the full forward-return matrices; 260 sessions keep the 20-day dollar volume and the
+        252-day high whole on its first day. Without it: every stored session, as before.
+        `keep_volume` keeps the volumes as `self.V` (the split check of insider_track needs them)."""
         C, V = S.load_wide()
+        if since is not None:
+            i = int(np.searchsorted(np.asarray(C.index.astype(str)), str(since), side="left"))
+            C, V = C.iloc[max(0, i - lookback):], V.iloc[max(0, i - lookback):]
+        self.V = V if keep_volume else None
         self.C = C
         self.dates = list(C.index)
         self._dates = np.asarray(self.dates)

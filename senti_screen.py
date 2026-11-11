@@ -268,10 +268,6 @@ def write_html(payload: dict, asof: str) -> str:
     html = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Sentiment {esc(asof)}</title><style>{ui.CSS}/* Legacy variable names aliased onto the shared palette (ui.py). These two pages predate ui and use --fg/--mut/--acc/--card; aliasing keeps every existing rule working while the colours come from one place. */:root{{--fg:var(--ink);--mut:var(--muted);--acc:var(--accent);--card:var(--panel);--hi:var(--pos);--lo:var(--neg);--mid:var(--muted);--neu:var(--muted)}}
-:root{{--bg:#fff;--fg:#111;--mut:#666;--line:#e3e3e6;--card:#fafafa;
---pos:#0a7d3f;--neg:#b3261e;--neu:#777;--acc:#1a56db}}
-@media(prefers-color-scheme:dark){{:root{{--bg:#111315;--fg:#e8e8ea;--mut:#9a9aa2;
---line:#2a2d31;--card:#191c1f;--pos:#3ddc84;--neg:#ff6b6b;--neu:#8a8a92;--acc:#7aa2f7}}}}
 *{{box-sizing:border-box}}body{{margin:0;padding:18px;background:var(--bg);color:var(--fg);
 font:14px/1.45 -apple-system,Segoe UI,Roboto,sans-serif}}
 h1{{font-size:19px;margin:0 0 2px}}
@@ -280,9 +276,8 @@ h1{{font-size:19px;margin:0 0 2px}}
 .hdr{{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 14px}}
 .stat{{background:var(--card);border:1px solid var(--line);border-radius:8px;
 padding:7px 11px;font-size:12.5px}}.stat b{{display:block;font-size:16px;margin-top:2px}}
-.warn{{background:#fff4e5;border:1px solid #f0b429;color:#7a4b00;padding:9px 12px;
+.warn{{background:var(--warnbg);border:1px solid var(--warn);color:var(--warn);padding:9px 12px;
 border-radius:8px;margin:10px 0;font-size:13px}}
-@media(prefers-color-scheme:dark){{.warn{{background:#3a2c10;border-color:#8a6a20;color:#f5d597}}}}
 .chip{{display:inline-flex;gap:6px;align-items:baseline;background:var(--card);
 border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:12px;margin:0 5px 5px 0}}
 .chip i{{color:var(--mut);font-style:normal;font-size:11px}}
@@ -302,7 +297,7 @@ font-size:11px;color:var(--mut)}}
 .hl{{font-size:12.5px;color:var(--mut);max-width:430px}}
 .pill{{display:inline-block;padding:1px 7px;border-radius:999px;font-size:10.5px;
 font-weight:650;letter-spacing:.03em}}
-.b-CRITICAL{{background:#b3261e;color:#fff}}.b-HIGH{{background:#e8710a;color:#fff}}
+.b-CRITICAL{{background:var(--neg);color:var(--onaccent)}}.b-HIGH{{background:#e8710a;color:#2b1600}}
 .b-MEDIUM{{background:#f0b429;color:#3a2c00}}.b-LOW{{background:var(--line);color:var(--mut)}}
 .b-NOISE{{background:transparent;color:var(--mut);border:1px solid var(--line)}}
 .bar{{position:relative;display:inline-block;width:88px;height:7px;background:var(--line);
