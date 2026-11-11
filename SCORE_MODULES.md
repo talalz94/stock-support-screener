@@ -138,6 +138,7 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 | `reports/zones/candidates.html` | `candidates_page.py` | names at a level, with combo, warnings and earnings |
 | `reports/zones/floor.html` | `floor_page.py` | floor retests after a big run |
 | `reports/sectors/latest.html` | `sectors_page.py` | sector and sub-industry readings, the validated sector score |
+| `reports/sectors/rotation.html` | `rotation_page.py` (in the `sectors` step) | which groups lead now (a relative-rotation chart), month by month since 2016, and what `rotation_study.py` measured |
 | `reports/watchlist/index.html` | `watchlist_page.py` | saved lists re-measured nightly |
 | `reports/shortlist/latest.html` | `shortlist.py` | the daily shortlist in three tabs (the list in column views, the forward record, how it works); `--selftest` |
 
@@ -601,6 +602,17 @@ names through `data/_sector_overrides.parquet`, laid over the SIC file by
 undoes it. The sector score was re-checked on the corrected groups: its study's rule now
 picks breadth200 + fund (IC 0.082, t 2.51 out of sample), and `sector_score.COMPOSITE`
 follows the rule.
+
+**Sector rotation** (`rotation_study.py`, 2026-11-12, on the stored monthly panels and the trade
+study's at-support name-dates). A group's lead persists one month (rank correlation +0.11
+sectors / +0.12 sub-industries, t 3.65 / 4.21) and then fades; top-third runs average 1.75
+months against 1.61 with months shuffled. No group's boom predicts another's (pairs chosen on
+2017-21 keep their sign 64% at one month, 39-52% further out; their forecast IC +0.05 against
++0.11 for plain 12-month strength). The rotation chart's Leading-minus-Lagging is +1.25pp a month
+for sub-industries (TEST t 3.23, kept); its Improving and Weakening quadrants say nothing.
+Seasonality, re-run on the corrected map: none. For the at-support trade, group momentum adds
+nothing; sector breadth's top third +0.15pp (TEST t 2.34) is 1 of 36 comparisons -- a lead,
+not a rule. Drawn nightly by `rotation_page.py` (Research > Rotation).
 
 ## Viewing and exploring
 

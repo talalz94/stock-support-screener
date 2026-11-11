@@ -155,7 +155,8 @@ table.sct{width:100%;border-collapse:collapse;font-size:12.5px;min-width:1100px}
 <div class="scwrap">
 <h1>Sectors</h1>
 <div class="scsub">session <b>@@ASOF@@</b> &middot; how each sector and sub-industry is doing against the whole market,
-and which of its stocks sit in a category today. Click a row for the list.</div>
+and which of its stocks sit in a category today. Click a row for the list. &middot; How groups take turns
+leading, month by month: <a href="rotation.html">Rotation</a></div>
 <div class="scev">@@EVIDENCE@@</div>
 <h2>Sectors &mdash; with the measured score</h2>
 <div class="sctw"><table class="sct" id="tsec"><thead></thead><tbody></tbody></table></div>

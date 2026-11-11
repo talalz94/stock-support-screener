@@ -68,6 +68,9 @@ is a standing request, not an optional courtesy.
 - Pages are static files: a menu change reaches pages already written through `python ui.py
   --renav` (the nightly `dashboard` step runs it too). A style fix inside a page's own CSS
   reaches them only through `ui._LEGACY_CSS`, which the same command applies.
+- Until the nightly `bars` step adds yesterday's session, every `sectors.load_wide()` call rebuilds
+  the 85 MB wide cache (~3.5 min): its check wants the last closed session. Out of hours, a test
+  harness that reads `data/_wide_1d.parquet` directly avoids it.
 - The working tree is CRLF and Git Bash `sed -i` rewrites a file as LF; a Bash heredoc collapses
   `\\` (a regex's `\\1` became the character 0x01 once). Edit with the Edit tool, and write any
   script that contains backslashes to a file with the Write tool before running it.

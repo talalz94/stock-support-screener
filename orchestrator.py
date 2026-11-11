@@ -838,8 +838,16 @@ def _step_sectors(asof: str) -> tuple[int, str]:
     per, groups = sector_score.write(asof)
     p, n = sectors_page.build(asof)
     top = groups[groups.level == "sector"].sort_values("score", ascending=False).head(3)
+    # The Rotation page (2026-11-12): context only, so a failure there is reported here and stops
+    # nothing -- the sector score above is what Explore and the shortlist read.
+    try:
+        import rotation_page
+        _rp, ns, nu = rotation_page.build(asof, verbose=False)
+        rot = f"; rotation page: {ns} sectors, {nu} sub-industries"
+    except Exception as exc:                                     # noqa: BLE001
+        rot = f"; ROTATION PAGE FAILED: {exc!r}"[:200]
     return n, (f"{n} group(s) on {p.name}; strongest sectors: "
-               + ", ".join(f"{g} {s:.0f}" for g, s in zip(top.group, top.score)))
+               + ", ".join(f"{g} {s:.0f}" for g, s in zip(top.group, top.score)) + rot)
 
 
 def _step_explore(asof: str) -> tuple[int, str]:
