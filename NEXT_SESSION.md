@@ -176,6 +176,31 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-15 (night) — THE NARRATIVE GETS A PAGE, REACHES THE PAGES WITHIN TWO HOURS, AND EACH RUN MEASURES ITS SHARE OF THE WEEKLY LIMIT
+
+**Asked:** "how will this narrative look in the UI and gets updated?", then "yes do both changes. also i want to measure the narrative task's AI usage on claude as a % of my weekly limit."
+
+**Before:** the narrative showed only as scores: Today's card (sector tailwinds and headwinds) and a "Narrative (group)" column on Shortlist and Explore (point in time by the list's date, so blank on the 11-13 lists). The reasons, themes and the 87 source links of the 11-15 answer sat in `data/narrative/`. And the step ran once a session, in the morning run (06:33-09:27 on 11-10..11-13; 22:08 on 11-14): Saturday's weekly view reached the pages on Tuesday, and each trial "next 2 trading days" view the next morning, after the first of its two days had traded.
+
+**1. Within two hours** (`orchestrator._narrative_due`, `narrative.pending`): the step is also due on any pass of the schedule (05:00, then every two hours until 17:00) that finds an answer file not checked since it was written. A rejected file counts again once rewritten; one younger than 2 minutes waits a pass (it may still be being written). When the step stores an answer it redraws Today as well. The inputs file is now written whole or not at all (a task may be reading it). An answer written after 17:00 waits for 05:00. Dry run after the change: "already ran for 2026-11-13", nothing waiting.
+
+**2. The Narrative page** (`narrative_page.py`, `reports/sectors/narrative.html`, Research > Narrative; Today's card links to it):
+- Tabs: This week / Next days (trial) / Runs and cost.
+- Sectors best first as signed chips ("now +1", "3m 0", "12m -1": the sign in words, not colour alone), confidence, and what changed since the previous view. Each opens to its summary and themes (direction, horizon) with dated source links; sub-industries with a view of their own sit under their sector, the inherited ones are named.
+- Only checked answers; everything escaped; links http(s) only, `rel="noopener noreferrer"`.
+- Checked in the browser at 375 px, light and dark: no sideways scroll with every sector open; the dark chips' contrast 5.2-6.1:1. Selftest 11/11 in a scratch folder.
+
+**3. Each run's share of the weekly limit:** the plan is Pro, and the app's meter (`get_usage`) reports whole percents (at 17:28: weekly 19%, 5-hour 40%, the week resetting Fri 20 Nov 16:00 UTC). Both task prompts now read the meter first and last (steps 0 and 5). `run_costs` takes the two readings from the run's transcript -- the app's own tool results, not retyped by the AI -- and records the shares of the weekly and 5-hour limits (good to about one point either way; a window reset between the readings voids it, and says so). It counts the other Claude Code sessions on this machine active between the readings, because the meter covers the whole account; chats on claude.ai or another device cannot be seen. Shown on the page's runs tab, on Today's cost line and in the step's detail; a run before this is "not measured", never 0. Both task files match the repo's prompts (checked).
+
+**The trial's first run:** once WebSearch was allowed it researched (29 searches; 1 page fetch failed) and at 17:32 asked to write its answer file; it waits for that approval, and no file exists yet. It started on the old prompt, so its share cannot be measured. Its notes say "65 groups" where the inputs have 64: the check will catch a wrong set. Once the file is written, the 05:00 pass checks and draws it.
+
+**Checks:** narrative 28/28 and narrative_page 11/11; ui (19 menu entries, AA contrast both themes); every changed module imports with `-W error`; the `narrative` step ran through the orchestrator (7.5 s, drew the page); menus refreshed on 487 pages; `status.py --pages`: 488 clean. `ui.py` changed, so the 173 stock pages are stale by their stamp: the 05:00 pass redraws them (`profiles_layout`, ~14 min).
+
+**Still pending:**
+- Allow the trial run to write its answer (in its session). The 17, 19 and 21 Nov runs will ask once more, for the usage meter.
+- The short-term trial: after 11-22, its views, costs and weekly-limit shares; then continue or not (if not, delete the task).
+- The shortlist's forward record (first ~11-25, with the breadth comparison); the 11-23 review of the 10-23 list; the insider record (mid-December); the weekly narrative accumulating.
+
 ## State at 2026-11-15 (evening) — A SHORT-TERM NARRATIVE TRIAL; EVERY RUN'S COST MEASURED; THE BOUNCE FILTERS COMBINED (FUND_SCORE ALONE); DISTANCE'S PASS WAS A LOOK-AHEAD
 
 **Asked:** "run a 2 day, weekly, monthly narrative, lets do this for one week and then we will see how to continue, also please continue with the next pending items, and please make sure no errors this time around !!!!!" and "also i want token cost too for the narrative job so measure that too using an accurate mechanism"; the user chose a new short-term job beside the weekly one, and both the narrative work and the bounce-trade refinements; then "yes start the pending items".

@@ -1721,13 +1721,30 @@ def _step_watchlists(asof: str) -> tuple[int, str]:
     return n, f"{n} watchlist(s) re-measured, drawn on watchlist/{p.name}"
 
 
+def _narrative_due(prev) -> tuple[bool, str]:
+    """Due once a session (fresh inputs for the AI tasks), AND on any pass that finds an answer
+    file not checked since it was written (asked 2026-11-15): a view written at 12:30 then reaches
+    the pages by the 13:00 pass, not after the next session's run -- for the trial's "next 2
+    trading days", the difference between before and after the first of them."""
+    import narrative
+    waiting = narrative.pending()
+    if waiting:
+        return True, f"answer file(s) to check: {', '.join(waiting[:3])}"
+    if prev is None:
+        return True, "never run"
+    ref = calendar_us.last_closed_session()
+    wm = str(prev.get("watermark") or "")
+    if wm >= ref:
+        return False, f"already ran for {ref}"
+    return True, f"watermark {wm or '(none)'} < {ref}"
+
+
 def _step_narrative(asof: str) -> tuple[int, str]:
-    """The weekly AI narrative's inputs (data/narrative/inputs_latest.json, read by the
-    Claude-app task `narrative-weekly`) and the check of any new answer file. Nightly, because
-    the task fires only while the app is open and must find fresh inputs whenever it does.
-    Nothing it writes carries a ranking weight until it is judged forward. Both tasks' answers are
-    checked (the weekly one and the short-term trial `narrative-short`), and every run's measured
-    cost is recorded from its own transcript (narrative.run_costs)."""
+    """The AI narrative's inputs (data/narrative/inputs_latest.json, read by the Claude-app tasks)
+    and the check of any new answer file, both tasks' (the weekly `narrative-weekly` and the
+    short-term trial `narrative-short`); every run's measured cost and plan-meter share from its
+    own transcript (narrative.run_costs); the Narrative page, and Today when an answer was added.
+    Nothing it writes carries a ranking weight until it is judged forward."""
     import narrative
     doc = narrative.inputs(asof, verbose=False)
     r = narrative.ingest(verbose=False)
@@ -1736,8 +1753,19 @@ def _step_narrative(asof: str) -> tuple[int, str]:
         cost = "; " + narrative.cost_summary(narrative.run_costs(verbose=False))
     except Exception as exc:                                     # noqa: BLE001
         cost = f"; run costs not read ({type(exc).__name__}: {str(exc)[:120]})"
+    # The page always (it shows the costs too); Today only when an answer was added -- on a
+    # session's run the `dashboard` step draws Today anyway, after the lists it also shows.
+    drawn = []
+    for name in ("narrative_page", "today_page") if r["added"] else ("narrative_page",):
+        try:
+            mod = __import__(name)
+            mod.build(verbose=False)
+            drawn.append(name)
+        except Exception as exc:                                 # noqa: BLE001
+            drawn.append(f"{name} NOT drawn ({type(exc).__name__}: {str(exc)[:80]})")
     return len(doc["groups"]), (f"inputs for {len(doc['groups'])} groups as of {doc['asof']}; "
-                                f"{len(r['added'])} new answer file(s) ingested{rej}{cost}")
+                                f"{len(r['added'])} new answer file(s) ingested {r['added'] or ''}{rej}{cost}; "
+                                f"drew {', '.join(drawn)}")
 
 
 def _step_shortlist(asof: str) -> tuple[int, str]:
@@ -1952,9 +1980,10 @@ REGISTRY: tuple[Step, ...] = (
     # session's buy limits, targets and stops as current. The narrative's checked view feeds
     # the same columns.
     Step("narrative", _step_narrative, config.CADENCE_DAILY,
-         depends_on=("sectors",), timeout=600,
-         desc="inputs per sector and sub-industry for the weekly AI narrative task, and the "
-              "check of its answers (no weight anywhere until judged forward)"),
+         depends_on=("sectors",), timeout=600, due_fn=_narrative_due,
+         desc="inputs per sector and sub-industry for the AI narrative tasks, the check of their "
+              "answers within two hours of a run, each run's cost and plan-meter share, and the "
+              "Narrative page (no weight anywhere until judged forward)"),
     Step("shortlist", _step_shortlist, config.CADENCE_DAILY,
          depends_on=("zones", "fundamental", "combo", "sectors"), timeout=900,
          desc="the daily shortlist: every ranking of the names at support, the trade plan, "

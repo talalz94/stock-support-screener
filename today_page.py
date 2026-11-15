@@ -389,7 +389,8 @@ def _narrative(asof: str, view_date: str | None = None) -> str:
         last = [f"{t.split('-', 1)[1]} {ui.esc(narrative.cost_line(runs[runs.task == t].iloc[-1]))}"
                 for t in narrative.TASKS if (runs.task == t).any()]
         rows.append(f'<p class="muted" style="margin:6px 0 0;font-size:11.5px">Last run cost: {"; ".join(last)}</p>')
-    return _card("narrative", "Narrative", note, "".join(rows))
+    return _card("narrative", "Narrative", note, "".join(rows),
+                 more='<a class="more" href="sectors/narrative.html">every sector &amp; its reasons &rarr;</a>')
 
 
 # ------------------------------------------------------------------------------ the page

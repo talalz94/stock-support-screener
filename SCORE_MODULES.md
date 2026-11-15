@@ -65,7 +65,8 @@ backtest just quietly improves.
 | `provider_quarters.py` | Yahoo Finance's interim quarters for year-end-only SEC filers (the weekly `provider_quarters` step); display only, in the stock page's quarterly table, marked **Y** | `--fetch`, `--show T`, `--selftest` |
 | `insider_track.py` | the forward record of insider and House trades and what each did to the price (the `insider_track` step) | `--show`, `--selftest` |
 | `shortlist.py` | the daily shortlist: every ranking of `shortlist_recipes.json`, the tested trade plan, the forward ledger, Explore's support / plan / strength columns (the `shortlist` step) | `--build [DATE]`, `--backtest` |
-| `narrative.py` | the AI narrative's inputs, the strict check of its answers and each run's measured cost (the `narrative` step; the Claude-app tasks `narrative-weekly` and, 15-21 Nov 2026, `narrative-short` write the answers) | `--inputs`, `--ingest`, `--costs`, `--prompt [short]`, `--selftest` |
+| `narrative.py` | the AI narrative's inputs, the strict check of its answers and each run's measured cost and weekly-limit share (the `narrative` step; the Claude-app tasks `narrative-weekly` and, 15-21 Nov 2026, `narrative-short` write the answers) | `--inputs`, `--ingest`, `--costs`, `--prompt [short]`, `--selftest` |
+| `narrative_page.py` | the Narrative page (Research > Narrative), drawn by the `narrative` step | `--selftest` |
 | `industry_map.py` | Finnhub industry labels laid over the SIC sector map on every read | `--fetch`, `--compare`, `--apply` |
 | `trade_rules_study.py` / `rs_study.py` / `metric_evidence.py` | the 2026-11-08 studies: 180 bounce-trade rules (daily + 30-minute), relative strength, every metric's evidence | see each docstring |
 | `bounce_filters_study.py` | the 2026-11-15 combination of the filters that passed alone (distance, sector breadth, fund_score) under the plan trade with real-order fills, walk-forward | `--build`, `--check`, `--selftest`; no flag: the combinations |
@@ -141,6 +142,7 @@ Every one of these came from a real loss, recorded in `NEXT_SESSION.md`:
 | `reports/zones/candidates.html` | `candidates_page.py` | names at a level, with combo, warnings and earnings |
 | `reports/zones/floor.html` | `floor_page.py` | floor retests after a big run |
 | `reports/sectors/latest.html` | `sectors_page.py` | sector and sub-industry readings, the validated sector score |
+| `reports/sectors/narrative.html` | `narrative_page.py` (in the `narrative` step) | the AI's view of every sector and sub-industry with its reasons and sources, what changed, and every run's cost and weekly-limit share |
 | `reports/sectors/rotation.html` | `rotation_page.py` (in the `sectors` step) | which groups lead now (a relative-rotation chart), month by month since 2016, and what `rotation_study.py` measured |
 | `reports/watchlist/index.html` | `watchlist_page.py` | saved lists re-measured nightly |
 | `reports/shortlist/latest.html` | `shortlist.py` | the daily shortlist in three tabs (the list in column views, the forward record, how it works); `--selftest` |
@@ -616,7 +618,13 @@ writes its own cost record (`cost-state`) into the run's transcript -- tokens pe
 helper model behind WebSearch and WebFetch included, web searches, and its estimate at API list
 prices -- and `run_costs` stores it in `data/narrative/_runs.parquet` after checking it against
 the transcript's per-message usage (the 11-15 weekly run: identical; $3.63, 3.7M tokens in, 92K
-out, 9 minutes). A run still open shows "no cost record yet", never a zero.
+out, 9 minutes). A run still open shows "no cost record yet", never a zero. From 2026-11-15
+evening each run also reads the plan's meter itself, first and last (`get_usage`); the two
+readings in its transcript give its share of the weekly and 5-hour limits (whole percents, so
++/-1 point), with the other Claude Code sessions active meanwhile counted, since the meter covers
+the whole account. **Shown** on the Narrative page (`narrative_page.py`, Research > Narrative:
+every sector's view with its reasons and sources, best first) and on Today's card; the step is
+due on any pass that finds an unchecked answer, so a view reaches the pages within two hours.
 
 **The sector map** (`industry_map.py`). SIC ranges misplace whole industries (KLA in
 Healthcare, REITs in Financials, Lam in Industrials). Finnhub's industry label corrects 931

@@ -14,11 +14,12 @@ runs in the orchestrator instead, and why the tracking job repeats every 2 hours
 when there is nothing new (see `NEXT_SESSION.md`, 2026-10-29 to 10-31).
 
 **A new task's first run waits for approvals.** Its runs start in the app's default permission
-mode, so the first web search or shell command stops at an approval prompt, with the run still
-shown as running. Open the run, allow the tools it asks for, and it carries on; the app keeps those
-approvals on the task, so later runs do not stop. Clicking "Run now" on the task's page once does
-the same ahead of time. (Measured 2026-11-15: `narrative-short`'s first run waited at its first
-three searches.)
+mode, so each tool's first use (a web search, writing the answer file, reading the usage meter)
+stops at an approval prompt, with the run still shown as running. Open the run, allow the tools it
+asks for, and it carries on; the app keeps those approvals on the task, so later runs do not stop.
+Clicking "Run now" on the task's page once does the same ahead of time. (Measured 2026-11-15:
+`narrative-short`'s first run waited at its first three searches, then again at writing its file.)
+An answer written after 17:00, the schedule's last pass of the day, is checked at 05:00.
 
 | Task id | Schedule | Cron | What it does |
 |---|---|---|---|
@@ -40,11 +41,13 @@ folder filled in, and paste the output:
 python narrative.py --prompt
 ```
 
-Tools for the task: Read, Write, WebSearch, WebFetch only (no shell). After its runs, the nightly
-`narrative` step checks each answer file and ingests the valid ones, and records what each run
-cost from the run's own transcript (`python narrative.py --costs`; Claude Code's cost record:
-tokens per model, including the helper model behind web searches, and its estimate at API list
-prices).
+Tools for the task: Read, Write, WebSearch, WebFetch, and ToolSearch with
+`mcp__ccd_session_mgmt__get_usage` for its two readings of the plan's usage meter (no shell). On
+any pass of the schedule after a run, the `narrative` step checks each new answer file and ingests
+the valid ones, and records what each run cost from the run's own transcript (`python
+narrative.py --costs`; Claude Code's cost record: tokens per model, including the helper model
+behind web searches, and its estimate at API list prices) and its share of the plan's weekly
+limit (the difference between the run's two meter readings). The Narrative page shows them.
 
 ## narrative-short
 

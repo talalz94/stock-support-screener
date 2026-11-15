@@ -317,8 +317,10 @@ independently of touch count: four touches in one week is one event, not four.
   `provider_quarters` (weekly, 2026-11-15) fetches Yahoo Finance's interim quarters for the
   companies whose SEC record has year-ends only (20-F and 40-F filers, ~209), shown marked on their
   stock pages' quarterly tables. `narrative` writes the AI narrative tasks' inputs, checks both
-  tasks' answers (the weekly one and, 15-21 Nov 2026, the short-term trial) and records what each
-  run cost from its own transcript; `shortlist` builds every ranking's list of names at support with the
+  tasks' answers (the weekly one and, 15-21 Nov 2026, the short-term trial), records what each
+  run cost and its share of the plan's weekly limit from its own transcript, and draws the
+  Narrative page; besides once a session it is due on ANY pass that finds an answer file not yet
+  checked, so a view written at 12:30 is on the pages by the 13:00 pass; `shortlist` builds every ranking's list of names at support with the
   tested trade plan and scores the forward ledger. Both run BEFORE `explore`, whose support and
   trade-plan columns read that night's shortlist (until 2026-11-09 they ran after it, so Explore
   showed the previous session's plan). `dashboard` builds Today (`reports/index.html`, the home
@@ -535,6 +537,7 @@ as bankruptcy text and asserts no metric moves.
 | `sector_score.py` | today's sector score (the validated composite) and context, per stock and per group, in `data/sectors/`. `--selftest` checks it equals the study |
 | `sectors_page.py` | the Sectors page, `reports/sectors/latest.html`; with `sector_score.py`, the `sectors` step |
 | `rotation_study.py` | sector rotation (2026-11-12): do booms persist (one month, then fade), does one group's boom lead another's (no), do the rotation chart's quadrants predict (Leading over Lagging, kept for sub-industries; the "turns" no), and does any of it help the shortlist's trade (momentum no; sector breadth one kept lead of 36 comparisons). `data/_rotation_study.json` |
+| `narrative_page.py` | the Narrative page, `reports/sectors/narrative.html` (menu Research): every sector's AI view (weekly: now / 3m / 12m; the trial: 2 days / week / month) as signed chips, best first, each opening to its summary, themes and dated source links, with its sub-industries that have a view of their own; what changed since the previous view; every run's tokens, cost and weekly-limit share. Only checked answers; everything escaped, http(s) links only. Drawn by the `narrative` step. `--selftest` |
 | `rotation_page.py` | the Rotation page, `reports/sectors/rotation.html` (menu Research): a relative-rotation chart (12-month vs 1-month excess, 4-week tails), the month-by-month heatmap since 2016, and the measured findings; built by the `sectors` step |
 | `insider.py` | corporate insider trades (SEC Form 4) in `data/insider/`: SEC's quarterly datasets from 2006q1, then each new Form 4 from EDGAR's daily index; directors' and officers' open-market purchases (`purchases`), believable prices (`price_ok`); the `insider` step. `--backfill`, `--update`, `--check`, `--selftest` |
 | `congress.py` | House members' trades from Periodic Transaction Reports (PDFs) in `data/congress/`; paper filings counted, not read; no Senate (its site refuses automated access); the `congress` step. `--backfill`, `--update`, `--reparse`, `--selftest` |
