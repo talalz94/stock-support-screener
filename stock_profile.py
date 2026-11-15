@@ -1439,9 +1439,23 @@ def _block_financials(t, hist: pd.DataFrame, opt: dict,
     # <thead> IS LOAD-BEARING, not decoration: `.scroll.sticky-x thead th` is
     # what pins the header row, and without the wrapper the selector matched
     # nothing and the header scrolled away like any other row.
+    # Quarters with figures from the provider (provider_quarters.py: companies whose SEC record holds
+    # year-ends only) are marked in the header and explained under the table.
+    prov = set(map(str, hist.attrs.get("provider_periods") or []))
+    tip = (f'Figures here from {hist.attrs.get("provider_source", "the provider")}: this company files its '
+           'quarterly results with the SEC on Form 6-K, which has no machine-readable data')
     head = ('<thead><tr><th class="lab">Line item</th><th class="spark"></th>'
-            + "".join(f"<th>{_esc(p)}</th>" for p in periods)
+            + "".join(f'<th class="prov" title="{_esc(tip)}">{_esc(p)}<sup>Y</sup></th>' if str(p) in prov
+                      else f"<th>{_esc(p)}</th>" for p in periods)
             + "</tr></thead>")
+    prov_note = ""
+    if prov:
+        prov_note = (f'<p class="note">Columns marked <b>Y</b>: {_esc(hist.attrs.get("provider_source"))}&rsquo;s '
+                     f'quarterly figures (fetched {_esc(hist.attrs.get("provider_fetched"))}, in '
+                     f'{_esc(hist.attrs.get("provider_currency") or "the reporting currency")}), filling what the SEC '
+                     'record lacks: this company files its quarterly results on Form 6-K, without machine-readable '
+                     'data, so the SEC store has its year-ends only. Not SEC figures, not point in time, and used '
+                     'in no score; per-share figures are as the provider reports them.</p>')
     body = ""
     growth_rows = set(opt.get("_growth_rows") or [])
     ni = pd.to_numeric(pd.Series(d.get("net_income", pd.Series(dtype=float)))
@@ -1512,7 +1526,7 @@ def _block_financials(t, hist: pd.DataFrame, opt: dict,
     # character ("143.8B" rendering as "143.8E").
     # Staleness first: it changes how every number below should be read.
     return (f'{stale_note}{warn}<div class="scroll sticky-x start-end">'
-            f'<table>{head}<tbody>{body}</tbody></table></div>')
+            f'<table>{head}<tbody>{body}</tbody></table></div>{prov_note}')
 
 
 # ==================================================================== build
@@ -1556,6 +1570,14 @@ def build(ticker: str, verbose: bool = True,
                 h = _bank_revenue(FD.history(ticker, freq, periods))
             except Exception:                                    # noqa: BLE001
                 h = pd.DataFrame()
+            if freq == "Q":
+                # A company whose SEC record has year-ends only (20-F / 40-F filers): the provider's
+                # interim quarters fill the gaps, marked as such (provider_quarters.py, 2026-11-15).
+                try:
+                    import provider_quarters as PQ
+                    h = PQ.merge(h, ticker, (sc.get("fundamental") or {}).get("currency"))
+                except Exception:                                # noqa: BLE001
+                    pass
             tables[freq] = h
             if freq == fin_opt.get("freq", "A"):
                 hist = h
@@ -1701,6 +1723,8 @@ def build(ticker: str, verbose: bool = True,
         ".cls a{font-weight:600}.cl-sep{color:var(--muted)}"
         ".cl-meta{color:var(--muted);font-size:12px;margin-left:6px}"
         ".sub .refresh{margin-left:5px;padding:1px 10px;font-size:11.5px;border-radius:12px;vertical-align:1px}"
+        # a quarter whose figures came from the provider (provider_quarters.py)
+        "th.prov sup{color:var(--accent);font-weight:700;margin-left:2px}"
         # on a phone the exchange line and the Refresh button wrap: no indent on their own line
         "@media(max-width:700px){.cl-meta{margin-left:0;flex-basis:100%}.sub .refresh{margin-left:0}}"
         "</style>")

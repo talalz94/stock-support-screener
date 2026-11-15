@@ -181,8 +181,11 @@ def inputs(asof: str | None = None, verbose: bool = True) -> dict:
 
 
 # ------------------------------------------------------------------------- checking and ingesting
-def check_answer(doc: dict, known: dict[str, str]) -> list[str]:
-    """Every way an answer file can be wrong; empty when it is right."""
+def check_answer(doc: dict, known: set[tuple[str, str]]) -> list[str]:
+    """Every way an answer file can be wrong; empty when it is right. `known` is the set of
+    (group, level) pairs in the inputs: a group is a NAME AT A LEVEL -- Chemicals, Semiconductors
+    and Transport are each both a sector and a sub-industry, and keying by name alone rejected the
+    first answer (2026-11-15) for listing them twice, as it should have."""
     bad = []
     if not DATE_RE.match(str(doc.get("date", ""))):
         bad.append("date missing or not YYYY-MM-DD")
@@ -191,15 +194,14 @@ def check_answer(doc: dict, known: dict[str, str]) -> list[str]:
         return bad + ["groups missing"]
     seen = set()
     for g in groups:
-        name = g.get("group")
-        if name not in known:
-            bad.append(f"unknown group {name!r}")
+        name, level = g.get("group"), g.get("level")
+        if (name, level) not in known:
+            levels = sorted(lv for n, lv in known if n == name)
+            bad.append(f"{name}: level {level!r} should be one of {levels}" if levels else f"unknown group {name!r}")
             continue
-        if name in seen:
-            bad.append(f"group {name!r} twice")
-        seen.add(name)
-        if g.get("level") != known[name]:
-            bad.append(f"{name}: level {g.get('level')!r} should be {known[name]!r}")
+        if (name, level) in seen:
+            bad.append(f"group {name!r} ({level}) twice")
+        seen.add((name, level))
         for h in ("now", "m3", "m12"):
             v = g.get(h)
             if not (isinstance(v, int) and not isinstance(v, bool) and -2 <= v <= 2):
@@ -241,7 +243,8 @@ def ingest(verbose: bool = True) -> dict:
         if name in state["ingested"]:
             continue
         try:
-            doc = json.loads(open(p, encoding="utf-8").read())
+            with open(p, encoding="utf-8") as fh:
+                doc = json.loads(fh.read())
         except (OSError, json.JSONDecodeError) as exc:
             state["rejected"][name] = [f"not valid JSON: {exc}"]
             continue
@@ -249,7 +252,7 @@ def ingest(verbose: bool = True) -> dict:
         inp = DIR / f"inputs_{asof}.json"
         src = json.loads(inp.read_text(encoding="utf-8")) if inp.exists() else (
             json.loads(INPUTS.read_text(encoding="utf-8")) if INPUTS.exists() else {"groups": []})
-        known = {g["group"]: g["level"] for g in src["groups"]}
+        known = {(g["group"], g["level"]) for g in src["groups"]}
         bad = check_answer(doc, known)
         if bad:
             state["rejected"][name] = bad[:20]
@@ -261,7 +264,7 @@ def ingest(verbose: bool = True) -> dict:
                  "summary": g.get("summary", "")} for g in doc["groups"]]
         old = pd.read_parquet(SCORES) if SCORES.exists() else pd.DataFrame()
         new = pd.concat([old, pd.DataFrame(rows)], ignore_index=True)
-        new = new.drop_duplicates(["date", "group"], keep="last")
+        new = new.drop_duplicates(["date", "group", "level"], keep="last")    # a name can be at both levels
         new.to_parquet(SCORES, index=False)
         state["ingested"][name] = {"groups": len(rows), "searches_used": doc.get("searches_used"),
                                    "at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
@@ -283,7 +286,7 @@ def latest(asof: str) -> pd.DataFrame:
 
 
 def selftest() -> int:
-    known = {"Energy": "sector", "Oil & Gas E&P": "subind"}
+    known = {("Energy", "sector"), ("Oil & Gas E&P", "subind")}
     good = {"date": "2026-11-14", "inputs_asof": "2026-11-13", "searches_used": 3, "groups": [
         {"group": "Energy", "level": "sector", "now": 1, "m3": 0, "m12": -1, "confidence": "medium",
          "inherited": False, "summary": "x", "themes": [{"theme": "t", "direction": "+", "horizon": "now",
@@ -301,9 +304,19 @@ def selftest() -> int:
     cases.append(("no themes and not inherited", b, 1))
     b = json.loads(json.dumps(good)); b["groups"][0]["now"] = True
     cases.append(("a boolean as a score", b, 1))
+    # One name at both levels (Chemicals is a sector and a sub-industry): both entries are right,
+    # and leaving out either one is a missing group.
+    known2 = known | {("Energy", "subind")}
+    both = json.loads(json.dumps(good))
+    both["groups"].append({**json.loads(json.dumps(good["groups"][1])), "group": "Energy"})
+    cases.append(("a name at both levels", both, 0, known2))
+    cases.append(("a name at both levels, one missing", good, 1, known2))
+    b = json.loads(json.dumps(both)); b["groups"][2]["level"] = "sector"
+    cases.append(("a name at both levels, the same level twice", b, 1, known2))
     bad_n = 0
-    for name, doc, want in cases:
-        got = check_answer(doc, known)
+    for case in cases:
+        name, doc, want = case[:3]
+        got = check_answer(doc, case[3] if len(case) > 3 else known)
         ok = (len(got) == 0) == (want == 0)
         bad_n += not ok
         print(f"  {'ok ' if ok else 'BAD'} {name}: {got[:2]}")

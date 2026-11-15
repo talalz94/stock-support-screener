@@ -324,15 +324,49 @@ def build(asof: str, verbose: bool = True) -> dict:
     led = pd.concat([x.assign(date=asof, recipe=name)[["date", "recipe", "rank", "ticker", "price", "level",
                                                         "limit", "atr_pct"]]
                      for name, x in lists.items()], ignore_index=True)
+    led["sector_breadth_t"] = led.ticker.map(breadth_terciles(asof))
     old = pd.read_parquet(LEDGER) if LEDGER.exists() else pd.DataFrame(columns=led.columns)
     old = old[old.date != asof]
-    pd.concat([old, led], ignore_index=True).to_parquet(LEDGER, index=False)
+    pd.concat([old, led], ignore_index=True).pipe(fill_breadth).to_parquet(LEDGER, index=False)
     res = {"asof": asof, "candidates": int(len(D)), "pool": int(len(pool)),
            "lists": {k: int(len(v)) for k, v in lists.items()}}
     if verbose:
         print(f"shortlist {asof}: {len(D):,} liquid names at/near support, {len(pool):,} after filters; "
               f"{len(lists)} recipes -> {out}", flush=True)
     return res
+
+
+# THE ONE LEAD FROM rotation_study.py, FOLLOWED FORWARD (2026-11-15). On 2018-26 at-support trades,
+# names in the third of sectors with the most members above their 200-day average did +0.15pp a
+# trade better than all at-support names on 2022-26 (t 2.34) -- but that was 1 of 36 comparisons,
+# about the chance rate. Each ledger entry records its sector's breadth third ON ITS DATE (1 bottom,
+# 3 top; blank when that day's sector file is missing), so the entries made from now on, scored
+# 13 sessions later, judge it on prices nobody had seen.
+def breadth_terciles(asof: str) -> pd.Series:
+    """ticker -> its sector's breadth200 third among the sectors on `asof` (data/sectors files of
+    the `sectors` step, which runs before this one)."""
+    g = config.DATA / "sectors" / f"groups_{asof}.parquet"
+    p = config.DATA / "sectors" / f"{asof}.parquet"
+    if not (g.exists() and p.exists()):
+        return pd.Series(dtype=float)
+    G = pd.read_parquet(g, columns=["group", "level", "breadth200"])
+    G = G[(G.level == "sector") & G.breadth200.notna()]
+    pct = G.set_index("group").breadth200.rank(pct=True)
+    third = pd.Series(np.where(pct > 2 / 3, 3.0, np.where(pct <= 1 / 3, 1.0, 2.0)), index=pct.index)
+    sec = pd.read_parquet(p, columns=["ticker", "sector"]).drop_duplicates("ticker").set_index("ticker").sector
+    return sec.map(third)
+
+
+def fill_breadth(L: pd.DataFrame) -> pd.DataFrame:
+    """Blank sector-breadth thirds filled from each entry's own date (point in time), where that
+    date's sector files exist; anything else stays blank."""
+    if "sector_breadth_t" not in L.columns:
+        L = L.assign(sector_breadth_t=np.nan)
+    L["sector_breadth_t"] = pd.to_numeric(L["sector_breadth_t"], errors="coerce")
+    for d in L.loc[L.sector_breadth_t.isna(), "date"].astype(str).unique():
+        m = (L.date.astype(str) == d) & L.sector_breadth_t.isna()
+        L.loc[m, "sector_breadth_t"] = L.loc[m, "ticker"].map(breadth_terciles(d)).to_numpy(dtype=float)
+    return L
 
 
 def evaluate(verbose: bool = True) -> pd.DataFrame:
@@ -624,7 +658,27 @@ def _forward_table(cfg: dict) -> str:
     return ("<div class='scroll'><table class='sl'><thead><tr><th>Ranking</th><th class='n'>Days</th>"
             "<th class='n'>Entries</th><th class='n'>Limit filled</th><th class='n'>Limit +3/-8, mean a trade</th>"
             "<th class='n'>Target / stop hit</th><th class='n'>Limit +5/-5</th><th class='n'>Open +5/-5</th></tr></thead>"
-            "<tbody>" + "".join(rows) + "</tbody></table></div>")
+            "<tbody>" + "".join(rows) + "</tbody></table></div>" + _breadth_line(o))
+
+
+def _breadth_line(o: pd.DataFrame) -> str:
+    """The rotation study's one lead, on the scored entries: the top third of sectors by breadth
+    against the rest, every ranking's entries pooled, a name counted once a day."""
+    if not LEDGER.exists() or o.empty:
+        return ""
+    L = pd.read_parquet(LEDGER)
+    if "sector_breadth_t" not in L.columns:
+        return ""
+    x = o.merge(L[["date", "recipe", "ticker", "sector_breadth_t"]], on=["date", "recipe", "ticker"], how="left")
+    x = x.drop_duplicates(["date", "ticker"])
+    top, rest = x[x.sector_breadth_t == 3].limit_ret.dropna(), x[x.sector_breadth_t.isin([1, 2])].limit_ret.dropna()
+    if not len(top) or not len(rest):
+        return ""
+    few = " Too few to judge yet (under 30 trades on a side)." if min(len(top), len(rest)) < 30 else ""
+    return (f"<p class='note'>Sector breadth (the rotation study's one lead, followed on new entries): names whose "
+            f"sector was in the top third by share of stocks above their 200-day average made "
+            f"{top.mean() * 100:+.2f}% a filled limit trade ({len(top)} trades), the rest {rest.mean() * 100:+.2f}% "
+            f"({len(rest)}).{few}</p>")
 
 
 def render(asof: str) -> Path:

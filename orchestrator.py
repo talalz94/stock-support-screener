@@ -1009,6 +1009,18 @@ def _step_profiles(asof: str) -> tuple[int, str]:
     return ok, detail
 
 
+def _step_provider_quarters(asof: str) -> tuple[int, str]:
+    """Interim quarters from Yahoo Finance for the companies whose SEC record holds year-ends only
+    (20-F and 40-F filers: their quarterly results come on Form 6-K, without XBRL) -- 209 of 3,298
+    on 2026-11-15, Pampa Energia among them. Weekly: quarters change four times a year. Display
+    only: the stock page's quarterly table, marked as the provider's (provider_quarters.py)."""
+    import provider_quarters as PQ
+    r = PQ.fetch(verbose=False)
+    return r["with_quarters"], (f"{r['with_quarters']} of {r['asked']} year-end-only name(s) with provider "
+                                f"quarters; {len(r['none_published'])} with none; {len(r['failed'])} failed"
+                                + (f": {', '.join(r['failed'][:6])}" if r["failed"] else "") + f"; {r['seconds']}s")
+
+
 def _profiles_layout_due(prev) -> tuple[bool, str]:
     """Due whenever a stock page carries another layout stamp than the files on disk now -- read
     from the first few KB of each page, so a pass with nothing to do stays cheap."""
@@ -1818,6 +1830,12 @@ REGISTRY: tuple[Step, ...] = (
          depends_on=("universe",), timeout=7200,
          desc="finnhub metric cache for the universe (the source for displayed "
               "ratios; ~58 min at 60 req/min)"),
+    # Weekly, before `profiles` draws the quarterly tables. Nothing depends on it: a failed fetch
+    # leaves last week's quarters on the pages.
+    Step("provider_quarters", _step_provider_quarters, config.CADENCE_WEEKLY, session_indexed=False,
+         timeout=2400,
+         desc="interim quarters from Yahoo Finance for companies whose SEC record has year-ends only "
+              "(20-F / 40-F filers), shown marked on their stock pages"),
     # THE SEC STEPS RUN BEFORE `fundamental`, NOT AFTER. They used to follow it,
     # so whatever they fetched was scored a run later: on 2026-10-10 the 2026q3
     # bulk set landed at 06:10, two minutes AFTER fundamental scored 10-09 at

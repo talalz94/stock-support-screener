@@ -176,6 +176,28 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-15 (later) — THE FIRST NARRATIVE ANSWER CHECKED; SECTOR BREADTH ON THE LEDGER; PROVIDER QUARTERS FOR 201 FOREIGN FILERS
+
+**Asked:** "yes check the narrative answer and start the other pending items".
+
+**The narrative task's first answer** (`data/narrative/2026-11-15.json`; the task ran Sunday 07:53, a day late because the app was closed on Saturday):
+- **Our checker rejected it, wrongly.** Chemicals, Semiconductors and Transport are each both a sector and a sub-industry; `check_answer` and `ingest` keyed groups by name alone, so the second of each pair "overwrote" the first and the answer was flagged for listing them twice. Fixed: a group is a (name, level) pair in the check, the store's de-duplication and the selftest (three new cases). Re-ingested: 64 groups (19 sectors, 45 sub-industries) in `scores.parquet`. The readers (Shortlist, Today) already keyed by level and name.
+- **What it says:** sectors now -1 x6 / 0 x8 / +1 x5; 34 of 45 sub-industries inherit their sector's view (the run's own report said 31; the file is what counts), 11 have their own. Strongest: Refiners and Other Energy +2 now (the Strait of Hormuz disruption); weakest: Autos -1 on every horizon, Consumer Discretionary, Staples and Construction -1 now and over 3 months.
+- **Its sources:** 87 citations, 37 distinct links, dated 2026-01-12..11-12. Of 8 spot-checked with WebFetch, the 5 reachable all exist and say what was cited (Nvidia's CEO resigned on 11-12 with the CFO as interim CEO; CoreWeave's backlog $132.5B; gold -16% and silver -30% since late August; Lloyd's List's Hormuz brief; CIBC's $5,200 gold forecast for 2027); 3 refused automated access (403) and stay unverified.
+- **Its cost, measured from the run's transcript:** 8 min 50 s; Opus 5.5 at medium effort; 18 API responses; 44,784 output tokens and 3.11M input tokens, 93% of them cache reads (211K cache writes); 38 web searches, 5 fetches. The app does not report a run's share of the plan's limits. A per-stock version for the shortlist's top 20 at ~2 searches a name would be about one more run of this size a week (an estimate from searches per run); for every stock it is out of reach.
+
+**Sector breadth on the shortlist ledger** (the rotation study's one lead, to be judged forward): every entry now records its sector's breadth200 third on its own date (`shortlist.breadth_terciles`, from the `sectors` step's files); the six dates already in the ledger were filled point in time: 3,294 of 3,300 entries (AEP on 11-06 has no sector reading and stays blank). The Shortlist page's forward table adds the comparison once entries are scored (first around 11-25), saying when either side has fewer than 30 trades.
+
+**Provider quarters** (`provider_quarters.py`, weekly step `provider_quarters`, the PAM question of 11-11): Yahoo Finance's quarterly income statement, balance sheet and cash flow for the companies whose SEC record holds year-ends only, mapped onto the fact store's concepts (capex sign flipped to the store's), stored with the reporting currency. First run: 201 of 201 such names with quarters, 0 failed, 888 s; 12,203 figures; 185 with a 2026 revenue quarter (126 through September); 104 report in USD, the rest in a dozen currencies. The stock page's quarterly table adds them as columns marked **Y** with a note, never over an SEC figure (where both exist they agreed: PAM 2025-12-31 assets $6.594B, cash $725M), never across currencies, never for a filer that has its own interim quarters, and they reach no score. PAM now shows revenue $591M / $507M / $573M / $746M / $790M and net income $23M / $161M / $214M / $172M / $129M for 2025-Q3 to 2026-Q3. Checked in the browser.
+
+**Note:** `stock_profile.py` changed, so every stock page is stale by its stamp; the schedule's next pass redraws them (`profiles_layout`), and the pages of any of the 201 then carry their quarters.
+
+**Still pending:**
+- The shortlist's forward record: first entries scored around 2026-11-25, with the breadth comparison.
+- The 2026-11-23 review of the 10-23 list (its app task is set for that morning).
+- The insider forward record: 20-session results from mid-December.
+- The narrative: weekly snapshots accumulate; months before it can be judged against later prices.
+
 ## State at 2026-11-15 — STOCK PAGES CARRY A LAYOUT STAMP; AN OLD ONE REDRAWS ITSELF
 
 **Asked:** "schedule a job that quietly rebuilds stock profiles acc to the new updates, or an auto feature that rebuilds or prompts/pop-up to rebuild if i open a stock profile page if theres been an update? because for so many stock im seeing old format of those profile pages and this might be a recurring issue."

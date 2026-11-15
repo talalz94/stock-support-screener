@@ -62,6 +62,7 @@ backtest just quietly improves.
 | `settings.py` | what the profile view shows | `--show`, `--enable X`, `--order` |
 | `serve.py` | opt-in local server; makes hub buttons live; builds stock pages in the background (`/api/build`, `/api/stock`), one at a time, reloading the page code when it changed on disk; the stop button (`/api/shutdown`) | `--open`, `--port`, `--stop` |
 | `layout_stamp.py` | the stamp of the code and saved layout that drew a stock page; the `profiles_layout` step and an open page (through `serve.py`) use it to redraw pages in an older layout | (no args) lists stale pages, `--selftest` |
+| `provider_quarters.py` | Yahoo Finance's interim quarters for year-end-only SEC filers (the weekly `provider_quarters` step); display only, in the stock page's quarterly table, marked **Y** | `--fetch`, `--show T`, `--selftest` |
 | `insider_track.py` | the forward record of insider and House trades and what each did to the price (the `insider_track` step) | `--show`, `--selftest` |
 | `shortlist.py` | the daily shortlist: every ranking of `shortlist_recipes.json`, the tested trade plan, the forward ledger, Explore's support / plan / strength columns (the `shortlist` step) | `--build [DATE]`, `--backtest` |
 | `narrative.py` | the weekly AI narrative's inputs and the strict check of its answers (the `narrative` step; the Claude-app task `narrative-weekly` writes the answers) | `--inputs`, `--ingest`, `--prompt`, `--selftest` |
