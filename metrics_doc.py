@@ -466,14 +466,16 @@ EXTRA_LABELS: dict[str, tuple[str, str]] = {
                    "Zones page's AT / NEAR), 0 for every other liquid name. The population the "
                    "bounce trade and the shortlist use."),
     "above_level_pct": ("Above level %", "how far the close sits above that support level, in %. "
-                        "With the limit order, the furthest third did better (+0.35pp a trade on "
-                        "2022-26, t 2.39, in every period): a name 2.5-6% up fills only on a real "
-                        "pullback to its level. The one at-support measure that held."),
+                        "No edge for the bounce trade when measured as it can be traded: the furthest "
+                        "third, cut on the signal date, did +0.07pp a trade better on 2022-26 with the "
+                        "plan's limit order (t 0.77). An earlier pass (+0.35pp, t 2.39) cut the thirds "
+                        "among the orders that filled, which is not known when an order goes in "
+                        "(withdrawn 2026-11-15)."),
     "buy_limit": ("Buy limit", "the support level + 0.5%: the limit order of the tested trade, live for "
                   "3 sessions. About 54% of such orders filled (2018-2026)."),
     "target": ("Target", "+3% from the limit fill: the tested trade's target (out after 10 sessions "
                "if neither side is hit). Measured on 2022-26 with fills that must trade through "
-               "the limit: +0.36% a trade net of costs, t 2.42. Research, not advice."),
+               "the limit: +0.34% a trade net of costs, t 2.25. Research, not advice."),
     "stop": ("Stop", "-8% from the limit fill: the tested trade's stop. Wider than the target, so "
              "the trade wins often and loses more when it loses; +5% / -5% did about the same."),
     "atr_pct": ("ATR %", "20-day average true range as % of the close: how far the stock usually "

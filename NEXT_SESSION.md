@@ -44,13 +44,13 @@ group pulled in rather than all twelve -- `--quick` across every group is ~11
 minutes and belongs on demand, not in the chain.
 
 
-## IDEAS QUEUE — PARKED BY THE USER, NOT BUILT (design and ask before building)
+## IDEAS QUEUE OF 2026-11-02 — ALL FOUR BUILT OR RUN SINCE (2026-11-08 and 2026-11-15; the State sections below have the results)
 
-**Remind the user of these whenever they ask for an update** (their instruction,
-2026-11-02: "remind me whenever I ask for an update or something, dont schedule it"),
-and ask whether to start the bounce-trade tests. No scheduled reminder exists for them.
+**What is still pending is listed at the end of the newest State section: remind the user of it
+whenever they ask for an update** (their instruction, 2026-11-02: "remind me whenever I ask for
+an update or something, dont schedule it"). No scheduled reminder exists for it.
 
-### NARRATIVE SCORE (asked for 2026-11-02)
+### NARRATIVE SCORE (asked for 2026-11-02; BUILT 2026-11-08 as `narrative.py` and the weekly task; a short-term trial from 2026-11-15)
 **What:** a score for which stories are likely to drive a stock or sector: sector and
 industry trends, policy (regulation, budgets, tariffs, rates), technology cycles, and
 seasonality, each now, in the near future and further out. It needs an AI (Claude)
@@ -80,7 +80,7 @@ module and can finally bundle into the multi-criteria ranking.
 6. **Evaluation:** after 3-6 months of snapshots, test like every module (IC vs forward
    returns, against the validated sector score as the baseline); until then shown only.
 
-### BOUNCE-TRADE REFINEMENTS (planned 2026-11-02; NOT RUN -- the user will refine first)
+### BOUNCE-TRADE REFINEMENTS (planned 2026-11-02; RUN 2026-11-08 as `trade_rules_study.py`, and the combination of the filters that passed alone 2026-11-15 as `bounce_filters_study.py`)
 **Base:** `big_movers_study.py --trades` (the 11-02 morning section): the saved events,
 buy at the next open, PRIMARY bracket b5_10 (+5% target / -5% stop / 10 sessions; a gap
 fills at the open; a day touching both is the stop). These rules are fixed now, before
@@ -136,7 +136,7 @@ The design is `trade_rules_study.py`'s docstring, fixed before any result:
   - I1: open+1h minus open. I2: limit in 30-minute order minus the pessimistic limit. Does the best rule change?
   - Fixed before any bar was downloaded (`trade_rules_study.py`, intraday block).
 
-### RELATIVE STRENGTH VS THE MARKET AND THE SECTOR (planned 2026-11-02; NOT BUILT)
+### RELATIVE STRENGTH VS THE MARKET AND THE SECTOR (planned 2026-11-02; BUILT 2026-11-08 as `rs_study.py` and the stock page's `relative` block: no edge, shown as context)
 **The idea, in the user's words:** a stock's line should roughly follow its index and its
 sector; one that has been ABOVE its sector is a healthy sign. Nothing like it exists yet
 (checked 2026-11-02: no relative-strength metric anywhere in the code).
@@ -167,7 +167,7 @@ industry momentum explains much of stock momentum (Moskowitz & Grinblatt 1999); 
 momentum is steadier than raw (Blitz, Huij & Martens 2011); 1-month strength tends to
 reverse. Caveats: today's sub-industry map; survivorship.
 
-### ONE FILTERING PIPELINE ACROSS ALL METRICS (the user's next step, 2026-11-02)
+### ONE FILTERING PIPELINE ACROSS ALL METRICS (the user's next step, 2026-11-02; started 2026-11-08: `metric_evidence.py`, the shortlist, Explore's columns)
 The user will come back to refine every metric and build a comprehensive analysis
 pipeline that filters stocks on many criteria. Starting points: a catalogue of every
 metric with its measured evidence (IC, at-support and bounce-trade effect, halves,
@@ -175,6 +175,40 @@ walk-forward -- most of it already sits in the studies' JSON files); `combo` (on
 measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
+
+## State at 2026-11-15 (evening) — A SHORT-TERM NARRATIVE TRIAL; EVERY RUN'S COST MEASURED; THE BOUNCE FILTERS COMBINED (FUND_SCORE ALONE); DISTANCE'S PASS WAS A LOOK-AHEAD
+
+**Asked:** "run a 2 day, weekly, monthly narrative, lets do this for one week and then we will see how to continue, also please continue with the next pending items, and please make sure no errors this time around !!!!!" and "also i want token cost too for the narrative job so measure that too using an accurate mechanism"; the user chose a new short-term job beside the weekly one, and both the narrative work and the bounce-trade refinements; then "yes start the pending items".
+
+**The short-term narrative trial** (Claude-app task `narrative-short`):
+- It scores every group for the next 2 trading days (`d2`), 5 (`w1`) and about 21 (`m1`), at 12:30 on 15, 17, 19 and 21 Nov, into its own folder, check and store (`data/narrative/short/`). The prompt is `narrative.TASK_PROMPT_SHORT` (`python narrative.py --prompt short`); it writes nothing after 2026-11-22. The task's SKILL.md matches the repo's prompt character for character (checked).
+- **Its first run stopped 49 s in,** at its first three WebSearch calls (started 14:44; the app opened late): a task's runs start in the default permission mode. It waits for the user's approval in the run's session; the app then keeps the approvals on the task. `docs/claude_app_tasks.md` now says so.
+- The weekly prompt said "20 sectors and 44 sub-industries"; the inputs have always had 19 and 45. Corrected in the code and in the weekly task (nothing else in it changed), with the "a name at both levels counts twice" note.
+
+**Every run's cost, measured** (`narrative.run_costs`, `python narrative.py --costs`, nightly inside the `narrative` step, `data/narrative/_runs.parquet`):
+- Claude Code writes its own cost record into each session's transcript (a `cost-state` line): tokens per model -- the session's model AND the helper model behind WebSearch and WebFetch, which the per-message usage does not show -- web searches, its estimate at API list prices, API and tool time. The last record is the session's total, and it is checked against the transcript's per-message usage for the session's own model.
+- **The 11-15 weekly run:** main model 3,113,955 tokens in (38 fresh, 210,901 cache writes, 2,903,016 cache reads) and 44,784 out, identical to the per-message sums; the helper 587,611 in and 47,121 out, 38 web searches (the run's own count: 38); $3.63 by Claude Code's estimate (on a subscription it counts against the plan's usage instead); 8.8 minutes first to last line. The earlier figure (44,784 out / 3.11M in) missed the helper's share.
+- A run still open shows "no cost record yet (run not finished)", never a zero: the short-term run now. A run whose transcript Claude Code later deletes keeps its row.
+- Shown in the step's detail and on Today's Narrative card. Selftest 20/20: the answer checks, both kinds ingested end to end in a scratch folder, four made-up transcripts.
+
+**Today's Narrative card was wrong from the first answer on:** it looked the view up on or before the last session (Fri 11-13), so it still said "The first weekly run is due Saturday 2026-11-14" though the 11-15 view had been checked. A current page now reads the newest view, a weekend one included; an older page stays point in time. The card adds the trial's "Next 2 days" and each run's cost. Checked in the browser at 375 px, light and dark, with its (i) open.
+
+**The bounce-trade refinements' last step** (`bounce_filters_study.py`; design fixed before any result, in its docstring):
+- **The plan trade with real-order fills, in the repo for the first time:** an open at or under the limit fills at the open, otherwise the low must trade 0.2% through (filled at the limit), and the fill day runs in 30-minute order. **Check:** with no trade-through it gives back the 11-08 `limit30` rule on all 175,937 name-dates: the same 99,787 trades, every return identical. Fill rates 56.7% and 53.9%, as on 11-08.
+- **The trade:** TEST +0.34% a trade (t 2.25; TRAIN halves +0.25 / +0.66), positive in 8 of 9 years: kept. The pages quoted +0.36% (t 2.42) from a one-off script of 11-08 (and +5/-5 +0.38%, t 2.37; now +0.35%, t 2.19). Corrected on Today, the Shortlist page, Explore's tooltips, `shortlist.py`, README and SCORE_MODULES.
+- **The combinations** of D (furthest third above the level), B (sector breadth top third) and F (fund_score top third), each cut at the signal: the TRAIN pick is **F alone** (t 5.14); TEST +0.11pp a trade over every at-support name (t 2.05): kept, just. Touch fills +0.14pp (t 2.70), the default +0.06pp (t 2.17). D alone TEST +0.07pp (t 0.77); B alone +0.13pp (t 2.06, but 2020-21 +0.00: not kept). B+F was kept on TEST (+0.21pp, t 2.12) but was not the TRAIN pick; post hoc, B+F minus F alone: +0.10pp (t 1.03), 2020-21 -0.29. 21 comparisons, 1.1 expected at |t| >= 2 by chance.
+- **So:** no change to the shortlist, which already ranks by fund_score. Its forward ledger judges all three again on new trades (`limit_ready` is the distance ranking; every entry carries its breadth third).
+
+**A look-ahead in the evidence catalogue, fixed:** `metric_evidence._spread` cut each metric's thirds among the FILLED trades. Under the limit rule (about 57% fill) that is not known at the signal, and for `dist`, which decides the fill, it alone made the one KEPT at support (TEST +0.35pp, t 2.39). Cut at the signal: +0.22pp (t 1.18), 2018-19 negative. Re-run: exactly one label changed (`dist` under the limit rule); the default-rule tests moved by a median 0.00 in t (max 0.28). KEPT now: 2 of 114 metrics, both negative ICs across all liquid names (`vol_surge`, `loss_days`). The old catalogue is kept as `data/_metric_evidence_cut_among_filled_20261108.*`. Explore's "Above level %" tooltip ("the one at-support measure that held") is corrected; older dated Explore pages keep what they showed. CLAUDE.md gains the rule "Cut at the signal".
+
+**Checks:** narrative 20/20 and bounce_filters 12/12; the ui, settings, shortlist, settings_page, explore, layout_stamp (0 of 173 pages stale), provider_quarters, insider_track, serve, stock_profile and trade_rules_study self-tests pass; `status.py --pages`: 487 pages clean; every changed module imports with `-W error`; the `narrative` and `explore` steps ran through the orchestrator (4.7 s and 28.4 s).
+
+**Still pending:**
+- The short-term trial: its first run waits for the user's approval (WebSearch, WebFetch) in its session; runs on 17, 19 and 21 Nov; after 11-22, review its views and measured costs and decide whether to continue. If not, delete the task: its cron would fire again next November.
+- The shortlist's forward record: first entries scored around 2026-11-25, with the breadth comparison.
+- The 2026-11-23 review of the 10-23 list (its app task is set for that morning).
+- The insider forward record: 20-session results from mid-December.
+- The weekly narrative: snapshots accumulate; months before it can be judged against later prices.
 
 ## State at 2026-11-15 (later) — THE FIRST NARRATIVE ANSWER CHECKED; SECTOR BREADTH ON THE LEDGER; PROVIDER QUARTERS FOR 201 FOREIGN FILERS
 

@@ -133,8 +133,13 @@ def summary(x: pd.Series, nw: bool = False, scale: float = 100) -> dict:
 
 
 def _spread(df: pd.DataFrame, col: str, y: str, binary: bool) -> pd.Series:
+    """Per date: the top third's mean trade minus the bottom third's. The thirds are cut AT THE
+    SIGNAL, among every at-support name with a value; then only the trades that filled count.
+    Until 2026-11-15 they were cut among the filled trades alone, which a limit entry (about 57%
+    fill) does not know at the signal: `dist` decides the fill, and that cut alone made it KEPT
+    (TEST +0.35pp, t 2.39; cut at the signal +0.22pp, t 1.18 -- bounce_filters_study.py)."""
     out = {}
-    for d, g in df[df[col].notna() & df[y].notna()].groupby("date"):
+    for d, g in df[df[col].notna()].groupby("date"):
         x = g[col]
         if binary:
             top, bot = x == 1.0, x == 0.0
@@ -143,7 +148,11 @@ def _spread(df: pd.DataFrame, col: str, y: str, binary: bool) -> pd.Series:
             top, bot = x > hi, x <= lo
             if top.sum() < 10:
                 top = x >= hi
-        if top.sum() < 10 or bot.sum() < 10 or bool((top & bot).any()):
+        if bool((top & bot).any()):
+            continue
+        filled = g[y].notna()
+        top, bot = top & filled, bot & filled
+        if top.sum() < 10 or bot.sum() < 10:
             continue
         out[d] = g.loc[top, y].mean() - g.loc[bot, y].mean()
     return pd.Series(out, dtype=float).sort_index()

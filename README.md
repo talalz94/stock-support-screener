@@ -225,8 +225,9 @@ over: your keys (`.env`), the data store (`data/`, 3.6 GB on 2026-11-11) and the
    the nightly run as it is set up today (`-DryRun` shows it first, `-At` changes the 05:00 start
    outside Pakistan time). The older `setup_schedule.ps1` registers a task that now does nothing:
    skip it.
-6. **Claude-app tasks.** Recreate the weekly narrative and the dashboard tracking in the Claude
-   desktop app: [docs/claude_app_tasks.md](docs/claude_app_tasks.md).
+6. **Claude-app tasks.** Recreate the narrative tasks (the weekly one, and the short-term trial
+   until 2026-11-22) and the dashboard tracking in the Claude desktop app:
+   [docs/claude_app_tasks.md](docs/claude_app_tasks.md).
 7. **Claude Code.** [CLAUDE.md](CLAUDE.md) carries the working agreements, and Claude reads it at
    the start of every session. Start a session with "read NEXT_SESSION.md and continue".
 
@@ -315,8 +316,9 @@ independently of touch count: four touches in one week is one event, not four.
   catch up within two hours between 05:00 and 17:00 instead of the next night.
   `provider_quarters` (weekly, 2026-11-15) fetches Yahoo Finance's interim quarters for the
   companies whose SEC record has year-ends only (20-F and 40-F filers, ~209), shown marked on their
-  stock pages' quarterly tables. `narrative` writes the weekly AI narrative task's
-  inputs and checks its answers; `shortlist` builds every ranking's list of names at support with the
+  stock pages' quarterly tables. `narrative` writes the AI narrative tasks' inputs, checks both
+  tasks' answers (the weekly one and, 15-21 Nov 2026, the short-term trial) and records what each
+  run cost from its own transcript; `shortlist` builds every ranking's list of names at support with the
   tested trade plan and scores the forward ledger. Both run BEFORE `explore`, whose support and
   trade-plan columns read that night's shortlist (until 2026-11-09 they ran after it, so Explore
   showed the previous session's plan). `dashboard` builds Today (`reports/index.html`, the home
@@ -541,11 +543,12 @@ as bankruptcy text and asserts no metric moves.
 | `watchlist_track.py` | tracks a saved watchlist from its entry date (the "Gainers at support" list), statuses fixed in the module, per-session history; `--refresh` / `--mark-uploaded` for the claude.ai copy |
 | `gainers_at_support.py` | the "Gainers at support" list for a session: liquid names at/near support, ranked within sector by past-year top-20 gainer days, with sector/fund/combo, warning filings and next earnings; writes `data/watchlists/gainers_at_support_<date>/`; add a `track.json` to track it nightly |
 | `big_movers_study.py` | do stocks that keep running bounce better at support? Top-20 / liquidity-fifth gainer and loser days, tilt, `rally_count` (separate 20%+ rallies), `recovery_rate` (15% dips won back within 63 sessions), burst months, sub-industry peers; plain and volatility-neutral, split halves, walk-forward vs gain_days and the plain rule; `data/_big_movers_study.json`. Frequent movers move more BOTH ways; only recovery_rate leans up (60 sessions: a lead, not a rule). `--trades`: the quick bounce trade (next open, +/-X% bracket, `data/_big_movers_trades.json`): the level helps HOT stocks (+0.4pp a trade vs hot stocks elsewhere, which lose) but hot does not beat calm at the level |
-| `trade_rules_study.py` | which bounce-trade rule works (plan item 1): 108 rules (open / limit at the level +0.5% / next close x fixed, ATR and level-stop brackets) on 175,937 at-support name-dates, chosen on 2018-21 and judged on 2022-26 with 0.10% costs; segments, 11 market filters, earnings, AT/NEAR. `--fetch-intraday` / `--build-intraday` / `--intraday`: 30-minute bars for the entry and fill days. Result: the open earns ~0; a limit at the level +0.5%, +3% / -8% (or +5/-5), 10 sessions, holds even with trade-through fills (+0.36% a trade, t 2.42) |
+| `trade_rules_study.py` | which bounce-trade rule works (plan item 1): 108 rules (open / limit at the level +0.5% / next close x fixed, ATR and level-stop brackets) on 175,937 at-support name-dates, chosen on 2018-21 and judged on 2022-26 with 0.10% costs; segments, 11 market filters, earnings, AT/NEAR. `--fetch-intraday` / `--build-intraday` / `--intraday`: 30-minute bars for the entry and fill days. Result: the open earns ~0; a limit at the level +0.5%, +3% / -8% (or +5/-5), 10 sessions, holds even with trade-through fills (+0.34% a trade, t 2.25, as `bounce_filters_study.py` measures it reproducibly; a one-off script had said +0.36%, t 2.42) |
+| `bounce_filters_study.py` | do the filters that each passed alone add up (the refinements' last step, 2026-11-15)? Distance above the level, sector breadth and fund_score thirds, cut at the signal, every AND of them under the plan trade with real-order fills (a limit fill must trade 0.2% through, the fill day in 30-minute order: `--build`, checked against the 11-08 rule exactly), chosen on 2018-21, judged on 2022-26. Result: fund_score's top third alone (TEST +0.11pp a trade, t 2.05); distance and breadth add nothing. `data/_bounce_filters_study.json`, `--selftest` |
 | `rs_study.py` | does running above the sector / market predict the bounce? Leave-one-out sector and sub-industry indexes, 10 measures: none kept (plan item 2) |
 | `metric_evidence.py` | the evidence catalogue: every stored metric with history tested at support (two trades) and as a 20-day IC; KEPT / STRONG labels feed Explore's tooltips and the shortlist (plan item 3) |
 | `shortlist.py` | the daily shortlist (plan item 3): every ranking in `shortlist_recipes.json` (default fund_score, n 20, max 50) of the names at support with the tested trade plan, the forward ledger (`data/shortlist/`), `reports/shortlist/latest.html` (three tabs; column views: Trade plan, Alternative plan, Scores, Strength, All), and Explore's support / plan / relative-strength columns; `--backtest` ranks the rankings |
-| `narrative.py` | the AI narrative (plan item 4): nightly inputs per sector and sub-industry for the weekly Claude-app task `narrative-weekly`, and the strict check of its answers (`data/narrative/`); no ranking weight until judged forward |
+| `narrative.py` | the AI narrative (plan item 4): nightly inputs per sector and sub-industry for the Claude-app tasks `narrative-weekly` (now / 3 months / 12 months) and, 15-21 Nov 2026, `narrative-short` (next 2 trading days / week / month), the strict check of their answers (`data/narrative/`, `data/narrative/short/`), and each run's measured cost from its transcript's own cost record (`data/narrative/_runs.parquet`: tokens per model, the web-search helper included, and Claude Code's estimate at API list prices). `--inputs`, `--ingest`, `--costs`, `--prompt [short]`, `--selftest`. No ranking weight until judged forward |
 | `industry_map.py` | corrects the SIC sector map with Finnhub's free industry labels (`--fetch` ~1 h, `--compare`, `--apply` -> `data/_sector_overrides.parquet`, laid over the SIC map on every read by `macro.load_sector_map` and `sectors.groups`) |
 | `watchlist_page.py` | the `watchlists` step: re-measures every `data/watchlists/*/track.json` list nightly and draws `reports/watchlist/` |
 | `news_events.py` | stock news EVENTS in `data/news_events/`: every SEC filing by type since 2016 (8-K items, deal and activist forms, acceptance to the second), PR Newswire M&A / FDA-approval and FDA press feeds, a daily Finnhub earnings-calendar snapshot (point in time); `page_flags(asof)` feeds the warning and earnings tags. The `news_events` step. `--backfill`, `--update`, `--stats`, `--selftest`. NOT `events.py` (severity calibration) |
@@ -556,7 +559,7 @@ as bankruptcy text and asserts no metric moves.
 | `layout_stamp.py` | which code and saved layout drew a stock page (`stock_profile.py`, `ui.py`, `settings.py`, `data/_profile.json`, hashed): written into every page, read by `profiles_layout` and by `serve.py` to find and redraw pages in an older layout. Run it to list the stale pages |
 | `insider_track.py` | the forward record (2026-11-11): every insider and House trade filed since, one row per filing in `data/insider/_forward.parquet` with its features as known that night, and its stock's move over the first session and 1/5/20/60 sessions against same-day stocks of the same liquidity, filled in as each matures; unadjusted splits flagged and left out; summary in `data/_insider_forward_summary.json`, a line on the Insiders and House pages. `--show`, `--selftest` |
 | **`dashboard.py`** | **the status hub**, `reports/system.html` — read-only, never triggers work |
-| **`today_page.py`** | **Today**, `reports/index.html` (the home page) — market, shortlist top 5, watchlists, this week, narrative |
+| **`today_page.py`** | **Today**, `reports/index.html` (the home page) — market, shortlist top 5, watchlists, this week, narrative (the newest checked view, a weekend one included; the short-term trial's next 2 days; each run's cost) |
 | **`settings_page.py`** | **Settings**, `reports/settings.html` — theme and Today's cards (this browser); stock-page sections and tabs, shortlist ranking, size and filters (project files, saved through `serve.py`) |
 
 ---

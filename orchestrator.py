@@ -1725,13 +1725,19 @@ def _step_narrative(asof: str) -> tuple[int, str]:
     """The weekly AI narrative's inputs (data/narrative/inputs_latest.json, read by the
     Claude-app task `narrative-weekly`) and the check of any new answer file. Nightly, because
     the task fires only while the app is open and must find fresh inputs whenever it does.
-    Nothing it writes carries a ranking weight until it is judged forward."""
+    Nothing it writes carries a ranking weight until it is judged forward. Both tasks' answers are
+    checked (the weekly one and the short-term trial `narrative-short`), and every run's measured
+    cost is recorded from its own transcript (narrative.run_costs)."""
     import narrative
     doc = narrative.inputs(asof, verbose=False)
     r = narrative.ingest(verbose=False)
     rej = f"; REJECTED {sorted(r['rejected'])}" if r["rejected"] else ""
+    try:
+        cost = "; " + narrative.cost_summary(narrative.run_costs(verbose=False))
+    except Exception as exc:                                     # noqa: BLE001
+        cost = f"; run costs not read ({type(exc).__name__}: {str(exc)[:120]})"
     return len(doc["groups"]), (f"inputs for {len(doc['groups'])} groups as of {doc['asof']}; "
-                                f"{len(r['added'])} new answer file(s) ingested{rej}")
+                                f"{len(r['added'])} new answer file(s) ingested{rej}{cost}")
 
 
 def _step_shortlist(asof: str) -> tuple[int, str]:

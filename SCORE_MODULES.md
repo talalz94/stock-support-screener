@@ -65,9 +65,10 @@ backtest just quietly improves.
 | `provider_quarters.py` | Yahoo Finance's interim quarters for year-end-only SEC filers (the weekly `provider_quarters` step); display only, in the stock page's quarterly table, marked **Y** | `--fetch`, `--show T`, `--selftest` |
 | `insider_track.py` | the forward record of insider and House trades and what each did to the price (the `insider_track` step) | `--show`, `--selftest` |
 | `shortlist.py` | the daily shortlist: every ranking of `shortlist_recipes.json`, the tested trade plan, the forward ledger, Explore's support / plan / strength columns (the `shortlist` step) | `--build [DATE]`, `--backtest` |
-| `narrative.py` | the weekly AI narrative's inputs and the strict check of its answers (the `narrative` step; the Claude-app task `narrative-weekly` writes the answers) | `--inputs`, `--ingest`, `--prompt`, `--selftest` |
+| `narrative.py` | the AI narrative's inputs, the strict check of its answers and each run's measured cost (the `narrative` step; the Claude-app tasks `narrative-weekly` and, 15-21 Nov 2026, `narrative-short` write the answers) | `--inputs`, `--ingest`, `--costs`, `--prompt [short]`, `--selftest` |
 | `industry_map.py` | Finnhub industry labels laid over the SIC sector map on every read | `--fetch`, `--compare`, `--apply` |
 | `trade_rules_study.py` / `rs_study.py` / `metric_evidence.py` | the 2026-11-08 studies: 180 bounce-trade rules (daily + 30-minute), relative strength, every metric's evidence | see each docstring |
+| `bounce_filters_study.py` | the 2026-11-15 combination of the filters that passed alone (distance, sector breadth, fund_score) under the plan trade with real-order fills, walk-forward | `--build`, `--check`, `--selftest`; no flag: the combinations |
 
 ### orchestrator owns the schedule
 
@@ -582,9 +583,20 @@ name-dates (217 dates, 2018-2026), chosen on 2018-21 and judged on 2022-26 with 
 3 daily entries x 36 exits, plus 30-minute entries (the store's own bars, fetched for the
 entry and fill days). Buying at the next open earns ~0. A buy limit at the level + 0.5% for
 3 sessions, +3% / -8%, 10 sessions, holds even when fills must trade 0.2% through the limit:
-+0.36% a trade on 2022-26 (t 2.42), positive in 8 of 9 years. Market-trend filters did not
-help; relative strength (`rs_study.py`) predicted nothing; only 3 of 114 stored metrics
-passed `metric_evidence.py`'s both-halves rule (about chance), none strongly.
++0.34% a trade on 2022-26 (t 2.25), positive in 8 of 9 years (`bounce_filters_study.py`, the
+first reproducible measurement, 2026-11-15; a one-off script had said +0.36%, t 2.42). Market-trend filters did not
+help; relative strength (`rs_study.py`) predicted nothing; only 2 of 114 stored metrics
+pass `metric_evidence.py`'s both-halves rule, both across all liquid names and both negative
+(about chance), none strongly, and none at support (`dist` passed until its thirds were cut at
+the signal instead of among the filled trades, 2026-11-15).
+
+**The filters combined** (`bounce_filters_study.py`, 2026-11-15). The three filters that had
+each passed alone -- the distance above the level, the sector's breadth, fund_score -- cut into
+thirds at the signal and combined in every way under the plan trade with real-order fills. Chosen
+on 2018-21: fund_score's top third alone (+0.49pp a trade over every at-support name, t 5.14),
+kept on 2022-26 by a hair (+0.11pp, t 2.05). Distance and breadth add nothing to it (breadth on
+top of fund_score: +0.10pp, t 1.03, 2020-21 negative). Distance's earlier pass came from cutting
+its thirds among the filled trades, which the catalogue no longer does.
 
 **The shortlist** (`shortlist.py`, step `shortlist`). Every ranking in `shortlist_recipes.json`
 (the user edits the default, n and filters) over the liquid names at support, with the trade
@@ -595,7 +607,16 @@ fund_score, tested best (+0.22pp a trade over every at-support name, t 2.21).
 **The narrative** (`narrative.py`, step `narrative`, Claude-app task `narrative-weekly`). The
 step writes per-group inputs; the weekly task researches and writes a dated answer with the
 Write tool only; `ingest` rejects anything malformed. NO weight anywhere until judged forward
-against the sector score (an AI's view of the past knows the outcome).
+against the sector score (an AI's view of the past knows the outcome). A group is a name AT A
+LEVEL (Chemicals, Semiconductors and Transport are each a sector and a sub-industry).
+A one-week SHORT-TERM trial (`narrative-short`, 15-21 Nov 2026, every two days) scores the same
+groups for the next 2 trading days, week and month (`d2`, `w1`, `m1`) into its own folder, check
+and store (`data/narrative/short/`). Every run's cost is MEASURED, not estimated: Claude Code
+writes its own cost record (`cost-state`) into the run's transcript -- tokens per model, the
+helper model behind WebSearch and WebFetch included, web searches, and its estimate at API list
+prices -- and `run_costs` stores it in `data/narrative/_runs.parquet` after checking it against
+the transcript's per-message usage (the 11-15 weekly run: identical; $3.63, 3.7M tokens in, 92K
+out, 9 minutes). A run still open shows "no cost record yet", never a zero.
 
 **The sector map** (`industry_map.py`). SIC ranges misplace whole industries (KLA in
 Healthcare, REITs in Financials, Lam in Industrials). Finnhub's industry label corrects 931

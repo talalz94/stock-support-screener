@@ -1,6 +1,6 @@
 # Claude-app scheduled tasks
 
-Three jobs run in the **Claude desktop app** rather than in the orchestrator, because they need
+Four jobs run in the **Claude desktop app** rather than in the orchestrator, because they need
 Claude itself (web research, or writing to a claude.ai dashboard). The app keeps them on the machine
 where they were made, so **a new machine needs them recreated**: in the Claude desktop app, open
 the Code tab's scheduled tasks, add each one below, and paste its prompt. Or ask Claude Code to
@@ -13,9 +13,17 @@ App tasks run only while the app is open, which is why everything that measures 
 runs in the orchestrator instead, and why the tracking job repeats every 2 hours and stops at once
 when there is nothing new (see `NEXT_SESSION.md`, 2026-10-29 to 10-31).
 
+**A new task's first run waits for approvals.** Its runs start in the app's default permission
+mode, so the first web search or shell command stops at an approval prompt, with the run still
+shown as running. Open the run, allow the tools it asks for, and it carries on; the app keeps those
+approvals on the task, so later runs do not stop. Clicking "Run now" on the task's page once does
+the same ahead of time. (Measured 2026-11-15: `narrative-short`'s first run waited at its first
+three searches.)
+
 | Task id | Schedule | Cron | What it does |
 |---|---|---|---|
 | `narrative-weekly` | Saturdays 10:30, about 12 minutes' jitter | `30 10 * * 6` | Researches what drives each sector and sub-industry and writes `data/narrative/<date>.json`. No ranking weight until judged forward. |
+| `narrative-short` | a one-week trial: 12:30 on 15, 17, 19 and 21 Nov 2026 | `30 12 15,17,19,21 11 *` | The same groups for the next 2 trading days, week and month, into `data/narrative/short/<date>.json`. Its prompt writes nothing after 2026-11-22. Only needed before that date, unless the trial is continued. |
 | `gainers-at-support-tracking` | every 2 hours, 06:23 to 22:23 | `23 6-23/2 * * *` | Copies the nightly "Gainers at support" tracking to its claude.ai dashboard. |
 | `gainers-at-support-20-day-review` | once, 2026-11-23 10:23 | (one-time) | Judges the 10-23 list after 20 sessions. Only needed before that date. |
 
@@ -33,7 +41,21 @@ python narrative.py --prompt
 ```
 
 Tools for the task: Read, Write, WebSearch, WebFetch only (no shell). After its runs, the nightly
-`narrative` step checks each answer file and ingests the valid ones.
+`narrative` step checks each answer file and ingests the valid ones, and records what each run
+cost from the run's own transcript (`python narrative.py --costs`; Claude Code's cost record:
+tokens per model, including the helper model behind web searches, and its estimate at API list
+prices).
+
+## narrative-short
+
+The one-week trial of 2026-11-15 to 11-21. Its prompt is in the code too:
+
+```
+python narrative.py --prompt short
+```
+
+Same tools and the same checks; its answers are stored apart (`data/narrative/short/scores.parquet`)
+and shown on the Today page as "Next 2 days".
 
 ## gainers-at-support-tracking
 

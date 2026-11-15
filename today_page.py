@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -262,7 +263,7 @@ def _shortlist(asof: str, built: set[str]) -> tuple[str, list[str]]:
     note = ui.info(f"Ranked by {ui.esc(label.lower())}, the ranking that tested best (2018-2026). The plan for each "
                    "name: a buy limit at its support level + 0.5%, good for 3 sessions; then a target of +3% and a "
                    "stop of -8% from the fill, out after 10 sessions. On 2022-2026, counting only fills that traded "
-                   "through the limit: +0.36% a trade after costs (t 2.42); about half the orders fill. "
+                   "through the limit: +0.34% a trade after costs (t 2.25); about half the orders fill. "
                    "Research, not advice.")
     more = (f'<a class="more" href="shortlist/latest.html">all {int(cfg["n"])} &middot; '
             f'{len(cfg["recipes"]) - 1} other rankings &rarr;</a>')
@@ -346,26 +347,49 @@ def _this_week(asof: str, tickers: list[str], built: set[str], short: set[str]) 
     return _card("week", "This week", note, body)
 
 
-def _narrative(asof: str) -> str:
-    note = ui.info("The weekly AI view of what is driving each sector, from -2 (strong headwind) to +2 (strong "
-                   "tailwind), with its sources. It carries <b>no</b> weight anywhere until months of these views "
-                   "have been checked against later prices.")
+def _winds(nl: pd.DataFrame, h: str) -> tuple[str, str]:
+    """The sectors' strongest tailwinds and headwinds on horizon `h` of one snapshot."""
+    s = nl[nl.level == "sector"].copy()
+    s[h] = pd.to_numeric(s[h], errors="coerce")
+    up = s[s[h] > 0].sort_values([h, "group"], ascending=[False, True])
+    dn = s[s[h] < 0].sort_values([h, "group"])
+    fmt = lambda x: ", ".join(f"{ui.esc(g)} ({int(v):+d})" for g, v in zip(x.group.head(4), x[h].head(4))) or "none"  # noqa: E731
+    return fmt(up), fmt(dn)
+
+
+def _narrative(asof: str, view_date: str | None = None) -> str:
+    """The newest checked AI view on or before `view_date` (the day the page is built, for a current
+    page: a weekend view comes after the last session and was hidden by looking up `asof` until
+    2026-11-15), the short-term trial's next-2-days view when there is one, and what the runs cost."""
+    note = ui.info("The AI view of what is driving each sector, from -2 (strong headwind) to +2 (strong "
+                   "tailwind), with its sources: weekly, and in a one-week trial (15-21 Nov) every two days for "
+                   "the next 2 trading days, week and month. It carries <b>no</b> weight anywhere until months of "
+                   "these views have been checked against later prices. The cost is Claude Code's own record of "
+                   "each run: its tokens, including the helper model behind web searches and page reads, and its "
+                   "estimate at API list prices (on a subscription it counts against the plan's usage instead).")
+    when = view_date or asof
     try:
         import narrative
-        nl = narrative.latest(asof)
+        nl, ns, runs = narrative.latest(when), narrative.latest(when, "short"), narrative.runs()
     except Exception:                                            # noqa: BLE001
-        nl = pd.DataFrame()
-    if nl is None or nl.empty:
-        return _card("narrative", "Narrative", note, '<p class="muted" style="margin:0">The first weekly run is '
-                     'due Saturday 2026-11-14; its view appears here once it has been checked.</p>')
-    s = nl[nl.level == "sector"].copy()
-    s["now"] = pd.to_numeric(s["now"], errors="coerce")
-    up = s[s.now > 0].sort_values(["now", "group"], ascending=[False, True])
-    dn = s[s.now < 0].sort_values(["now", "group"])
-    fmt = lambda x: ", ".join(f"{ui.esc(r.group)} ({int(r.now):+d})" for r in x.head(4).itertuples()) or "none"  # noqa: E731
-    body = (f'<p style="margin:0">Tailwinds: <b>{fmt(up)}</b></p><p style="margin:4px 0 0">Headwinds: {fmt(dn)}</p>'
-            f'<p class="muted" style="margin:6px 0 0;font-size:11.5px">View of {_day(str(nl.date.iloc[0]))}</p>')
-    return _card("narrative", "Narrative", note, body)
+        nl, ns, runs = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+    rows = []
+    if not nl.empty:
+        up, dn = _winds(nl, "now")
+        rows.append(f'<p style="margin:0"><span class="muted">Now, view of {_day(str(nl.date.iloc[0]))}:</span> '
+                    f'tailwinds <b>{up}</b>; headwinds {dn}</p>')
+    if not ns.empty:
+        up, dn = _winds(ns, "d2")
+        rows.append(f'<p style="margin:4px 0 0"><span class="muted">Next 2 days, view of {_day(str(ns.date.iloc[0]))}:'
+                    f'</span> tailwinds <b>{up}</b>; headwinds {dn}</p>')
+    if not rows:
+        rows.append('<p class="muted" style="margin:0">No checked view yet: the weekly task writes one on Saturdays '
+                    'and it appears here once it has been checked.</p>')
+    if len(runs):
+        last = [f"{t.split('-', 1)[1]} {ui.esc(narrative.cost_line(runs[runs.task == t].iloc[-1]))}"
+                for t in narrative.TASKS if (runs.task == t).any()]
+        rows.append(f'<p class="muted" style="margin:6px 0 0;font-size:11.5px">Last run cost: {"; ".join(last)}</p>')
+    return _card("narrative", "Narrative", note, "".join(rows))
 
 
 # ------------------------------------------------------------------------------ the page
@@ -384,8 +408,10 @@ def build(asof: str | None = None, verbose: bool = True) -> Path:
             cards[key], got[key] = _unavailable(key, key.title(), f"Not available ({ui.esc(type(exc).__name__)})."), []
     names = got["shortlist"] + got["watchlists"]
     short = set(got["shortlist"])
+    # a current page shows the newest view, a weekend one included; an older page stays point in time
+    view_date = str(datetime.now().date()) if asof >= last_closed else asof
     for key, fn in (("market", lambda: _market(asof)), ("week", lambda: _this_week(asof, names, built, short)),
-                    ("narrative", lambda: _narrative(asof))):
+                    ("narrative", lambda: _narrative(asof, view_date))):
         try:
             cards[key] = fn()
         except Exception as exc:                                 # noqa: BLE001

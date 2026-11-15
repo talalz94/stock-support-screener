@@ -124,8 +124,10 @@ PAGE = config.REPORTS / "shortlist"
 LIMIT_UP, LIMIT_DAYS, HOLD = 0.005, 3, 10
 # Item 1's rule chosen on TRAIN dates once the 30-minute bars were in (2026-11-08): a buy limit at
 # the level + 0.5% for 3 sessions, target +3% and stop -8% from the fill, out after 10 sessions.
-# 2022-26 with fills that must trade 0.2% through the limit: +0.36% a trade (t 2.42), positive in
-# 8 of 9 years. +5% / -5% is the symmetric alternative (+0.38%, t 2.37).
+# 2022-26 with fills that must trade 0.2% through the limit: +0.34% a trade (t 2.25), positive in
+# 8 of 9 years. +5% / -5% is the symmetric alternative (+0.35%, t 2.19). Measured reproducibly by
+# bounce_filters_study.py (2026-11-15); the one-off script of 11-08 had said +0.36% (t 2.42) and
+# +0.38% (t 2.37).
 TGT, STP = 0.03, 0.08
 TGT_ALT, STP_ALT = 0.05, 0.05
 COST = 0.001
@@ -736,10 +738,10 @@ def render(asof: str) -> Path:
         'of +3% and a stop of &minus;8% from the fill, out after 10 sessions. Chosen on 2018-2021 dates with '
         '30-minute bars.</dd>'
         '<dt>What it measured</dt><dd>On 2022-2026, counting only fills that traded 0.2% through the limit, with '
-        'the fill day in 30-minute order: +0.36% a trade after costs (t 2.42), positive in 8 of 9 years. About '
+        'the fill day in 30-minute order: +0.34% a trade after costs (t 2.25), positive in 8 of 9 years. About '
         '54% of orders fill. The stop is wider than the target, so it wins often and loses more when it '
         'loses.</dd>'
-        '<dt>The alternative</dt><dd>+5% / &minus;5% did about the same: +0.38% a trade (t 2.37).</dd>'
+        '<dt>The alternative</dt><dd>+5% / &minus;5% did about the same: +0.35% a trade (t 2.19).</dd>'
         '<dt>When to buy</dt><dd>Buying at the next open earned about nothing after costs, and buying an hour '
         'after the open made no difference: the limit order at the level is what measured.</dd>'
         '<dt>The rankings</dt><dd>The first one shown is your choice on the <a href="../settings.html#shortlist">'

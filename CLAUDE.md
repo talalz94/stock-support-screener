@@ -42,6 +42,9 @@ is a standing request, not an optional courtesy.
 - **A result needs a baseline:** compare a new rule with a plain rule on the same split (TRAIN
   before 2022-01-01, TEST after; "kept" means both TRAIN halves and TEST agree in sign and TEST
   |t| >= 2). A pass in a kind test span is not an edge.
+- **Cut at the signal.** A filter's thirds (or any rank) are cut among every candidate on the
+  signal date, never among the trades that filled: a limit order's fill is not known when it is
+  placed. Cutting among the fills alone is what made `dist` look KEPT (2026-11-15).
 - **Provider values first** for the ratios a page displays today; our own arithmetic only where
   no provider publishes. Never write a provider's current value into a historical session.
 - **Fundamentals:** several XBRL tags map to one concept with different numbers. Dump
