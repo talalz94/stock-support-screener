@@ -1405,6 +1405,7 @@ NAV_JS = r"""<script>
     function about(s){ var t = total(s); return t ? 'about ' + Math.max(1, Math.round(t / 60)) + ' min' : 'a few minutes'; }
     function progress(s){
       if (s.done) return 1;
+      if (s.waiting) { var w = PROG[s.tk]; return w ? w.p : 0; }   // queued behind another build: no progress yet
       var exp = s.expected || [], tot = total(s) || 1, st = s.stage || 0, base = 0, i;
       for (i = 0; i < st && i < exp.length; i++) base += exp[i];
       var cur = exp[st] || 1, key = (s.tk || '') + '@' + (s.started || '');
@@ -1463,7 +1464,10 @@ NAV_JS = r"""<script>
         x = el(tk);
         var p = progress(s), meta = Math.round(p * 100) + '% · ' + mmss(s.elapsed) + ' elapsed';
         meta = fails > 2 ? 'the server is not answering · ' + meta : meta + ' · usually ' + about(s);
-        set(x, '', (s.stages || [])[s.stage || 0] || 'Building', meta, null);
+        var why = (getB()[tk] || {}).why;
+        if (why === 'layout') meta = 'Newer page layout · ' + meta;
+        if (s.waiting) meta = 'Queued: one build runs at a time · ' + mmss(s.elapsed) + ' waiting';
+        set(x, '', s.waiting ? 'waiting for another build' : ((s.stages || [])[s.stage || 0] || 'Building'), meta, null);
         x.querySelector('.scr-bar i').style.width = (p * 100).toFixed(1) + '%';
         var b = getB();
         if (b[tk] && b[tk].state === 'building') { b[tk].p = p; b[tk].k = PROG[tk].k; b[tk].last = s; setB(b); }
@@ -1526,15 +1530,17 @@ NAV_JS = r"""<script>
         }).then(next, next);
       });
     }
-    function track(tk){
+    function track(tk, why){
       var m = PROG[tk] || {}, b = getB();
-      if (!b[tk] || b[tk].state !== 'building') { b[tk] = {state: 'building', at: Date.now(), p: m.p || 0, k: m.k || ''}; setB(b); }
+      if (!b[tk] || b[tk].state !== 'building') {
+        b[tk] = {state: 'building', at: Date.now(), p: m.p || 0, k: m.k || '', why: why || ''}; setB(b);
+      }
       el(tk); schedule(50);
     }
-    function start(tk){
+    function start(tk, why){
       return api('/api/build?tk=' + encodeURIComponent(tk), true).then(function(s){
         LIVE = true;
-        put(tk, {state: 'building', at: Date.now(), p: 0, k: ''});
+        put(tk, {state: 'building', at: Date.now(), p: 0, k: '', why: why || ''});
         show(tk, s); schedule(1500); return s;
       }, function(err){
         set(el(tk), 'err', 'could not start', 'The local server did not answer. Start it with: python serve.py --open', null);
@@ -1617,6 +1623,24 @@ NAV_JS = r"""<script>
         btn.hidden = false;
         btn.onclick = function(){ start(btn.getAttribute('data-scr-refresh')).catch(function(){}); };
       });
+      // A stock page drawn by older code or another saved layout than the files on disk now
+      // (layout_stamp.py, 2026-11-15) rebuilds itself in the background; the corner card offers
+      // Reload when it is done. One already rebuilt on disk since this tab opened just offers Reload.
+      var me = /^\/stock\/([A-Za-z0-9.\-]+)\.html$/.exec(location.pathname);
+      if (me && me[1].toLowerCase() !== 'index') {
+        var tk0 = me[1].toUpperCase(), fm = document.querySelector('meta[name="scr-format"]');
+        var mine = fm ? fm.getAttribute('content') : '';
+        api('/api/stock?tk=' + encodeURIComponent(tk0)).then(function(s){
+          if (!s.layout || !s.built || s.layout === mine) return;
+          if (s.page_layout === s.layout) {
+            set(el(tk0, true), 'ok', 'has a newer version', 'Rebuilt with the latest page layout since this tab opened',
+                {text: 'Reload', href: location.pathname + location.search});
+            return;
+          }
+          if (s.building) { track(tk0, 'layout'); return; }
+          start(tk0, 'layout').catch(function(){});
+        }, function(){});
+      }
       schedule(0);
     }, function(){});
   })();
@@ -2006,8 +2030,9 @@ CHART_JS = r"""
 
 def page(title: str, body: str, subtitle: str = "", active: str = "",
          depth: int = 0, nav_extra: str = "", head: str = "",
-         script: str = "") -> str:
-    """The whole document. Generators supply body content only."""
+         script: str = "", meta: str = "") -> str:
+    """The whole document. Generators supply body content only. `meta` goes at the very top of
+    <head>, where a reader of the first few KB finds it (stock pages' layout stamp, layout_stamp.py)."""
     heading = f"<h1>{title}</h1>" if title else ""
     sub = f'<div class="sub">{subtitle}</div>' if subtitle else ""
     # SCROLL_SYNC_JS goes on every page rather than being opted into: it is a
@@ -2015,7 +2040,7 @@ def page(title: str, body: str, subtitle: str = "", active: str = "",
     # forgets to opt in is the one with the unreachable table.
     combined = SCROLL_SYNC_JS + CHART_JS + (script or "")
     js = f"<script>{combined}</script>"
-    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">{EARLY_JS}
+    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">{EARLY_JS}{meta}
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title) or "Screener"}</title><style>{CSS}</style>{head}</head>
 <body>{nav(active, depth, nav_extra)}<div class="wrap">

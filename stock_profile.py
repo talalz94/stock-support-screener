@@ -48,10 +48,15 @@ import config
 config.safe_console()
 
 import calendar_us                                               # noqa: E402
+import layout_stamp                                              # noqa: E402
 import settings as SETTINGS                                      # noqa: E402
 import ui                                                        # noqa: E402
 
 OUT_DIR = config.REPORTS / "stock"
+# The code this process draws pages with (layout_stamp.py, 2026-11-15). A server left running can
+# lag the files on disk; its pages must carry the stamp of the code that built them, so the page,
+# the server and the `profiles_layout` step can tell it is stale.
+LOADED_CODE = layout_stamp.code_stamp()
 
 # "Every period the store has." `fundamentals.history` takes a count, so this is
 # a ceiling high enough that no real filer reaches it (the deepest today is 75).
@@ -1745,7 +1750,7 @@ def build(ticker: str, verbose: bool = True,
 
     html = ui.page(f"{ticker} \u00b7 {m.get('name')}", body, subtitle=sub,
                    active="profiles", depth=1, head=extra_css, script=js,
-                   nav_extra=picker)
+                   nav_extra=picker, meta=layout_stamp.meta(LOADED_CODE))
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     name = f"{ticker}.html" if session is None else f"{ticker}_{session}.html"

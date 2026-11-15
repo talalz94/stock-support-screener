@@ -68,6 +68,9 @@ is a standing request, not an optional courtesy.
 - Pages are static files: a menu change reaches pages already written through `python ui.py
   --renav` (the nightly `dashboard` step runs it too). A style fix inside a page's own CSS
   reaches them only through `ui._LEGACY_CSS`, which the same command applies.
+- Stock pages carry a layout stamp (`layout_stamp.py`): ANY edit to `stock_profile.py`, `ui.py`,
+  `settings.py` or the saved layout marks every stock page stale, and the `profiles_layout` step
+  redraws them all on the schedule's next pass (~6 min for ~170 pages). Expected, not a fault.
 - Until the nightly `bars` step adds yesterday's session, every `sectors.load_wide()` call rebuilds
   the 85 MB wide cache (~3.5 min): its check wants the last closed session. Out of hours, a test
   harness that reads `data/_wide_1d.parquet` directly avoids it.

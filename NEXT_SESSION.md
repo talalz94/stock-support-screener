@@ -176,6 +176,28 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-15 — STOCK PAGES CARRY A LAYOUT STAMP; AN OLD ONE REDRAWS ITSELF
+
+**Asked:** "schedule a job that quietly rebuilds stock profiles acc to the new updates, or an auto feature that rebuilds or prompts/pop-up to rebuild if i open a stock profile page if theres been an update? because for so many stock im seeing old format of those profile pages and this might be a recurring issue."
+
+**Measured first:** all 173 current stock pages on disk had been redrawn by the nightly `profiles` step (2026-11-14 22:22) and all carried the 2026-11-11 layout; no dated snapshots exist. The old format showed in two gaps: from a change until the next nightly redraw, and from a local server left running, which kept building with the code it had loaded when it started.
+
+**Built:**
+- `layout_stamp.py`: a 12-hex stamp of `stock_profile.py`, `ui.py`, `settings.py` and the saved layout `data/_profile.json`. Every stock page carries it in `<meta name="scr-format">` (the new `ui.page(meta=...)`, top of `<head>`), written with the code the building process loaded (`stock_profile.LOADED_CODE`).
+- Step `profiles_layout` (the 39th, after `profiles`): due on ANY pass of the schedule that finds a stale page (its `due_fn` reads each page's first 8 KB), it redraws only those through `_rebuild_profiles`, the nightly step's own priming and build loop moved into a helper. First run: 173 of 173 redrawn in 1,496 s on a pass of its own (371 s inside the nightly run, with warm caches); budget 2,400 s. After a nightly `profiles` it is not due.
+- `serve.py`: builds run one at a time (`_RUN_LOCK`; a queued one says "waiting for another build"); before each build the page code is reloaded when the files changed since the server loaded them (`_fresh_stock_profile`); `/api/stock` reports `layout` (a page built now) and `page_layout` (the page on disk); a client that leaves mid-reply no longer prints a traceback (`_Server`).
+- On open (`ui.NAV_JS`): a stock page served by the local server compares its own stamp. Stale: it redraws itself in the background ("Newer page layout" in the corner card, then "is refreshed · Reload"). Already redrawn on disk since the tab opened: the card just offers Reload.
+
+**Checked:** AN given an old stamp and opened: it redrew itself (1:45), the card offered Reload, the reloaded page carried the current stamp and stayed quiet. A second build (KO) asked for meanwhile showed "waiting for another build" at 0% and ran when AN finished. Selftests: layout_stamp, serve (3 runs, with a simulated stale-code reload), ui, settings, settings_page, stock_profile; `status.py --pages` clean on 487 pages; every inline script parses.
+
+**Note:** ANY edit to those three files or the saved layout marks every stock page stale (whole files are hashed on purpose); the next pass redraws them, and an opened page redraws itself first. The user's own server needs one restart to get this (`python serve.py --open`).
+
+**Still pending:**
+- The narrative task's first run was due Saturday 2026-11-14: check its answer file and measure its cost.
+- The shortlist's forward record (13 sessions per entry) and the 2026-11-23 review of the 10-23 list.
+- The insider forward record: 20-session results from mid-December.
+- Offered: interim quarters from a provider for the 209 year-end-only names; recording the sector breadth tercile in the shortlist ledger.
+
 ## State at 2026-11-12 — SECTOR ROTATION MEASURED: SHORT MOMENTUM, NO SEQUENCE, NO SEASON; A ROTATION PAGE
 
 **Asked:** "is there sector/industry/sub-industry wise money rotation, like we say AI/Tech stocks boom and then we saw bio/health stocks boom, is there a trend or seasonality or chart that shows this? so there may be some edge there to exploit certain good/short-listed companies at the right time?"
@@ -5260,74 +5282,75 @@ Do the rebuild and the re-measure together, or not at all.
 ## Costs (generated)
 
 <!-- GENERATED:costs -->
-_Generated 2026-11-11 07:06 — do not edit by hand._
+_Generated 2026-11-15 01:44 — do not edit by hand._
 
 | step | cadence | last | median | slowest (last 5) | budget | runs |
 |---|---|---:|---:|---:|---:|---:|
-| `universe` | daily | 9s | 8s | 1.9 min | 2.0 min | 69 |
-| `bars` | daily | 1.7 min | 55s | 2.2 min | 10.0 min | 69 |
-| `macro` | daily | 66s | 1.6 min | 2.0 min | 15.0 min | 69 |
-| `news` | daily | 17s | 5s | 31s | 10.0 min | 69 |
-| `news_events` | daily | 4.0 min | 4.0 min | 531.0 min ⚠ | 30.0 min | 11 |
-| `senti_cache` | daily | 9s | 3s | 12s | 10.0 min | 69 |
-| `sentiment` | daily | 23s | 20s | 40s | 15.0 min | 70 |
-| `bounce` | daily | 54s | 42s | 1.9 min | 15.0 min | 70 |
-| `zones` | daily | 86s | 1.6 min | 2.5 min | 30.0 min | 53 |
-| `shortvol` | daily | 5s | 4s | 11s | 10.0 min | 67 |
-| `hype` | daily | 1.8 min | 2.0 min | 2.7 min | 120.0 min | 70 |
-| `provider` | daily | 65.1 min | 65.0 min | 71.4 min | 120.0 min | 62 |
-| `sec_facts` | quarterly | 6s | 5s | 26s | 60.0 min | 16 |
-| `sec_gap` | weekly | 2.9 min | 5.2 min | 12.1 min | 20.0 min | 15 |
-| `sec_edgar` | daily | 4.6 min | 48s | 8.2 min | 30.0 min | 31 |
-| `insider` | daily | 3.5 min | 2.2 min | 3.5 min | 30.0 min | 16 |
-| `congress` | daily | 15s | 10s | 18s | 30.0 min | 16 |
-| `fundamental` | daily | 3.8 min | 3.7 min | 7.8 min | 180.0 min | 78 |
-| `events` | weekly | 8.0 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 16 |
-| `leaderboard` | weekly | 36.6 min | 40.0 min | 91.0 min ⚠ | 90.0 min | 17 |
-| `dip` | daily | 14s | 17s | 17s | 15.0 min | 78 |
-| `insider_score` | daily | 5.6 min | 5.9 min | 9.7 min | 30.0 min | 12 |
-| `combo` | daily | 20s | 19s | 30s | 15.0 min | 77 |
-| `candidates` | daily | 3s | 5s | 8s | 5.0 min | 35 |
-| `floor` | daily | 58s | 54s | 2.5 min | 15.0 min | 29 |
-| `insider_pages` | daily | 5s | 5s | 6s | 15.0 min | 12 |
-| `sectors` | daily | 80s | 2.1 min | 2.3 min | 30.0 min | 28 |
-| `narrative` | daily | 3s | 4s | 10s | 10.0 min | 3 |
-| `shortlist` | daily | 56s | 81s | 2.3 min | 15.0 min | 3 |
-| `validate` | daily | 11.2 min | 7.1 min | 13.1 min | 60.0 min | 64 |
-| `explore` | daily | 11s | 9s | 15s | 5.0 min | 86 |
-| `snapshots` | daily | 11s | 4s | 16s | 5.0 min | 100 |
-| `profiles` | daily | 15.2 min | 21.0 min | 15.2 min ⚠ | 15.0 min | 82 |
-| `watchlists` | daily | 4s | 3s | 4s | 10.0 min | 8 |
-| `retention` | daily | 0s | 0s | 0s | 5.0 min | 90 |
-| `dashboard` | daily | 15s | 0s | 15s | 2.0 min | 93 |
-| `docs` | daily | 2s | 0s | 2s | 5.0 min | 111 |
+| `universe` | daily | 13s | 8s | 16s | 2.0 min | 72 |
+| `bars` | daily | 733.0 min | 56s | 733.0 min ⚠ | 10.0 min | 72 |
+| `macro` | daily | 2.9 min | 1.6 min | 2.9 min | 15.0 min | 72 |
+| `news` | daily | 17s | 5s | 19s | 10.0 min | 72 |
+| `news_events` | daily | 4.3 min | 4.0 min | 4.9 min | 30.0 min | 15 |
+| `senti_cache` | daily | 18s | 3s | 18s | 10.0 min | 72 |
+| `sentiment` | daily | 34s | 20s | 34s | 15.0 min | 73 |
+| `bounce` | daily | 57s | 46s | 66s | 15.0 min | 73 |
+| `zones` | daily | 1.7 min | 1.6 min | 1.9 min | 30.0 min | 56 |
+| `shortvol` | daily | 5s | 4s | 5s | 10.0 min | 70 |
+| `hype` | daily | 2.3 min | 2.0 min | 2.3 min | 120.0 min | 73 |
+| `provider` | daily | 63.5 min | 64.9 min | 71.4 min | 120.0 min | 65 |
+| `sec_facts` | quarterly | 4s | 5s | 7s | 60.0 min | 17 |
+| `sec_gap` | weekly | 2.0 min | 4.6 min | 12.1 min | 20.0 min | 16 |
+| `sec_edgar` | daily | 23s | 48s | 7.4 min | 30.0 min | 35 |
+| `insider` | daily | 76s | 2.2 min | 5.0 min | 30.0 min | 20 |
+| `congress` | daily | 4s | 10s | 73s | 30.0 min | 20 |
+| `fundamental` | daily | 2.1 min | 3.7 min | 7.8 min | 180.0 min | 81 |
+| `events` | weekly | 9.6 min | 10.6 min | 590.9 min ⚠ | 30.0 min | 17 |
+| `leaderboard` | weekly | 53.9 min | 40.7 min | 91.0 min ⚠ | 90.0 min | 18 |
+| `dip` | daily | 15s | 17s | 36s | 15.0 min | 81 |
+| `insider_score` | daily | 3.2 min | 4.8 min | 9.7 min | 30.0 min | 15 |
+| `combo` | daily | 17s | 18s | 30s | 15.0 min | 80 |
+| `candidates` | daily | 3s | 4s | 8s | 5.0 min | 38 |
+| `floor` | daily | 35s | 52s | 2.5 min | 15.0 min | 32 |
+| `insider_track` | daily | 5s | 3s | 8s | 20.0 min | 4 |
+| `insider_pages` | daily | 4s | 5s | 6s | 15.0 min | 15 |
+| `sectors` | daily | 82s | 1.6 min | 1.5 min | 30.0 min | 31 |
+| `narrative` | daily | 2s | 3s | 4s | 10.0 min | 6 |
+| `shortlist` | daily | 33s | 52s | 81s | 15.0 min | 6 |
+| `validate` | daily | 7.0 min | 7.1 min | 12.5 min | 60.0 min | 67 |
+| `explore` | daily | 8s | 9s | 15s | 5.0 min | 89 |
+| `snapshots` | daily | 0s | 5s | 11s | 5.0 min | 104 |
+| `profiles` | daily | 6.2 min | 20.4 min | 15.2 min ⚠ | 15.0 min | 85 |
+| `watchlists` | daily | 2s | 3s | 4s | 10.0 min | 11 |
+| `retention` | daily | 0s | 0s | 0s | 5.0 min | 94 |
+| `dashboard` | daily | 12s | 0s | 22s | 2.0 min | 96 |
+| `docs` | daily | 2s | 0s | 3s | 5.0 min | 115 |
 
-**Daily total ≈ 122.9 min.** Weekly adds 55.8 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
+**Daily total ≈ 120.3 min.** Weekly adds 55.9 min on top. ⚠ marks a step whose slowest run of the last 5 exceeded its budget.
 <!-- /GENERATED:costs -->
 
 ## Stores (generated)
 
 <!-- GENERATED:stores -->
-_Generated 2026-11-11 07:06 — do not edit by hand._
+_Generated 2026-11-15 01:44 — do not edit by hand._
 
 | store | files | MB | span |
 |---|---:|---:|---|
-| bars 1d | 122 | 250.1 | 2016-10 → 2026-11 |
+| bars 1d | 122 | 250.6 | 2016-10 → 2026-11 |
 | bars 1h | 5 | 1.0 | 2026-07 → 2026-11 |
 | bars ETF | 125 | 2.9 | 2016-07 → 2026-11 |
-| news | 124 | 177.6 | 2016-08 → 2026-11 |
-| sentiment cache | 124 | 12.2 | 2016-08 → 2026-11 |
-| scores | 122 | 341.5 | 2016-10 → 2026-11 |
+| news | 124 | 178.5 | 2016-08 → 2026-11 |
+| sentiment cache | 124 | 12.3 | 2016-08 → 2026-11 |
+| scores | 122 | 345.5 | 2016-10 → 2026-11 |
 | fundamentals | 70 | 345.4 | 2009q2 → 2026q3 |
-| short volume | 76 | 57.4 | 2020-08 → 2026-11 |
-| flags | 72 | 6.1 | 2026-07-31 → 2026-11-10 |
-| rejects | 22 | 8.3 | 2026-10-12 → 2026-11-10 |
-| zones | 53 | 29.8 | 2026-08-27 → 2026-11-10 |
+| short volume | 76 | 57.5 | 2020-08 → 2026-11 |
+| flags | 75 | 6.4 | 2026-07-31 → 2026-11-13 |
+| rejects | 21 | 7.9 | 2026-10-16 → 2026-11-13 |
+| zones | 56 | 31.5 | 2026-08-27 → 2026-11-13 |
 | fundamentals (companyfacts) | 131 | 75.0 | 1980q3 → 2028q3 |
-| fundamentals (EDGAR filings) | 24 | 2.2 | 2009q4 → 2026q4 |
-| loose (macro, universe, jobs, study) | 48 | 311.9 | — |
+| fundamentals (EDGAR filings) | 25 | 2.7 | 2009q4 → 2026q4 |
+| loose (macro, universe, jobs, study) | 48 | 312.0 | — |
 
-**`data/` total ≈ 1,621 MB.** `reports/` is a further 158 MB across 462 pages.
+**`data/` total ≈ 1,629 MB.** `reports/` is a further 182 MB across 487 pages.
 
 Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamentals **11.6**, scores **3.2**, short volume **12.1**.
 <!-- /GENERATED:stores -->
@@ -5335,22 +5358,22 @@ Measured bytes per stored row (zstd-9): bars **25.0**, news **91.8**, fundamenta
 ## Modules (generated)
 
 <!-- GENERATED:modules -->
-_Generated 2026-11-11 07:06 — do not edit by hand._
+_Generated 2026-11-15 01:44 — do not edit by hand._
 
 | module | metrics | stored sessions | span |
 |---|---:|---:|---|
-| `sentiment` | 26 | 397 | 2016-10-17 → 2026-11-10 |
-| `fundamental` | 61 | 254 | 2016-10-25 → 2026-11-10 |
-| `hype` | 20 | 373 | 2016-10-25 → 2026-11-10 |
-| `dip` | 10 | 299 | 2016-10-17 → 2026-11-10 |
-| `insider` | 8 | 215 | 2016-10-14 → 2026-11-10 |
-| `combo` | 16 | 255 | 2016-11-04 → 2026-11-10 |
+| `sentiment` | 26 | 400 | 2016-10-17 → 2026-11-13 |
+| `fundamental` | 61 | 257 | 2016-10-25 → 2026-11-13 |
+| `hype` | 20 | 376 | 2016-10-25 → 2026-11-13 |
+| `dip` | 10 | 302 | 2016-10-17 → 2026-11-13 |
+| `insider` | 8 | 218 | 2016-10-14 → 2026-11-13 |
+| `combo` | 16 | 258 | 2016-11-04 → 2026-11-13 |
 <!-- /GENERATED:modules -->
 
 ## Study (generated)
 
 <!-- GENERATED:study -->
-_Generated 2026-11-11 07:06 — do not edit by hand._
+_Generated 2026-11-15 01:44 — do not edit by hand._
 
 1,984 cells measured across 123 metrics, horizons [1, 5, 20, 60], buckets ['all', 'large', 'mid', 'small'].
 

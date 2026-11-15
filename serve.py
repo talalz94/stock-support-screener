@@ -216,8 +216,40 @@ def _stage(tk: str, i: int) -> None:
             st["stage"], st["stage_t"] = i, time.time()
 
 
+# ONE BUILD AT A TIME (2026-11-15). Builds compete for the same CPU and caches, and the code reload
+# below must never land in the middle of another build. A build waiting its turn says so (`waiting`).
+_RUN_LOCK = threading.Lock()
+
+
+def _fresh_stock_profile():
+    """stock_profile as the files on disk are now. A server left running for days kept writing
+    pages with the code it started with -- the old layout over pages the nightly run had just
+    redrawn. When the page code changed on disk (layout_stamp.code_stamp), settings, ui and
+    stock_profile are reloaded first. Called only under _RUN_LOCK."""
+    import importlib
+
+    import layout_stamp
+    import settings
+    import stock_profile
+    import ui
+    if layout_stamp.code_stamp() != stock_profile.LOADED_CODE:
+        for m in (settings, ui, stock_profile):
+            importlib.reload(m)
+        _log(f"page code changed on disk: reloaded settings, ui and stock_profile ({stock_profile.LOADED_CODE})")
+    return stock_profile
+
+
 def _build_worker(tk: str) -> None:
     """Prime, then build one profile, reporting each stage as it starts."""
+    with _RUN_LOCK:
+        with _BUILDS_LOCK:
+            st = _BUILDS.get(tk)
+            if st is not None:
+                st["waiting"] = False
+        _build_one(tk)
+
+
+def _build_one(tk: str) -> None:
     err, secs = None, []
     t0 = time.time()
 
@@ -230,7 +262,7 @@ def _build_worker(tk: str) -> None:
         _stage(tk, i)
 
     try:
-        import stock_profile
+        stock_profile = _fresh_stock_profile()
         one, asof = [tk], _asof_now()
         # PRIME FIRST, exactly as the nightly step does, or one build pays the full cold cost of
         # re-scanning every score partition per module (measured 252s once).
@@ -273,7 +305,8 @@ def _start_build(tk: str) -> dict:
         if st is not None and not st["done"]:
             return st                       # already building; don't restart
         now = time.time()
-        _BUILDS[tk] = {"started": now, "done": False, "error": None, "stage": 0, "stage_t": now}
+        _BUILDS[tk] = {"started": now, "done": False, "error": None, "stage": 0, "stage_t": now,
+                       "waiting": _RUN_LOCK.locked()}
     _log(f"building profile for {tk} on demand (background)")
     threading.Thread(target=_build_worker, args=(tk,), daemon=True).start()
     return _BUILDS[tk]
@@ -297,7 +330,9 @@ def _status(tk: str) -> dict:
     """Everything a page needs to show one stock's page and build: is it built and when, and the
     build's stage, elapsed time and measured stage durations. `known` is False when this server
     has no record of a build for `tk` (none was started here, or the server was restarted since),
-    so a page following a build can tell "finished" from "lost with the old server"."""
+    so a page following a build can tell "finished" from "lost with the old server". `layout` is
+    the stamp a page built now would carry and `page_layout` the one the page on disk carries
+    (layout_stamp.py): an open page whose own stamp differs from `layout` is stale."""
     page = config.REPORTS / "stock" / f"{tk}.html"
     with _BUILDS_LOCK:
         st = dict(_BUILDS.get(tk) or {})
@@ -306,7 +341,13 @@ def _status(tk: str) -> dict:
         mtime = page.stat().st_mtime
     except OSError:
         mtime = None
-    return {"tk": tk, "built": mtime is not None,
+    try:
+        import layout_stamp
+        layout, page_layout = layout_stamp.stamp(), (layout_stamp.page_stamp(page) if mtime else None)
+    except Exception:                                            # noqa: BLE001
+        layout = page_layout = None
+    return {"tk": tk, "built": mtime is not None, "layout": layout, "page_layout": page_layout,
+            "waiting": bool(st.get("waiting")) and not st.get("done"),
             "built_at": datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M") if mtime else None,
             "built_ts": round(mtime, 1) if mtime else None,
             "known": bool(st), "started": st.get("started"), "ended": st.get("ended"),
@@ -673,6 +714,17 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
 
+class _Server(ThreadingHTTPServer):
+    """A client that goes away mid-reply (a page navigating on, a ping racing the stop button)
+    is normal: no traceback for it, as Handler._write already does for a body (2026-11-15: one
+    printed during the stop test, looking like a crash)."""
+
+    def handle_error(self, request, client_address):
+        if isinstance(sys.exc_info()[1], (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def selftest(verbose: bool = True) -> None:
     root = config.REPORTS.resolve()
     # traversal must not escape reports/
@@ -700,12 +752,22 @@ def selftest(verbose: bool = True) -> None:
     assert all(x > 0 for x in _expected()), _expected()
     s = _status("ZZZZQ")
     assert not s["known"] and not s["building"] and not s["done"] and s["started"] is None, s
+    # The layout stamps an open page compares with (layout_stamp.py), and the one-at-a-time lock.
+    import layout_stamp
+    assert s["layout"] == layout_stamp.stamp() and s["page_layout"] is None and s["waiting"] is False, s
+    assert not _RUN_LOCK.locked(), "a build lock left held"
+    sp = _fresh_stock_profile()
+    assert sp.LOADED_CODE == layout_stamp.code_stamp(), "the server would build with code older than the files"
+    # A server whose page code is older than the files (simulated): the next build reloads it.
+    sp.LOADED_CODE = "0" * 12
+    sp = _fresh_stock_profile()
+    assert sp.LOADED_CODE == layout_stamp.code_stamp(), "stale page code was not reloaded before a build"
 
     # The endpoints, end to end, on a throwaway port: ping, a bad ticker, a POST without the header.
     import urllib.error
     import urllib.request
     global _SERVER
-    srv = ThreadingHTTPServer((HOST, 0), Handler)
+    srv = _Server((HOST, 0), Handler)
     port = srv.server_address[1]
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://{HOST}:{port}"
@@ -747,7 +809,8 @@ def selftest(verbose: bool = True) -> None:
         srv.server_close()
     if verbose:
         print(f"  [serve] traversal blocked, unknown steps rejected, bound to {HOST} only; "
-              "ticker filter, build status, ping and the guarded stop endpoint checked end to end")
+              "ticker filter, build status, ping and the guarded stop endpoint checked end to end; "
+              "layout stamps reported, stale page code reloaded before a build")
 
 
 def main() -> int:
@@ -801,7 +864,7 @@ def main() -> int:
 
     url = f"http://{HOST}:{a.port}/index.html"
     global _SERVER
-    srv = _SERVER = ThreadingHTTPServer((HOST, a.port), Handler)
+    srv = _SERVER = _Server((HOST, a.port), Handler)
     _log(f"serving {config.REPORTS} at {url}")
     _log("buttons on the Status page (system.html) are live while this runs. Ctrl-C to stop.")
     if a.idle_exit:

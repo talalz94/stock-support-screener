@@ -900,43 +900,11 @@ def _step_snapshots(asof: str) -> tuple[int, str]:
                    f"{tail}")
 
 
-def _step_profiles(asof: str) -> tuple[int, str]:
-    """Profile pages for today's bounce flags only -- building all 3,472 would
-    cost minutes and write ~90 MB of HTML nobody asked for. Any other ticker is
-    one `python stock_profile.py TICKER` away."""
-    import pandas as pd
+def _rebuild_profiles(tk: list[str], asof: str) -> tuple[int, list[str]]:
+    """Prime the caches once for a batch of tickers, build each page, rewrite the index.
+    Shared by `profiles` (the nightly set) and `profiles_layout` (pages drawn by older code or
+    another saved layout); returns (pages built, the failures named)."""
     import stock_profile
-    f = config.FLAGS / f"{asof}.parquet"
-    if not f.exists():
-        return 0, "no flags file for this session"
-    tk = list(dict.fromkeys(pd.read_parquet(f)["ticker"].astype(str)))
-    # ...plus the shortlist's names, which runs earlier for this reason (2026-11-09). Pages
-    # built only for the shortlist are dropped 20 sessions after the name leaves it -- see
-    # stock_profile.listed_pages -- BEFORE the on-disk scan below, so they are not rebuilt.
-    listed, removed, listed_err = [], [], ""
-    try:
-        listed, removed = stock_profile.listed_pages(asof, tk)
-        tk = list(dict.fromkeys(tk + listed))
-    except Exception as exc:                                     # noqa: BLE001
-        listed_err = f"; shortlist names unavailable ({type(exc).__name__})"
-    # ...PLUS every page already on disk.
-    #
-    # Only today's flags were rebuilt, so a page written on a day its ticker
-    # happened to be flagged then sat there ageing with nothing to say so. AMD
-    # was served two days stale: it showed neither the recovered 2026 quarters
-    # nor the derived fiscal Q4, and looked exactly like a page whose bugs had
-    # never been fixed. A stale page is indistinguishable from a current one,
-    # which makes it worse than an absent one.
-    #
-    # This does NOT resurrect the "build all 3,472" cost the docstring rejects
-    # -- only pages that already exist are refreshed, 47 of them today, and the
-    # history cache below is primed for the whole batch.
-    try:
-        tk += [p.stem for p in stock_profile.OUT_DIR.glob("*.html")
-               if "_" not in p.stem and p.stem not in ("index",)]
-        tk = list(dict.fromkeys(tk))
-    except Exception:                                            # noqa: BLE001
-        pass
     # Prime the history cache ONCE for the whole batch. Without this each
     # profile re-scans every score partition -- measured 22s per ticker per
     # module, i.e. 45 min for 30 flags against a 900s budget.
@@ -987,6 +955,47 @@ def _step_profiles(asof: str) -> tuple[int, str]:
         stock_profile.write_index(verbose=False)
     except Exception:                                        # noqa: BLE001
         pass
+    return ok, failed
+
+
+def _step_profiles(asof: str) -> tuple[int, str]:
+    """Profile pages for today's bounce flags only -- building all 3,472 would
+    cost minutes and write ~90 MB of HTML nobody asked for. Any other ticker is
+    one `python stock_profile.py TICKER` away."""
+    import pandas as pd
+    import stock_profile
+    f = config.FLAGS / f"{asof}.parquet"
+    if not f.exists():
+        return 0, "no flags file for this session"
+    tk = list(dict.fromkeys(pd.read_parquet(f)["ticker"].astype(str)))
+    # ...plus the shortlist's names, which runs earlier for this reason (2026-11-09). Pages
+    # built only for the shortlist are dropped 20 sessions after the name leaves it -- see
+    # stock_profile.listed_pages -- BEFORE the on-disk scan below, so they are not rebuilt.
+    listed, removed, listed_err = [], [], ""
+    try:
+        listed, removed = stock_profile.listed_pages(asof, tk)
+        tk = list(dict.fromkeys(tk + listed))
+    except Exception as exc:                                     # noqa: BLE001
+        listed_err = f"; shortlist names unavailable ({type(exc).__name__})"
+    # ...PLUS every page already on disk.
+    #
+    # Only today's flags were rebuilt, so a page written on a day its ticker
+    # happened to be flagged then sat there ageing with nothing to say so. AMD
+    # was served two days stale: it showed neither the recovered 2026 quarters
+    # nor the derived fiscal Q4, and looked exactly like a page whose bugs had
+    # never been fixed. A stale page is indistinguishable from a current one,
+    # which makes it worse than an absent one.
+    #
+    # This does NOT resurrect the "build all 3,472" cost the docstring rejects
+    # -- only pages that already exist are refreshed, 47 of them today, and the
+    # history cache below is primed for the whole batch.
+    try:
+        tk += [p.stem for p in stock_profile.OUT_DIR.glob("*.html")
+               if "_" not in p.stem and p.stem not in ("index",)]
+        tk = list(dict.fromkeys(tk))
+    except Exception:                                            # noqa: BLE001
+        pass
+    ok, failed = _rebuild_profiles(tk, asof)
     detail = f"{ok} of {len(tk)} profile page(s)"
     if listed:
         detail += f", {len(listed)} for the shortlist"
@@ -997,6 +1006,37 @@ def _step_profiles(asof: str) -> tuple[int, str]:
         detail += f"; FAILED: {', '.join(failed[:8])}"
         if len(failed) > 8:
             detail += f" +{len(failed) - 8} more"
+    return ok, detail
+
+
+def _profiles_layout_due(prev) -> tuple[bool, str]:
+    """Due whenever a stock page carries another layout stamp than the files on disk now -- read
+    from the first few KB of each page, so a pass with nothing to do stays cheap."""
+    import layout_stamp
+    stale = layout_stamp.stale_pages()
+    if not stale:
+        return False, "every stock page has the current layout"
+    return True, f"{len(stale)} stock page(s) drawn by older code or another saved layout"
+
+
+def _step_profiles_layout(asof: str) -> tuple[int, str]:
+    """Stock pages drawn by older code or another saved layout than the files on disk now, rebuilt
+    quietly (layout_stamp.py, asked 2026-11-15). The nightly `profiles` step redraws every page
+    once a session; a change made after it -- new code, or a layout saved on the Settings page --
+    left the old format showing until the next night. This step is due on any pass of the
+    schedule (05:00, then every two hours until 17:00) that finds such a page, so they catch up
+    within two hours. Data stays the last closed session's, as the nightly pages."""
+    import layout_stamp
+    stale = layout_stamp.stale_pages()
+    if not stale:
+        return 0, "every stock page has the current layout"
+    ok, failed = _rebuild_profiles(stale, asof)
+    left = layout_stamp.stale_pages()
+    detail = f"{ok} of {len(stale)} page(s) redrawn in the current layout"
+    if failed:
+        detail += f"; FAILED: {', '.join(failed[:8])}" + (f" +{len(failed) - 8} more" if len(failed) > 8 else "")
+    if left:
+        detail += f"; {len(left)} still stale"
     return ok, detail
 
 
@@ -1931,6 +1971,14 @@ REGISTRY: tuple[Step, ...] = (
          # pushing the CIK filter into pyarrow took a 29-page run to 165s, so
          # 900s is now ~5x headroom rather than ~2x.
          timeout=900, desc="per-stock pages for today's bounce flags"),
+    # Right after `profiles`, and due on ANY pass that finds a page in an older layout (its due_fn
+    # reads each page's stamp; layout_stamp.py). Nothing depends on it, and it depends on nothing:
+    # after a nightly `profiles` it finds every page current and costs only the check.
+    # Budget from the first run: 1,496s for all 173 pages in a pass of its own (2026-11-15), against
+    # 371s inside the nightly run, where earlier steps have already warmed the stores it reads.
+    Step("profiles_layout", _step_profiles_layout, config.CADENCE_DAILY, session_indexed=False,
+         due_fn=_profiles_layout_due, timeout=2400,
+         desc="stock pages drawn by older code or another saved layout, redrawn on the next pass"),
     # Reads only bars and each list's own files; recomputed whole every night.
     Step("watchlists", _step_watchlists, config.CADENCE_DAILY,
          depends_on=("bars",), timeout=600,
@@ -2242,9 +2290,10 @@ def status() -> int:
     print(f"\n  asof (last closed session): {asof}")
     print(f"  paused: {paused()}   lock: {_lock_info() or 'free'}")
     print(f"  job table: {len(jobs)} row(s)  {config.JOBS_FILE}\n")
-    print(f"  {'step':<14}{'cadence':<11}{'last ok':<21}{'dur':>7}  "
+    w = max(14, max(len(s.name) for s in REGISTRY) + 1)    # profiles_layout is 15 characters
+    print(f"  {'step':<{w}}{'cadence':<11}{'last ok':<21}{'dur':>7}  "
           f"{'status':<9}detail")
-    print("  " + "-" * 96)
+    print("  " + "-" * (82 + w))
     for step in REGISTRY:
         prev = last_ok(step.name, jobs)
         rows = jobs[jobs["step"] == step.name]
@@ -2254,7 +2303,7 @@ def status() -> int:
         dur = f"{float(prev['duration_s']):.0f}s" if prev is not None else "-"
         st = str(cur["status"]) if cur is not None else "(none)"
         mark = "DUE" if due else "   "
-        print(f"  {step.name:<14}{step.cadence:<11}{when:<21}{dur:>7}  "
+        print(f"  {step.name:<{w}}{step.cadence:<11}{when:<21}{dur:>7}  "
               f"{st:<9}{mark} {why[:44]}")
         if cur is not None and str(cur["status"]) == STATUS_ERROR:
             print(f"                 ! {str(cur['error'])[:100]}")
@@ -2270,12 +2319,13 @@ def dry_run() -> int:
     print(f"  store: {store.store_bytes() / 1e6:.0f} MB, "
           f"{len(store.months('1d'))} month file(s)\n")
     total = 0
+    w = max(14, max(len(s.name) for s in REGISTRY) + 1)
     for step in REGISTRY:
         due, why = is_due(step, asof, jobs)
         prev = last_ok(step.name, jobs)
         est = float(prev["duration_s"]) if prev is not None else 0.0
         total += est if due else 0
-        print(f"  {'WOULD RUN' if due else 'skip     '}  {step.name:<14}"
+        print(f"  {'WOULD RUN' if due else 'skip     '}  {step.name:<{w}}"
               f"{('~%.0fs' % est) if est else '   ?':>7}  {why}")
     print(f"\n  estimated wall clock for the due steps: ~{total / 60:.1f} min")
     print("  (estimates are each step's own last measured duration, not a guess)\n")

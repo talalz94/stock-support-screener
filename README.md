@@ -171,6 +171,11 @@ While it runs, every page also gets (2026-11-11; nothing changes for a page open
 - **A stop button** (the power icon at the end of the menu) that shuts the server down after a
   confirmation. Builds still running stop with it; a nightly step started from the Status page runs
   in its own process and carries on.
+- **Stock pages that update themselves** (2026-11-15). Every stock page carries a stamp of the code
+  and saved layout that drew it (`layout_stamp.py`). Opened from the server, a page drawn by older
+  code or another layout rebuilds itself in the background; the corner card says so and offers
+  Reload. Builds run one at a time ("waiting for another build" when queued), and a server left
+  running reloads the page code when it changed on disk, so it never writes the old layout again.
 
 The same bounce rows are in `reports\Pattern_<date>.csv` for Excel.
 
@@ -299,12 +304,15 @@ independently of touch count: four touches in one week is one event, not four.
   about 3 seconds and 106 MB, so a run interrupted by a sleep or a Windows Update
   restart resumes within two hours instead of waiting a day. Below-normal
   priority, one instance at a time, 12-hour limit.
-- **38 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
+- **39 steps**, in this order: `universe, bars, macro, news, news_events, senti_cache, sentiment, bounce, zones,
   shortvol, hype, provider, sec_facts, sec_gap, sec_edgar, insider, congress,
   fundamental, events, leaderboard, dip, insider_score, combo, candidates, floor,
   insider_track, insider_pages, sectors, narrative, shortlist, validate, explore, snapshots, profiles,
-  watchlists, retention, dashboard, docs`. `insider_track` (2026-11-11) keeps the forward record of
-  every insider and House trade filed since that day and what its stock did after it. `narrative` writes the weekly AI narrative task's
+  profiles_layout, watchlists, retention, dashboard, docs`. `insider_track` (2026-11-11) keeps the forward
+  record of every insider and House trade filed since that day and what its stock did after it.
+  `profiles_layout` (2026-11-15) is due on ANY pass that finds a stock page drawn by older code or
+  another saved layout (`layout_stamp.py`) and redraws just those, so after a change the pages
+  catch up within two hours between 05:00 and 17:00 instead of the next night. `narrative` writes the weekly AI narrative task's
   inputs and checks its answers; `shortlist` builds every ranking's list of names at support with the
   tested trade plan and scores the forward ledger. Both run BEFORE `explore`, whose support and
   trade-plan columns read that night's shortlist (until 2026-11-09 they ran after it, so Explore
@@ -540,7 +548,8 @@ as bankruptcy text and asserts no metric moves.
 | `news_events.py` | stock news EVENTS in `data/news_events/`: every SEC filing by type since 2016 (8-K items, deal and activist forms, acceptance to the second), PR Newswire M&A / FDA-approval and FDA press feeds, a daily Finnhub earnings-calendar snapshot (point in time); `page_flags(asof)` feeds the warning and earnings tags. The `news_events` step. `--backfill`, `--update`, `--stats`, `--selftest`. NOT `events.py` (severity calibration) |
 | `news_events_study.py` | what each event type predicts, vs the liquidity fifth AND the same stock's own non-event days, split halves; `data/_news_events_study_summary.json`. Nothing qualified as a buy signal; 3.02 / 4.02 / 1.02 are warnings |
 | `edgar.py` | new SEC filings, one at a time, straight from EDGAR: daily index + latest-filings feed, each filing's XBRL parsed into the bulk set's own schema and rules, stored in `data/fundamentals_edgar/` until the quarterly bulk set supersedes it. The `sec_edgar` step. `--since D`, `--tickers`, `--diff ADSH`, `--selftest` |
-| **`orchestrator.py`** | **THE scheduled entry point** — 38-step registry, watermark catch-up, `data/_jobs.parquet` |
+| **`orchestrator.py`** | **THE scheduled entry point** — 39-step registry, watermark catch-up, `data/_jobs.parquet` |
+| `layout_stamp.py` | which code and saved layout drew a stock page (`stock_profile.py`, `ui.py`, `settings.py`, `data/_profile.json`, hashed): written into every page, read by `profiles_layout` and by `serve.py` to find and redraw pages in an older layout. Run it to list the stale pages |
 | `insider_track.py` | the forward record (2026-11-11): every insider and House trade filed since, one row per filing in `data/insider/_forward.parquet` with its features as known that night, and its stock's move over the first session and 1/5/20/60 sessions against same-day stocks of the same liquidity, filled in as each matures; unadjusted splits flagged and left out; summary in `data/_insider_forward_summary.json`, a line on the Insiders and House pages. `--show`, `--selftest` |
 | **`dashboard.py`** | **the status hub**, `reports/system.html` — read-only, never triggers work |
 | **`today_page.py`** | **Today**, `reports/index.html` (the home page) — market, shortlist top 5, watchlists, this week, narrative |
