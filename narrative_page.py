@@ -190,7 +190,9 @@ def runs_panel() -> str:
         "<b>Weekly limit</b> is the plan's meter read by the run itself at its start and its end (from "
         "2026-11-15 evening): whole percents, so a share is good to about one point. The meter counts the whole "
         "account, so a share includes anything else done meanwhile: other Claude Code sessions on this "
-        "machine are counted in the last column; chats on claude.ai or another device are not visible here.")
+        "machine are counted in the last column; chats on claude.ai or another device are not visible here. "
+        "<b>Minutes working</b> leave out the time a run stood waiting for someone to approve a tool (the app's "
+        "own permission records), shown under it.")
     if not len(R):
         return f'<p class="muted">No run recorded yet. {note}</p>'
     rows = []
@@ -203,16 +205,20 @@ def runs_panel() -> str:
         cost = f'${r["cost_usd"]:.2f}' if fin and np.isfinite(r.get("cost_usd", np.nan)) else '<span class="muted">no record yet</span>'
         others = r.get("others_sessions", np.nan)
         oth = f"{int(others)}" if others is not None and np.isfinite(others) else '<span class="muted">&ndash;</span>'
+        work, wait = r.get("work_min"), r.get("wait_min")
+        work = r.get("span_min", 0) if work is None or not np.isfinite(work) else work
+        wait = wait if wait is not None and np.isfinite(wait) else 0.0
+        mins = f'{work:.0f}' + (f'<br><span class="muted">+{wait:.0f} waiting</span>' if wait >= 1 else '')
         rows.append(
             f'<tr><td>{task} &middot; {_day(str(r.get("start", ""))[:10])}</td>'
-            f'<td class="num">{r.get("span_min", 0):.0f}</td>'
+            f'<td class="num">{mins}</td>'
             f'<td class="num">{narrative._tok(tin)}{"" if fin else "+"}</td><td class="num">{narrative._tok(tout)}{"" if fin else "+"}</td>'
             f'<td class="num">{cost}</td>'
             f'<td>{_pct(r.get("weekly_pct_start"), r.get("weekly_pct_end"), r.get("weekly_share"))}</td>'
             f'<td>{_pct(r.get("five_pct_start"), r.get("five_pct_end"), r.get("five_share"))}</td>'
             f'<td class="num">{oth}</td>'
             f'<td>{ui.esc(r.get("answer") or "none")}</td></tr>')
-    table = ('<div class="scroll"><table class="nv-runs"><thead><tr><th>Run</th><th class="num">Minutes</th>'
+    table = ('<div class="scroll"><table class="nv-runs"><thead><tr><th>Run</th><th class="num">Minutes working</th>'
              '<th class="num">Tokens in</th><th class="num">Tokens out</th><th class="num">Cost</th>'
              '<th>Weekly limit</th><th>5-hour limit</th><th class="num">Other sessions</th><th>Answer</th>'
              f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>')

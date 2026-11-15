@@ -176,6 +176,18 @@ measured metrics enter, 100 dates of evidence each); the saved lists and the
 `watchlists` step for forward checks. Every composite filter is judged like the rest:
 chosen on early dates, tested on later ones, against the plain at-support rule.
 
+## State at 2026-11-15 (late night) — THE TRIAL'S FIRST ANSWER CHECKED AND SHOWN; A RUN'S WORK SPLIT FROM ITS WAITS FOR APPROVAL
+
+**Asked:** "i approved the write, check the trial answer and report when its all concluded".
+
+**The run:** once its web searches were allowed (12:21 UTC) it researched (29 searches; 1 page fetch failed), asked to write its answer at 12:32, was allowed at 13:17:40, then fixed its own file with one Edit (a stray theme moved out; the prompt allows Write only -- harmless here, the file is what is checked) and reported at 13:18. Its cost record landed at 13:33 UTC, 15 minutes after its last line (the weekly run's: 5).
+
+**The answer, checked:** valid; PASSES `check_answer` with all 64 groups of the 11-13 inputs (19 sectors, 45 sub-industries), none twice, none missing (its own notes said "65"). Ingested by the `narrative` step through the orchestrator (3.2 s), which drew the Narrative page and Today. It is cautious: next 2 days 17 of 19 sectors at 0, Energy and Real Estate -1; the week six at -1, Transport +1; the month Financials and Transport +1; confidence low for 17. It disagrees with the weekly view on Energy (+1 now there, -1 here: falling crude on Iran-peace hopes). 72 citations, 30 links, dated 2026-01-09..11-14, mostly aggregator sites rather than the primary sources the prompt asks for. Three spot-checked: decrypt.co (11-10) confirms Nvidia's report on 11-17 and a requested closed-door briefing of its CEO on 11-18 (the run called it a "hearing"); earningswhispers.com's page shows Monday only, so it does not support the retail dates it is cited for; thestreet.com refused automated access (403).
+
+**Its cost:** $2.85 by Claude Code's estimate; main model 1.9M tokens in (1.72M cache reads) and 34.6K out, the helper 412K in / 29.7K out, 29 web searches; the record agrees with the per-message usage. Weekly-limit share: not measured (it started before the readings were in its prompt).
+
+**Minutes worked, apart from waiting:** its clock read 214 minutes, but the app's own permission records show it waited 207.5 for approvals (the first searches 157, a page fetch 5.3, the file 45.2; parallel waits counted once). `run_costs` now records `wait_min` -- from a call to its result where the result's record says a person allowed it (`source` user_..., not by a rule) -- and `work_min`; Today and the page show "6 min (+208 min waiting for approval)". Selftest 30/30; page 11/11; 488 pages clean.
+
 ## State at 2026-11-15 (night) — THE NARRATIVE GETS A PAGE, REACHES THE PAGES WITHIN TWO HOURS, AND EACH RUN MEASURES ITS SHARE OF THE WEEKLY LIMIT
 
 **Asked:** "how will this narrative look in the UI and gets updated?", then "yes do both changes. also i want to measure the narrative task's AI usage on claude as a % of my weekly limit."

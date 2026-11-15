@@ -467,7 +467,8 @@ def _text(content) -> str:
     return ""
 
 
-def _take_assistant(e: dict, usage: dict, tools: dict, answers: list, usage_ids: set | None = None) -> None:
+def _take_assistant(e: dict, usage: dict, tools: dict, answers: list, usage_ids: set | None = None,
+                    use_ts: dict | None = None) -> None:
     """One assistant line: its tool calls, and its API message's usage. A message spans several lines
     (one per content part), each repeating the usage, so usage is kept once per message id."""
     msg = e.get("message") or {}
@@ -475,6 +476,8 @@ def _take_assistant(e: dict, usage: dict, tools: dict, answers: list, usage_ids:
         if isinstance(part, dict) and part.get("type") == "tool_use":
             name = part.get("name")
             tools[name] = tools.get(name, 0) + 1
+            if use_ts is not None and part.get("id") and e.get("timestamp"):
+                use_ts[part["id"]] = str(e["timestamp"])
             m = _ANSWER.search(str((part.get("input") or {}).get("file_path", "")))
             if name == "Write" and m:
                 answers.append(("short/" if m.group(1) else "") + m.group(2) + ".json")
@@ -529,7 +532,7 @@ def _run_cost(path) -> dict | None:
     from pathlib import Path
     path = Path(path)
     task, cost, times, usage, tools, answers = None, None, [], {}, {}, []
-    usage_ids, readings = set(), []
+    usage_ids, readings, use_ts, waits = set(), [], {}, []
     with open(path, encoding="utf-8") as fh:
         for raw in fh:
             try:
@@ -549,10 +552,20 @@ def _run_cost(path) -> dict | None:
             if t == "cost-state":
                 cost = e
             elif t == "assistant":
-                _take_assistant(e, usage, tools, answers, usage_ids)
-            elif t == "user" and usage_ids:
-                for part in (e.get("message") or {}).get("content") or []:
-                    if isinstance(part, dict) and part.get("type") == "tool_result" and part.get("tool_use_id") in usage_ids:
+                _take_assistant(e, usage, tools, answers, usage_ids, use_ts)
+            elif t == "user":
+                # A result the user let through by hand (the app's own permission record: source
+                # "user_...", not by a rule) ended a wait for that approval: from the call to here.
+                d = e.get("permissionDecision") or {}
+                by_hand = str(d.get("source", "")).startswith("user") and d.get("reasonType") != "rule"
+                content = (e.get("message") or {}).get("content")
+                for part in content if isinstance(content, list) else []:
+                    if not (isinstance(part, dict) and part.get("type") == "tool_result"):
+                        continue
+                    tid = part.get("tool_use_id")
+                    if by_hand and tid in use_ts and e.get("timestamp"):
+                        waits.append((use_ts[tid], str(e["timestamp"])))
+                    if tid in usage_ids:
                         r = _reading(part, str(e.get("timestamp") or ""))
                         if r:
                             readings.append(r)
@@ -584,6 +597,13 @@ def _run_cost(path) -> dict | None:
         check = "agrees" if not diffs else "differs: " + "; ".join(diffs[:3])
     ts = sorted(pd.to_datetime(times, utc=True, format="ISO8601")) if times else []
     gaps = [(b - a).total_seconds() / 60 for a, b in zip(ts, ts[1:])]
+    wait_min, end = 0.0, None                  # the approval waits, overlapping ones counted once
+    for a, b in sorted((pd.Timestamp(a), pd.Timestamp(b)) for a, b in waits):
+        a = max(a, end) if end is not None else a
+        if b > a:
+            wait_min += (b - a).total_seconds() / 60
+        end = b if end is None else max(end, b)
+    span_min = (ts[-1] - ts[0]).total_seconds() / 60 if ts else float("nan")
     t_main = tx.get(main) or dict.fromkeys(_UKEYS, 0)
     helpers = [m for m in mu if m != main]
     nan = float("nan")
@@ -605,7 +625,9 @@ def _run_cost(path) -> dict | None:
         **usage_fields,
         "task": task, "session": path.stem,
         "start": ts[0].isoformat() if ts else None, "end": ts[-1].isoformat() if ts else None,
-        "span_min": round((ts[-1] - ts[0]).total_seconds() / 60, 2) if ts else nan,
+        "span_min": round(span_min, 2) if ts else nan,
+        "wait_min": round(wait_min, 2),
+        "work_min": round(max(span_min - wait_min, 0.0), 2) if ts else nan,
         "longest_pause_min": round(max(gaps), 2) if gaps else 0.0,
         "answer": ",".join(dict.fromkeys(answers)),
         "finished": cost is not None,
@@ -679,7 +701,7 @@ def run_costs(verbose: bool = True) -> pd.DataFrame:
         return old
     # a record written before a column existed is read again in full once (rows whose transcript is
     # gone stay as they were)
-    current = len(old) and all(c in old.columns for c in ("weekly_share", "others_sessions", "usage_note"))
+    current = len(old) and all(c in old.columns for c in ("weekly_share", "others_sessions", "usage_note", "work_min"))
     seen = dict(zip(old.session, zip(old.file_size, old.file_mtime))) if current else {}
     fresh = []
     for p in sorted(d.glob("*.jsonl")):
@@ -722,9 +744,19 @@ def cost_line(r) -> str:
         return f"{day}: no cost record yet (run not finished)"
     tin = r["main_input"] + r["main_cache_write"] + r["main_cache_read"] + r["helper_input"]
     tout = r["main_output"] + r["helper_output"]
-    return (f"{day}: ${r['cost_usd']:.2f}, {_tok(tin)} tokens in / {_tok(tout)} out, "
-            f"{r['span_min']:.0f} min" + (" (cost incomplete: a model without a price)" if r["unknown_model_cost"] else "")
+    return (f"{day}: ${r['cost_usd']:.2f}, {_tok(tin)} tokens in / {_tok(tout)} out, {minutes(r)}"
+            + (" (cost incomplete: a model without a price)" if r["unknown_model_cost"] else "")
             + f", {limit_share(r)}")
+
+
+def minutes(r) -> str:
+    """A run's working minutes, and apart from them any time it stood waiting for someone to approve
+    a tool (the app's own permission records): an unattended run's clock is not its work."""
+    work = r.get("work_min", float("nan")) if hasattr(r, "get") else float("nan")
+    work = r["span_min"] if work is None or not np.isfinite(work) else work
+    wait = r.get("wait_min", 0.0) if hasattr(r, "get") else 0.0
+    wait = wait if wait is not None and np.isfinite(wait) else 0.0
+    return f"{work:.0f} min" + (f" (+{wait:.0f} min waiting for approval)" if wait >= 1 else "")
 
 
 def limit_share(r) -> str:
@@ -905,9 +937,11 @@ def _selftest_costs() -> int:
         result("tu1", "2026-11-15T09:44:08.000Z", meter(19, 40)),                  # the first reading
         {"type": "assistant", "timestamp": "2026-11-15T09:44:10.100Z",
          "message": {"id": "m1", "model": "main-m", "usage": u(3, 100, 1000, 500),
-                     "content": [{"type": "tool_use", "name": "WebSearch", "input": {"query": "q"}}]}},
-        {"type": "user", "timestamp": "2026-11-15T09:50:10.100Z",                   # a 6-minute wait
-         "message": {"content": [{"type": "tool_result", "content": '<scheduled-task name="narrative-weekly">'}]}},
+                     "content": [{"type": "tool_use", "id": "ws1", "name": "WebSearch", "input": {"query": "q"}}]}},
+        {"type": "user", "timestamp": "2026-11-15T09:50:10.100Z",                   # 6 minutes waiting for approval
+         "permissionDecision": {"decision": "accept", "source": "user_permanent", "grantScope": "session"},
+         "message": {"content": [{"type": "tool_result", "tool_use_id": "ws1",
+                                  "content": '<scheduled-task name="narrative-weekly">'}]}},
         {"type": "assistant", "timestamp": "2026-11-15T09:50:20.000Z",
          "message": {"id": "m2", "model": "main-m", "usage": u(2, 50, 1500, 0), "content": [{"type": "tool_use",
                      "name": "Write", "input": {"file_path": "C:\\p\\data\\narrative\\short\\2026-11-15.json"}}]}},
@@ -932,7 +966,13 @@ def _selftest_costs() -> int:
             "main_model": "main-m", "main_input": 5, "main_cache_write": 500, "main_cache_read": 2500,
             "main_output": 150, "helper_models": "helper-m", "helper_input": 7000.0, "helper_output": 900.0,
             "web_searches": 1.0, "websearch_calls": 1, "tool_calls": 4, "check": "agrees",
-            "longest_pause_min": 6.0, "span_min": 6.27, "api_min": 1.0})
+            "longest_pause_min": 6.0, "span_min": 6.27, "api_min": 1.0, "wait_min": 6.0, "work_min": 0.27})
+        bad += _expect("costs: the minutes say what was work and what was waiting for approval",
+                       {"words": minutes(r)}, {"words": "0 min (+6 min waiting for approval)"})
+        auto = json.loads(json.dumps(run))
+        auto[7]["permissionDecision"] = {"decision": "accept", "source": "user_temporary", "reasonType": "rule"}
+        ra = _run_cost(put("auto", auto)) or {}
+        bad += _expect("costs: a call let through by a rule is not a wait", ra, {"wait_min": 0.0, "work_min": 6.27})
         bad += _expect("usage: the run's own first and last meter readings", r, {
             "plan": "Pro", "weekly_pct_start": 19.0, "weekly_pct_end": 22.0, "weekly_share": 3.0,
             "five_pct_start": 40.0, "five_pct_end": 52.0, "five_share": 12.0, "usage_note": "",

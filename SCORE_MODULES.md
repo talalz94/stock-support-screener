@@ -622,7 +622,8 @@ out, 9 minutes). A run still open shows "no cost record yet", never a zero. From
 evening each run also reads the plan's meter itself, first and last (`get_usage`); the two
 readings in its transcript give its share of the weekly and 5-hour limits (whole percents, so
 +/-1 point), with the other Claude Code sessions active meanwhile counted, since the meter covers
-the whole account. **Shown** on the Narrative page (`narrative_page.py`, Research > Narrative:
+the whole account. A run's minutes count its work: the time it stood waiting for someone to
+approve a tool (the app's permission records on each result) is shown apart. **Shown** on the Narrative page (`narrative_page.py`, Research > Narrative:
 every sector's view with its reasons and sources, best first) and on Today's card; the step is
 due on any pass that finds an unchecked answer, so a view reaches the pages within two hours.
 
